@@ -33,7 +33,9 @@ Jev is a "System One" classifier, not a text-generating LLM. It evaluates typed 
 - Endpoint: `POST https://api.typesafe.ai/v1/systemone`, `Authorization: Bearer <key>`, body `{state, model, questions}`.
 - A **Choice** question has `instructions` and `criteria`. `criteria` is always a map of option name to description, with up to 255 options. `instructions`, and each description value inside `criteria`, can be a string, an object or an array, with free-form object field names. The answer is `{choice, probabilities, confidence}` ([Choice](https://docs.typesafe.ai/primitives/choice)).
 - `confidence` (0–1) comes from how spread out `probabilities` is. TypeSafe recommends confidence-gated routing: act on high confidence and fall back on low ([confidence routing](https://docs.typesafe.ai/patterns/confidence-routing)).
-- Limits for `jev-1.13.0`: 64k tokens per request; **32k tokens for `state` plus the longest question**. Input is text only ([models](https://docs.typesafe.ai/models)).
+- Limits for `jev-1.13.0`: 64k tokens per request for `state` plus **all** questions; **32k tokens for `state` plus the longest question**. Input is text only ([models](https://docs.typesafe.ai/models)). Verified against the models page on 2026-09-28.
+- **No multi-part input.** Jev has no session or streaming-state API: each request is independent and ingests its `state` once. A state over 32k can only be handled as several independent requests whose answers are combined in the caller's code (see [Splitting large state](#splitting-large-state)).
+- Accuracy falls as the state fills with detail unrelated to the question ([Jev 1.13 jaggedness](https://docs.typesafe.ai/model-jaggedness/jev-1.13), item 5). TypeSafe's advice is to filter first or use a Noul to judge relevance, and to combine atomic answers in code ([composite scoring](https://docs.typesafe.ai/patterns/composite-scoring)).
 - Price: $0.042 per million input tokens; output tokens are free. A routing call costs a fraction of a cent.
 - Errors: `401`, `422` (validation, including an oversized request), `429` (rate limit), `529` (overloaded). Retry `429` and `529` with backoff.
 
@@ -117,12 +119,21 @@ INI, loaded with `gopkg.in/ini.v1` using `IgnoreInlineComment: true`, as ralphex
 api_key   =
 # pin a versioned id (e.g. jev-1.13.0) to keep routing stable across Jev releases
 jev_model = jev-latest
-# total budget for the Jev call, retries included
+# total budget for all Jev calls, chunk requests and retries included; raise it for very long inputs
 timeout   = 10s
-# the routing question sent to Jev; tune the cost/quality preference here
-# per-file and total caps for prompt_file_args contents
-prompt_file_max = 64KiB
+# a state over the Jev budget is split into chunks, one Jev request each (see "Splitting large state").
+# more chunks than this = cannot decide; also bounds how much stdin and prompt-file text is read. >= 1
+max_chunks      = 64
+# chunk requests in flight at once. >= 1
+chunk_parallel  = 4
+# lower bound for a chunk's relevance weight; a tunable coefficient, not a probability. 0 < x <= 1
+relevance_floor = 0.05
+# the routing question for a state sent whole; tune the cost/quality preference here
 question  = Which coding-agent CLI, model and reasoning effort should run the task described in `state` (its `prompt`, `stdin`, `system_prompts`, `files` and `attachments`)? Judge each option as a whole: the model and effort together must be strong enough to complete the task well, at the lowest cost and time that achieves that. Look up each option's `model` in `models` and its `cli` and `effort` in `efforts`.
+# the routing question for one chunk of a split state: same options, same preference
+chunk_question = Which coding-agent CLI, model and reasoning effort should run the task described by `anchor` and `chunk.text` together, where `chunk.text` is one part of a longer input? Judge each option as a whole: the model and effort together must be strong enough to complete the task well, at the lowest cost and time that achieves that. Look up each option's `model` in `models` and its `cli` and `effort` in `efforts`.
+# the relevance question asked beside chunk_question
+relevance = Does the text in `chunk.text` state the task to perform, its requirements, or what makes it hard, beyond what `anchor` already says?
 
 [cli.claude]
 command      = claude
@@ -185,7 +196,7 @@ Rules:
 - **No fallback.** The config has no default or fallback model. Jev always decides; when it cannot, see [When Jev cannot decide](#when-jev-cannot-decide).
 - **Hard limits, checked at load time:**
   - at most **255** eligible options, the Jev limit. Options are never truncated silently; the catalog must be trimmed with `enabled = false`.
-  - the serialized question must fit the budget on its own (see [Budget and truncation](#budget-and-truncation)).
+  - the serialized route and relevance questions must fit the budget on their own (see [Budget](#budget)).
 - **Adding things needs no code.** A new CLI is a `[cli.*]` section, a new model is a `[model.*]` section, and a new effort description is an `[effort.<cli>.<level>]` section. Source URLs stay INI metadata and are not sent to Jev.
 
 ## Catalog shipped in v1
@@ -261,9 +272,15 @@ caller argv + stdin
  build options = every enabled (model, effort) of eligible CLIs
       │
       ├─ exactly 1 option ──► use it (no Jev call)
+      │
+      ├─ state fits the budget ──► one Jev Choice request ──────────┐
+      └─ state too large ────────► split into chunks; one request   │
+                                   per chunk (Choice + relevance    │
+                                   Noul), pool the answers ─────────┤
+      ┌─────────────────────────────────────────────────────────────┘
       ▼
- Jev Choice (one request) ──cannot decide──► --cli set:   run that CLI, args untouched
-      │                                     --cli empty: exit 2
+ Jev decision ──cannot decide──► --cli set:   run that CLI, args untouched
+      │                          --cli empty: exit 2
       ▼
  chosen option
       │
@@ -280,7 +297,7 @@ Jev gets a **whitelist**: only text taken from known prompt sources. Model flags
 | `stdin` | Stdin, when it is not a TTY (see *Reading stdin* below), replayed to the child byte-for-byte. Binary stdin is not sent; it becomes an `attachments` entry (see [Non-text input](#non-text-input)). If every non-empty line parses as JSON, only permitted content is taken: string values under `text` keys at any depth (content blocks included) go to `stdin`; image and document blocks become `attachments` entries; everything else in those lines, including base64 `data`, is dropped. JSON lines are never sent raw. | ralphex (both modes), `claude --print < prompt.txt`, `cat p.md \| codex exec -`, Claude `--input-format stream-json` |
 | `prompt` | The token right after the first token listed in `prompt_after`, provided it does not start with `-` and is not `-`. | `claude -p "fix it"`, `codex exec "fix it"` |
 | `system_prompts` | The values matched by `prompt_args` entries, which are templates with `{value}`, matched in split or `=` form like `model_args`. Key templates match the exact key only (`developer_instructions=` never matches `developer_instructions_x=`). Codex `-c` values, in `prompt_args` and `prompt_file_args` alike, are decoded as TOML, as Codex does: a TOML string is captured (quoted paths with spaces included), a non-string value such as a number or boolean is skipped, and invalid TOML falls back to the raw text. | Claude `--system-prompt "…"`, `--append-system-prompt "…"`; Codex `-c developer_instructions="…"`, `-c compact_prompt="…"` |
-| `files` | For each match of a `prompt_file_args` template, the file's text, resolved against the caller's working directory and capped by `prompt_file_max` per file and in total. Missing or unreadable files are skipped; binary files become `attachments` entries. Only contents are sent, never paths. | Claude `--system-prompt-file`, `--append-system-prompt-file`; Codex `-c model_instructions_file=…`, its deprecated alias `experimental_instructions_file`, and `experimental_compact_prompt_file` |
+| `files` | For each match of a `prompt_file_args` template, the file's text, resolved against the caller's working directory. There is no per-file cap: a long file is split like any other text, and only the total text capture limit applies (see [Splitting large state](#splitting-large-state)). Missing or unreadable files are skipped; binary files become `attachments` entries. Only contents are sent, never paths. | Claude `--system-prompt-file`, `--append-system-prompt-file`; Codex `-c model_instructions_file=…`, its deprecated alias `experimental_instructions_file`, and `experimental_compact_prompt_file` |
 | `attachments` | Metadata only, for binary stdin, binary prompt files, image/document blocks in JSON stdin, and each match of an `attachment_args` template: `{source, type, bytes}`, where `source` is `stdin`, `stream-json`, or the flag, and `type` is the detected media type or `unknown`. Never content, never paths or file names. | Codex `-i shot.png`, `claude --print < diagram.png`, image blocks in Claude stream-json |
 
 The shipped whitelist covers the documented prompt, prompt-file and print-mode sources listed in the table above, not every conceivable instruction-bearing setting. Sources: `claude --help` (2.1.283), `codex --help` / `codex exec --help` (0.157.1), and the Codex config reference.
@@ -335,7 +352,7 @@ To keep the question small, the catalog goes **once** into a structured `instruc
 {
   "model": "jev-latest",
   "state": {
-    "stdin": "<stdin text, possibly truncated>",
+    "stdin": "<stdin text; a state over budget is split instead>",
     "prompt": "fix the flaky test in pkg/foo",
     "system_prompts": ["<--append-system-prompt text>"],
     "files": ["<--append-system-prompt-file contents>"],
@@ -366,20 +383,85 @@ To keep the question small, the catalog goes **once** into a structured `instruc
 - **Payload contents:** only the whitelisted state (stdin text, the positional prompt, system-prompt text, prompt-file contents, and attachment metadata: type and size only) and the catalog descriptions go to Jev. No other argument, file path, command, source URL or the API key ever does.
 - **Needs validation:** this compact encoding is schema-valid, but its classification accuracy is not yet proven equivalent to a full description inside each criterion. The routing evaluation set (see [Testing](#testing)) decides. If the references prove unreliable, switch to full descriptions per criterion; 54 options × ~120 tokens still fits.
 
-### Budget and truncation
+### Budget
 
-Jev allows 32k tokens for the state plus the longest question.
+Jev allows 32k tokens for the state plus the longest question, and 64k for the state plus all questions.
 
-- **The state budget is an estimate.** agrouter estimates tokens as UTF-8 bytes ÷ 3 and sets the budget for the whole state (all whitelisted fields) to 30k minus the question estimate. That ratio is a heuristic, not a guarantee.
-- **Oversized questions are caught at load.** If the question alone leaves less than 2k tokens for the state, agrouter refuses to start, rather than computing a negative budget.
-- **The largest piece shrinks first.** While the state is over budget, its largest text is cut down to what fits: the stdin text, one file, or one argument. Each cut keeps the head and the tail, on UTF-8 boundaries, with a `[... N bytes omitted ...]` marker between them. Short arguments and small files survive intact, and a long prompt keeps its instructions (the start) and its concrete ask (usually the end).
-- **A `422` from Jev gets one retry** with half the state budget, since the estimate may have been too low.
+- **The state budget is an estimate.** agrouter estimates tokens as UTF-8 bytes ÷ 3 and sets the state budget to 30k minus the estimate of the longest question. That ratio is a heuristic, not a guarantee. When chunking, the route question, the relevance question and the chunk envelope (`index`, `of`, field name) are all counted, and the state plus both questions must also stay under 64k.
+- **Oversized questions are caught at load.** If `question`, or `chunk_question` plus `relevance` and a maximal anchor, leave less than 2k tokens for the state, agrouter refuses to start, rather than computing a negative budget.
+- **A state that fits is sent whole** in one request, as described above. This is the common case, and it costs one round trip.
+- **A state that does not fit is split**, never truncated. See below.
 
-Truncation affects routing quality only. The child still receives stdin, files and arguments in full, changed only by the model/effort override.
+### Splitting large state
+
+Jev has no way to take one state in parts (see [Jev](#jev-typesafe)), so a state over budget is **split into chunks, every chunk is sent in its own request, and the answers are pooled in agrouter**. Every byte of whitelisted text reaches Jev, either in the anchor or in exactly one chunk; nothing is dropped. The anchor is repeated in every request on purpose.
+
+**Anchor.** Each request carries a bounded `anchor`: the short sources that say what the task is, labelled by field, repeated in every chunk request.
+
+- The anchor holds `prompt`, `system_prompts` and `attachments`, in that order, while they fit in **4k tokens**.
+- **When there is no separate prompt** (ralphex passes its whole task on stdin), the anchor would be nearly empty. The room left in the 4k is then filled with the head and tail of the stdin text, labelled as such, so every chunk request still says what the task is. Stdin is still split in full into the chunks.
+- A field that does not fit in the anchor contributes its head and tail to the anchor, and its **full** text is split into chunks like stdin. So the anchor's copy is a summary, and the chunks are the lossless partition.
+- A field kept whole in the anchor is not repeated in the chunks. For an overflowing field, the head and tail in the anchor also appear in its chunks; that duplication is deliberate.
+
+**Chunks.** The remaining text (stdin, prompt files, and anchor overflow) is cut into chunks that fit the budget beside the anchor:
+
+- Cuts fall on line boundaries, and inside an overlong line on UTF-8 character boundaries. There is no overlap.
+- Each chunk keeps its origin: `{"field": "stdin", "index": 3, "of": 9, "text": "..."}`. Fields are chunked in state order, so the chunk sequence reads like the original.
+
+**Per-chunk request.** One request per chunk, carrying two questions over the same state (TypeSafe's [fan-out](https://docs.typesafe.ai/patterns/fan-out) of several questions in one request):
+
+```json
+{
+  "state": {
+    "anchor": { "prompt": "run the next task in the plan", "attachments": [] },
+    "chunk":  { "field": "stdin", "index": 3, "of": 9, "text": "<what fits after anchor, questions and envelope>" }
+  },
+  "questions": {
+    "route":     { "type": "choice", "instructions": { "question": "<[agrouter] chunk_question>", "...": "catalog as in the single request" }, "criteria": { "...": "same" } },
+    "relevance": {
+      "type": "noul",
+      "instructions": "<[agrouter] relevance>",
+      "criteria": {
+        "true":  "`chunk.text` adds to what the task is, what it requires, or what makes it hard",
+        "false": "`chunk.text` is only material the task works on, or repeats `anchor`"
+      }
+    }
+  }
+}
+```
+
+- `route` is the joint Choice with the **same options and catalog** as the single request, so every chunk scores the same options. Only its question text differs: `chunk_question` names the paths this state actually has (`anchor`, `chunk`), because `question` names fields (`stdin`, `files`) that a chunk request does not carry.
+- `relevance` asks whether **`chunk.text`** states the task, its requirements or its difficulty **beyond what `anchor` already says**. It judges the chunk, not the whole state; otherwise the repeated anchor would make every chunk look relevant.
+
+**Pooling.** The per-chunk option vectors are combined by a weighted average in code. The rule is agrouter's own, inspired by TypeSafe's [composite scoring](https://docs.typesafe.ai/patterns/composite-scoring) (separate answers combined with weights the caller controls). TypeSafe does not document it for chunks of one state.
+
+```
+w_i  = max(noul_i, relevance_floor)
+P[o] = Σ_i w_i · p_i[o] / Σ_i w_i
+choice = argmax_o P[o]      ties broken by catalog order
+```
+
+- **Why relevance weights, not size weights.** Weighting by chunk size would let a 200 KB log dump outvote a two-line hard requirement, which is the distractor failure TypeSafe warns about. The Noul lets the chunk that states the task count more than the chunks that only carry material. It does not guarantee that chunk wins: at the default floor, 63 filler chunks at `0.05` weigh `3.15` against one relevant chunk at `1.0`, so enough filler voting the same way can still outvote it. This is a known limit, measured by the eval set, not fixed by a different algorithm.
+- **`relevance_floor`** (default `0.05`) keeps every chunk in the pool. It is a tunable weighting coefficient, not a calibrated probability. When every chunk's relevance is at or below the floor, every weight equals the floor and the result is equal-weight pooling over chunks; it is not a uniform score over options.
+- **`P` is an aggregate routing score**, not a calibrated probability over the whole prompt, and there is **no pooled confidence**. Per-chunk confidences are not averaged and are not used as weights. Under `AGROUTER_DEBUG=1`, agrouter prints each chunk's field, index, relevance and top options, then the pooled top options.
+- **Other pooling rules were rejected.** Multiplying the vectors (product of experts) assumes the chunks are independent evidence, which they are not. Majority vote or max-per-option throws away the probabilities.
+
+**Limits of splitting.** No chunk sees the whole text, so a relationship between two distant chunks (a requirement in chunk 1 that only matters because of code in chunk 7) cannot be judged by any single request. Seeing every chunk is not the same as understanding the whole. The routing evaluation set measures how much this costs.
+
+**Bounds and failures.** Splitting never quietly routes on part of the input. Each case below either covers every chunk or makes Jev **unable to decide** (see [When Jev cannot decide](#when-jev-cannot-decide)), which already has a defined result: run the pinned CLI untouched, or exit `2`.
+
+- **More chunks than `max_chunks`** (default `64`, about 1.9M tokens and $0.08) means Jev cannot decide. agrouter does not pick which chunks to skip. The same limit bounds capture of **text**, counted after binary detection and JSON extraction: a large PNG prompt file or a stream-json line full of base64 still becomes `attachments` metadata, not an oversize failure. A prompt file is sniffed first; only text files are read, up to the remaining capacity plus one byte to detect overflow. Once captured text passes the limit, Jev cannot decide and agrouter stops reading; partial text is never sent. The child still gets all of stdin: the bytes already buffered are replayed first, then the rest of stdin is relayed live, as in the stream path.
+- **Any chunk request that still fails** after its retries means Jev cannot decide. Routing on the chunks that happened to succeed would drop the hard ones in a pattern nobody chose.
+- **A `422` on one request** re-splits that chunk (or the whole state, in the single-request case) at half the budget, once. TypeSafe documents `422` as a general validation error; its body names the offending field, but there is no documented, stable way to tell an oversize request from other validation errors. So re-splitting is a guess that the token estimate was too low. A second `422`, or a `422` on a request whose chunk text is already under 2k tokens (splitting further cannot help; the cause is elsewhere), means Jev cannot decide. `max_chunks` is checked again after a re-split.
+- **Parallelism and time.** At most `chunk_parallel` requests (default `4`, as in TypeSafe's cookbooks) run at once, all inside the one `timeout`, which covers capture, queueing, requests and retries. It does not scale with input size: 64 chunks at 4 in parallel is 16 rounds, which the 10s default fits only if Jev answers quickly. Users with very long inputs raise `timeout`. A timeout means Jev cannot decide.
+- **Cost.** Price is per input token, so splitting costs what the text costs, plus the anchor and questions once per chunk: a 300k-token prompt is about 11 requests and under $0.02.
+
+Splitting affects routing only. The child still receives stdin, files and arguments in full, changed only by the model/effort override.
 
 ### Decision
 
-Jev's `choice` is always executed. There is no confidence threshold; confidence and probabilities are reported under `AGROUTER_DEBUG` as data for tuning descriptions.
+- **State sent whole:** Jev's `choice` is always executed. There is no confidence threshold; confidence and probabilities are reported under `AGROUTER_DEBUG` as data for tuning descriptions.
+- **State split:** the pooled `argmax` is executed. It is agrouter's decision over Jev's per-chunk answers, not a Jev `choice`, and it has no confidence (see [Splitting large state](#splitting-large-state)).
 
 With exactly one eligible option, it is used without a Jev call.
 
@@ -390,8 +472,9 @@ Jev cannot decide in these cases:
 - the state is empty: no stdin, no prompt files, and no arguments left after the removals (see [Prompt capture](#prompt-capture));
 - no API key from any source (flag, env, config), or an explicit empty `--jev-api-key=`;
 - a timeout or network error;
-- an HTTP error: `401`; `429` or `529` after backoff retries have used up `timeout`; `422` after the one smaller retry;
-- a malformed response: invalid JSON, a missing `route` answer, a `choice` that is not among the options sent, or `confidence` missing, NaN or outside [0, 1].
+- an HTTP error on the request, or on any chunk request: `401`; `429` or `529` after backoff retries have used up `timeout`; `422` after the one re-split at half the budget;
+- a state that needs more than `max_chunks` chunks (see [Splitting large state](#splitting-large-state));
+- a malformed response, to the single request or to any chunk request: invalid JSON; a missing `route` answer, or a missing `relevance` answer in a chunk request; a `choice` that is not among the options sent; `confidence` missing, NaN or outside [0, 1]; `probabilities` whose keys are not exactly the options sent, with a value that is not finite or is outside [0, 1], or whose sum is not within 0.01 of 1; a `noul` that is not finite or is outside [0, 1].
 
 There is no fallback model, so what happens depends only on `--cli`:
 
@@ -402,7 +485,7 @@ There is no fallback model, so what happens depends only on `--cli`:
 
 Other errors that stop agrouter before any child starts:
 
-- configuration errors: an unknown `--cli`, no enabled options, more than 255 options, or a question over budget;
+- configuration errors: an unknown `--cli`, no enabled options, more than 255 options, a question over budget, `max_chunks` or `chunk_parallel` below 1, or `relevance_floor` outside (0, 1];
 - a child that cannot be started.
 
 ## Model and effort override
@@ -431,7 +514,7 @@ Rejected alternative: treating a caller-supplied model or effort as a **constrai
 ## Execution
 
 - **Command line.** `command` + the caller's arguments, with model and effort replaced or prepended as above. When Jev could not decide under `--cli`, the caller's arguments are forwarded unchanged.
-- **Process.** The child runs via `os/exec` with no shell, inheriting the environment minus `TYPESAFE_API_KEY`. Stdin is the replayed buffer, or the original stdin when nothing was read. Stdout and stderr are the parent's own file descriptors, unbuffered and untranslated.
+- **Process.** The child runs via `os/exec` with no shell, inheriting the environment minus `TYPESAFE_API_KEY`. Stdin is the replayed buffer followed by the rest of the original stdin (the rest is empty when stdin was read to EOF), or the original stdin when nothing was read. Stdout and stderr are the parent's own file descriptors, unbuffered and untranslated.
 - **Startup failure.** If the command is missing from `PATH`, not executable, or fails to start, agrouter prints one `agrouter:` line and exits with `127`. It does **not** retry another CLI: the caller's arguments were written for the one it asked for.
 - **Cancellation.** Platform-specific implementations, each tested on its own platform:
   - **Unix:** SIGINT and SIGTERM are forwarded to the child's process group. When agrouter is cancelled, the group is killed.
@@ -472,9 +555,9 @@ pkg/config/            # INI loading, layering, validation; embedded defaults
 pkg/config/defaults/   # embedded config with the v1 catalog
 pkg/catalog/           # options (model × effort) derived from config; option ids
 pkg/args/              # token matching: model/effort replace/inject, redaction, Jev copy of argv
-pkg/prompt/            # Jev state: stdin buffering and JSONL text extraction, prompt files, budget, truncation
+pkg/prompt/            # Jev state: stdin buffering and JSONL text extraction, prompt files, budget, anchor and chunking
 pkg/jev/               # TypeSafe HTTP client: request/response types, validation, retry, timeout
-pkg/router/            # eligibility, Jev question construction, answer validation, no-decision policy
+pkg/router/            # eligibility, Jev question construction, per-chunk fan-out and pooling, answer validation, no-decision policy
 pkg/runner/            # child process, stdin replay, signals / Job Object, exit code
 ```
 
@@ -495,7 +578,8 @@ pkg/runner/            # child process, stdin replay, signals / Job Object, exit
   - malformed JSON templates;
   - `@` in a model section name;
   - more than 255 options;
-  - a question over budget;
+  - a question over budget, including `chunk_question` plus `relevance` with a maximal anchor;
+  - `max_chunks` and `chunk_parallel` below 1, and `relevance_floor` outside (0, 1];
   - a guard test that no embedded value carries a trailing inline comment;
   - API key precedence (flag > env > local > global > embedded placeholder), and an explicit empty flag clearing the key.
 - **`pkg/args`:**
@@ -506,13 +590,16 @@ pkg/runner/            # child process, stdin replay, signals / Job Object, exit
   - stdin capture, and byte-exact replay;
   - JSONL extraction: nested content blocks, image/document blocks turned into attachments, base64 `data` never present in the state, mixed JSON and non-JSON input treated as text;
   - non-text detection: PNG, JPEG and PDF signatures (including an ASCII-looking PDF), NUL bytes, a UTF-8 character cut at the 8 KiB boundary (still text), `attachment_args` with a missing file, and a binary-only task routed on metadata;
-  - prompt files: relative paths, missing and binary files, per-file and total caps;
+  - prompt files: relative paths, missing and binary files, a large binary file giving metadata rather than an oversize failure, the total text capture limit across files;
   - the empty-state rule: a one-word prompt and a flag-only argv are both routed, and only an empty state is not;
-  - per-field truncation boundaries, including multibyte UTF-8.
+  - chunking: a state under budget is not split; anchor fields kept whole up to 4k, an oversized anchor field gives head and tail to the anchor and its full text to the chunks; the chunks plus the anchor-only fields reproduce every whitelisted byte (lossless coverage; only the head and tail of an overflowing field are duplicated, in the anchor); capture over the `max_chunks` limit, including across several prompt files, gives "cannot decide" with stdin still replayed in full; cuts on line and multibyte UTF-8 boundaries; route question, relevance question and envelope counted against 32k and 64k.
 - **`pkg/router`:**
   - the golden JSON of the Jev request for a fixed catalog, with and without `--cli`;
   - every "cannot decide" case, via a mocked `JevClient`: untouched passthrough with `--cli`, exit `2` without it;
-  - the single-option short-circuit.
+  - the single-option short-circuit;
+  - pooling with a mocked `JevClient`: a short hard requirement plus a few long filler chunks (the relevant chunk outweighs them), and a `max_chunks` case where floored filler outweighs it (documents the known limit), weights floored at `relevance_floor`, all-low relevance giving equal weights, stable tie order by catalog, per-chunk confidence never averaged;
+  - chunk failure policy: `max_chunks` exceeded, and one chunk failing after retries while the others succeed, both give "cannot decide"; a `422` on one chunk re-splits it once, a second `422` or one on a chunk under 2k tokens gives "cannot decide", and `max_chunks` is rechecked after the re-split; invalid probability maps (missing or extra keys, NaN, sum off by more than 0.01) and an invalid `noul` are malformed;
+  - the per-chunk request golden JSON: same route question and catalog in every chunk, anchor repeated, relevance question present.
 - **`pkg/jev`:** `httptest` server covering:
   - 200;
   - 401;
@@ -526,19 +613,20 @@ pkg/runner/            # child process, stdin replay, signals / Job Object, exit
   - the key appears only in the `Authorization` header and is redacted from debug output, including echoed error bodies.
 - **`pkg/runner`:**
   - agrouter's own flags (`--cli`, `--jev-api-key`) never reach the child's arguments;
-  - byte-exact stdin replay, including binary stdin and the stream path: held lines replayed, then live pass-through while stdin stays open; stream mode chosen by `stream_input_args`, not by content; an image-only first message ends the hold;
+  - byte-exact stdin replay, including binary stdin, capture stopped at the text limit (buffered prefix replayed, then the rest relayed), and the stream path: held lines replayed, then live pass-through while stdin stays open; stream mode chosen by `stream_input_args`, not by content; an image-only first message ends the hold;
   - `TYPESAFE_API_KEY` absent from the child's environment;
   - exit code propagation;
   - exit `127` on a missing command;
   - cancellation, on Unix and Windows via build tags.
 
   The child is a helper process built from the test binary (`os.Args[0]` with `GO_WANT_HELPER_PROCESS`), so no real agent CLI is needed.
-- **Routing evaluation set.** `testdata/routing/*.json` holds labelled prompts (real ralphex task, review and plan prompts; trivial edits; large refactors) with an acceptable-options list. A `make eval-routing` target, which needs `TYPESAFE_API_KEY` and does not run in CI, reports accuracy and the confidence distribution for both encodings. It is the basis for choosing the encoding and for tuning descriptions and the `question` text.
+- **Routing evaluation set.** `testdata/routing/*.json` holds labelled prompts (real ralphex task, review and plan prompts; trivial edits; large refactors) with an acceptable-options list. A `make eval-routing` target, which needs `TYPESAFE_API_KEY` and does not run in CI, reports accuracy and the confidence distribution for both encodings. It is the basis for choosing the encoding and for tuning descriptions and the `question` text. It includes oversized prompts: a short hard requirement buried in long filler (up to `max_chunks` of it), and a requirement whose meaning depends on text in a distant chunk. Those cases tune `relevance`, `relevance_floor` and the anchor size, and measure what splitting loses against a prompt that fits. Split cases are scored on accuracy only, since a pooled decision has no confidence.
 - **End-to-end:** a manual check with ralphex on a toy project in both modes, with `AGROUTER_DEBUG=1` to inspect decisions.
 
 ## Open questions
 
 1. **Low-confidence choices.** Jev's choice is always executed. If `make eval-routing` shows low-confidence choices are often wrong, a confidence rule could return later. It would need a policy for what to run instead, since there is no fallback model.
 2. **Routing context.** Should agrouter pass anything besides the prompt (repo size, which ralphex phase) in `state`? ralphex does not name the phase today, so this would need an upstream hint (for example an `AGROUTER_HINT` environment variable).
-3. **Decision log.** Is `AGROUTER_DEBUG` enough, or do users want a persistent decision log (JSONL) for tuning descriptions against outcomes?
-4. **Catalog freshness.** Automate a `make catalog-check` that diffs `~/.codex/models_cache.json` and the Claude Models API against the embedded defaults, or keep it a manual release step?
+3. **Two-pass splitting.** If the eval shows pooled chunks route worse than a prompt that fits, an alternative is to use the relevance Nouls first and then ask one Choice over the anchor plus the most relevant chunks. That drops chunks, so it only becomes the default if the eval shows the loss is worth it.
+4. **Decision log.** Is `AGROUTER_DEBUG` enough, or do users want a persistent decision log (JSONL) for tuning descriptions against outcomes?
+5. **Catalog freshness.** Automate a `make catalog-check` that diffs `~/.codex/models_cache.json` and the Claude Models API against the embedded defaults, or keep it a manual release step?
