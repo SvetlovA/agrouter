@@ -16,6 +16,7 @@ Status: design, not implemented. Last verified against upstream docs and CLIs on
 - One binary that any tool (ralphex first) can call in place of `claude` or `codex`.
 - Model and effort chosen per prompt by Jev, from a catalog with descriptions taken from the official vendor docs.
 - A new CLI, model or effort is added by editing INI, with no code changes.
+- **One implementation for every CLI.** The code has no CLI names and no per-CLI branches. What differs between CLIs lives only in its `[cli.*]` section: `command`, `prompt_args`, `stream_input_args`, `model_args` and `effort_args`. Claude and Codex are simply the config that ships; Gemini or any other CLI is another section, handled by the same code.
 - Every argument is forwarded verbatim, with **one exception**: model and effort arguments written in the form of the CLI's configured template. Choosing those is agrouter's job, so the caller's values are replaced (see [Model and effort override](#model-and-effort-override)).
 
 ## Non-goals
@@ -129,26 +130,22 @@ chunk_parallel  = 4
 # lower bound for a chunk's relevance weight; a tunable coefficient, not a probability. 0 < x <= 1
 relevance_floor = 0.05
 # the routing question for a state sent whole; tune the cost/quality preference here
-question  = Which coding-agent CLI, model and reasoning effort should run the task described in `state` (its `prompt`, `stdin`, `system_prompts`, `files` and `attachments`)? Judge each option as a whole: the model and effort together must be strong enough to complete the task well, at the lowest cost and time that achieves that. Look up each option's `model` in `models` and its `cli` and `effort` in `efforts`.
+question  = Which coding-agent CLI, model and reasoning effort should run the task described in `state` (its `stdin`, `prompts`, `files` and `attachments`, where `attachments` lists images, PDFs and other non-text inputs the task includes, by type and size only)? Judge each option as a whole: the model and effort together must be strong enough to complete the task well, at the lowest cost and time that achieves that. Look up each option's `model` in `models` and its `cli` and `effort` in `efforts`.
 # the routing question for one chunk of a split state: same options, same preference
-chunk_question = Which coding-agent CLI, model and reasoning effort should run the task described by `anchor` and `chunk.text` together, where `chunk.text` is one part of a longer input? Judge each option as a whole: the model and effort together must be strong enough to complete the task well, at the lowest cost and time that achieves that. Look up each option's `model` in `models` and its `cli` and `effort` in `efforts`.
+chunk_question = Which coding-agent CLI, model and reasoning effort should run the task described by `anchor` and `chunk.text` together (`anchor.attachments` lists images, PDFs and other non-text inputs the task includes, by type and size only), where `chunk.text` is one part of a longer input? Judge each option as a whole: the model and effort together must be strong enough to complete the task well, at the lowest cost and time that achieves that. Look up each option's `model` in `models` and its `cli` and `effort` in `efforts`.
 # the relevance question asked beside chunk_question
 relevance = Does the text in `chunk.text` state the task to perform, its requirements, or what makes it hard, beyond what `anchor` already says?
 
 [cli.claude]
 command      = claude
 description  = Claude Code (Anthropic). Agentic coding CLI with file editing, shell, subagents (Task tool) and MCP.
-# WHITELIST of what Jev may see; nothing else from the arguments leaves the machine
-# positional prompt: the token right after one of these (claude -p "prompt")
-prompt_after     = ["-p", "--print"]
-# arguments whose value is prompt text; each entry is a template with {value}
-prompt_args      = [["--system-prompt", "{value}"], ["--append-system-prompt", "{value}"]]
-# arguments whose value is a FILE holding prompt text; its contents go to Jev, never the path
-prompt_file_args = [["--system-prompt-file", "{value}"], ["--append-system-prompt-file", "{value}"]]
-# arguments that switch stdin to a live JSONL stream (same matching as templates)
+# WHITELIST of what Jev may see; nothing else from the arguments leaves the machine.
+# Arguments whose following text is checked. A value naming an existing file is read:
+# text goes to Jev as contents, binary as type and size; never the path. Any other value is text.
+# -p/--print are boolean in Claude; taking the next token is a heuristic (claude -p "prompt")
+prompt_args  = ["-p", "--print", "--system-prompt", "--append-system-prompt", "--system-prompt-file", "--append-system-prompt-file"]
+# arguments that switch stdin to a live JSONL stream (same matching as model_args templates)
 stream_input_args = ["--input-format", "stream-json"]
-# arguments naming binary attachments; only their type and size go to Jev
-attachment_args  = []
 # how model and effort are passed; used to replace the caller's values and to inject the choice
 model_args   = ["--model", "{model}"]
 effort_args  = ["--effort", "{effort}"]
@@ -156,14 +153,11 @@ effort_args  = ["--effort", "{effort}"]
 [cli.codex]
 command      = codex
 description  = Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.
-# codex exec "prompt"
-prompt_after     = ["exec"]
-# instruction-bearing config keys (learn.chatgpt.com/docs/config-file/config-reference)
-prompt_args      = [["-c", "developer_instructions={value}"], ["--config", "developer_instructions={value}"], ["-c", "compact_prompt={value}"], ["--config", "compact_prompt={value}"]]
-prompt_file_args = [["-c", "model_instructions_file={value}"], ["--config", "model_instructions_file={value}"], ["-c", "experimental_instructions_file={value}"], ["--config", "experimental_instructions_file={value}"], ["-c", "experimental_compact_prompt_file={value}"], ["--config", "experimental_compact_prompt_file={value}"]]
-stream_input_args = []
+# codex exec "prompt"; instruction-bearing config keys, inline or as files ("flag key" reads key=<value>)
+# (learn.chatgpt.com/docs/config-file/config-reference); images.
 # -i/--image are variadic; only the first value after the flag is seen
-attachment_args  = [["-i", "{value}"], ["--image", "{value}"]]
+prompt_args  = ["exec", "-c developer_instructions", "--config developer_instructions", "-c compact_prompt", "--config compact_prompt", "-c model_instructions_file", "--config model_instructions_file", "-c experimental_instructions_file", "--config experimental_instructions_file", "-c experimental_compact_prompt_file", "--config experimental_compact_prompt_file", "-i", "--image"]
+stream_input_args = []
 # -c form, the same one ralphex injects, so ralphex's own values are replaced
 model_args   = ["-c", "model={model}"]
 effort_args  = ["-c", "model_reasoning_effort={effort}"]
@@ -183,11 +177,12 @@ source      = https://platform.claude.com/docs/en/build-with-claude/effort
 
 Rules:
 
-- **Templates are JSON string arrays.** `{model}` and `{effort}` are substituted inside each token, and the result goes straight to `os/exec` with no shell. This avoids all quoting problems and works the same on Windows.
+- **`prompt_args` is a plain list of argument names.** An entry `X` takes the text after `X`: the next token (`X value`) or the rest of the same token (`X=value`). An entry `X key` takes the value of one key of a key=value flag: `-c developer_instructions` matches `-c developer_instructions=V` and `-c=developer_instructions=V`, and takes `V`. The key must match exactly (`developer_instructions` never matches `developer_instructions_x`). Spellings such as `-c` and `--config` are separate entries.
+- **`model_args` and `effort_args` are templates, as JSON string arrays,** because agrouter writes them: `{model}` and `{effort}` are substituted inside each token, and the result goes straight to `os/exec` with no shell. This avoids all quoting problems and works the same on Windows.
 - **agrouter knows only what it has to about each CLI:**
   - how model and effort are passed, so it can replace them;
-  - where prompt text can be found, which is the whitelist of what Jev may see.
-  - which arguments name binary attachments, whose type and size are described to Jev.
+  - which arguments carry the prompt, inline or as a file: the whitelist of what Jev may see (`prompt_args`). Whether a value is text, a text file or a binary attachment is detected from the value, not declared;
+  - which arguments switch stdin to a live stream (`stream_input_args`), because that decides whether stdin may be read to EOF.
 
   Every other argument is proxied as-is, without being understood.
 - **Model and effort placement.** Where the caller already passed that argument, it is replaced in place, so it keeps a position the CLI accepts. Otherwise the tokens are prepended before the caller's arguments; Claude and Codex both accept these flags before any subcommand. See [Model and effort override](#model-and-effort-override).
@@ -290,15 +285,14 @@ caller argv + stdin
 
 ### Prompt capture
 
-Jev gets a **whitelist**: only text taken from known prompt sources. Model flags, settings JSON, MCP config, file paths passed as arguments, session ids and every other argument are never sent. This limits *which arguments* are read, not what the prompt says: a prompt, stdin or prompt file that itself contains a path or a secret still reaches Jev, as it reaches the CLI. `prompt_after` is purely positional (see the `resume` example below). The whitelist is declared per CLI, so a new CLI needs no code:
+Jev gets a **whitelist**: only text taken from known prompt sources. Model flags, settings JSON, MCP config, session ids and every other argument not matched by `prompt_args` are never sent. This limits *which arguments* are read, not what the prompt says: a prompt, stdin or prompt file that itself contains a secret still reaches Jev, as it reaches the CLI, and files it names inside the working directory are read too (see [Files mentioned in text](#files-mentioned-in-text)). Matching is purely by position (see the `resume` example below). The whitelist is declared per CLI, so a new CLI needs no code:
 
 | State field | Source | Examples |
 |---|---|---|
-| `stdin` | Stdin, when it is not a TTY (see *Reading stdin* below), replayed to the child byte-for-byte. Binary stdin is not sent; it becomes an `attachments` entry (see [Non-text input](#non-text-input)). If every non-empty line parses as JSON, only permitted content is taken: string values under `text` keys at any depth (content blocks included) go to `stdin`; image and document blocks become `attachments` entries; everything else in those lines, including base64 `data`, is dropped. JSON lines are never sent raw. | ralphex (both modes), `claude --print < prompt.txt`, `cat p.md \| codex exec -`, Claude `--input-format stream-json` |
-| `prompt` | The token right after the first token listed in `prompt_after`, provided it does not start with `-` and is not `-`. | `claude -p "fix it"`, `codex exec "fix it"` |
-| `system_prompts` | The values matched by `prompt_args` entries, which are templates with `{value}`, matched in split or `=` form like `model_args`. Key templates match the exact key only (`developer_instructions=` never matches `developer_instructions_x=`). Codex `-c` values, in `prompt_args` and `prompt_file_args` alike, are decoded as TOML, as Codex does: a TOML string is captured (quoted paths with spaces included), a non-string value such as a number or boolean is skipped, and invalid TOML falls back to the raw text. | Claude `--system-prompt "…"`, `--append-system-prompt "…"`; Codex `-c developer_instructions="…"`, `-c compact_prompt="…"` |
-| `files` | For each match of a `prompt_file_args` template, the file's text, resolved against the caller's working directory. There is no per-file cap: a long file is split like any other text, and only the total text capture limit applies (see [Splitting large state](#splitting-large-state)). Missing or unreadable files are skipped; binary files become `attachments` entries. Only contents are sent, never paths. | Claude `--system-prompt-file`, `--append-system-prompt-file`; Codex `-c model_instructions_file=…`, its deprecated alias `experimental_instructions_file`, and `experimental_compact_prompt_file` |
-| `attachments` | Metadata only, for binary stdin, binary prompt files, image/document blocks in JSON stdin, and each match of an `attachment_args` template: `{source, type, bytes}`, where `source` is `stdin`, `stream-json`, or the flag, and `type` is the detected media type or `unknown`. Never content, never paths or file names. | Codex `-i shot.png`, `claude --print < diagram.png`, image blocks in Claude stream-json |
+| `stdin` | Stdin, when it is not a TTY (see *Reading stdin* below), replayed to the child byte-for-byte. Binary stdin is not sent; it becomes an `attachments` entry (see [Non-text input](#non-text-input)). If every non-empty line parses as JSON, only permitted content is taken, by the same content rule for every CLI: string values under `text` keys at any depth (content blocks included) go to `stdin`; image and document blocks become `attachments` entries; everything else in those lines, including base64 `data`, is dropped. JSON lines are never sent raw. | ralphex (both modes), `claude --print < prompt.txt`, `cat p.md \| codex exec -`, Claude `--input-format stream-json` |
+| `prompts` | Each value matched by a `prompt_args` entry that does not name a file, in argument order, labelled with the entry it came from: `{"source": "--append-system-prompt", "text": "…"}`, or `{"source": "-c developer_instructions", ...}`. The label is the config entry itself, so it names the flag and key but never holds a value or path. In split form, a next token that starts with `-` or is `-` is not a value, so `claude -p --model M` captures nothing. Every captured value, for every CLI, is normalised the same way: when the **entire** value is one quoted string literal (a TOML basic or literal string, or a JSON string, as in `-c key="a b"`), it is decoded by that syntax (a TOML literal string keeps its backslashes); anything else, including an invalid literal, a number or a boolean, is used as written. There is no shell or environment expansion. | `claude -p "fix it"`, `codex exec "fix it"`, Claude `--append-system-prompt "…"`, Codex `-c developer_instructions="…"` |
+| `files` | Each value, after that normalisation, that resolves against the caller's working directory to an existing regular file with readable text, labelled the same way: `{"source": "--append-system-prompt-file", "text": "<contents>"}`. Files mentioned inside text are added here too, labelled `"source": "mentioned"` (see [Files mentioned in text](#files-mentioned-in-text)). There is no per-file cap: a long file is split like any other text, and only the total text capture limit applies (see [Splitting large state](#splitting-large-state)). An existing file that cannot be read is skipped, never sent as text; a binary file becomes an `attachments` entry. Only contents are sent, never paths. An argument's file is read wherever it is; mentioned files are limited to the working directory. | Claude `--system-prompt-file`, `--append-system-prompt-file`; Codex `-c model_instructions_file=…`, `experimental_instructions_file`, `experimental_compact_prompt_file` |
+| `attachments` | Metadata only, for binary stdin, binary prompt files, image/document blocks in JSON stdin, binary files named by a `prompt_args` value, and binary files mentioned in text: `{source, type, bytes}`, where `source` is `stdin`, `stream-json`, the `prompt_args` entry, or `mentioned`, and `type` is the detected media type or `unknown`. In a split state a long list may be grouped into `{source, type, count, bytes}` entries, where `bytes` is the group total (see [Splitting large state](#splitting-large-state)). Never content, never paths or file names. | Codex `-i shot.png`, `claude --print < diagram.png`, image blocks in Claude stream-json |
 
 The shipped whitelist covers the documented prompt, prompt-file and print-mode sources listed in the table above, not every conceivable instruction-bearing setting. Sources: `claude --help` (2.1.283), `codex --help` / `codex exec --help` (0.157.1), and the Codex config reference.
 
@@ -314,9 +308,10 @@ The shipped whitelist covers the documented prompt, prompt-file and print-mode s
 
 Rules:
 
+- **File or text is detected, not declared.** One `prompt_args` list replaces separate lists for prompts, prompt files and attachments. The price is two edge cases, both affecting routing only: a prompt that is exactly the name of an existing file (`codex exec README.md`) is read as that file; and a file flag whose file is **missing** (`-i missing.png`) has its value sent as text, so that path does reach Jev. A directory or other non-regular path is also treated as text, so a one-word prompt such as `tests` is never lost. The child gets the same arguments either way and reports a missing file itself.
 - **Only Jev's copy is built this way.** The child always gets the original stdin bytes and arguments, changed only by the model/effort override.
 - **With `--cli` empty,** the whitelist rules of every eligible CLI are applied, because the CLI that will run is not known before Jev answers.
-- **What the positional rule deliberately does not do.** It does not model each CLI's flags (a closed decision), so some positional forms are not seen:
+- **What the adjacent-token rule deliberately does not do.** `-p` and `exec` entries take the next token; Claude's `-p` is actually a boolean flag, so this is a heuristic, not positional parsing. It does not model each CLI's flags (a closed decision), so some positional forms are not seen:
   - a prompt that comes after other options, as in `claude -p --verbose "x"` or `codex exec --json "x"`;
   - a bare `claude "x"` with no `-p`.
 
@@ -324,8 +319,21 @@ Rules:
 - **When Jev is called.** Whenever at least one whitelisted field is non-empty, including a one-word prompt. When all are empty, see [When Jev cannot decide](#when-jev-cannot-decide).
 - **Reading stdin.** How stdin is read is decided by the arguments, never guessed from its content:
   - **Normal (finite) input:** read to EOF. This is the ralphex case. Each line that parses as JSON goes through the `text` extraction above, so a JSON image or document line never contributes base64, even when mixed with plain text. Plain lines are kept as text. The **whole** captured text is then validated, not just the 8 KiB prefix: NUL bytes or invalid UTF-8 anywhere turn it into an `attachments` entry instead. Unknown binary that happens to look like valid text cannot be told apart and is sent as text.
-  - **Live stream:** the arguments match the CLI's `stream_input_args` (Claude `--input-format stream-json`, in split or `=` form, with the same matching as templates). The caller keeps stdin open while it waits for output, so reading to EOF would hang. agrouter reads line by line until the **first user message with text or an attachment**; control and metadata lines before it are held. It routes on that message, replays every held line to the child byte-for-byte, and then relays the rest of stdin live. Later messages in the session run on the model chosen for the first. With `--cli` empty, the stream arguments of every eligible CLI are checked.
+  - **Live stream:** the arguments match the CLI's `stream_input_args` (Claude `--input-format stream-json`, in split or `=` form, with the same matching as templates). The caller keeps stdin open while it waits for output, so reading to EOF would hang. agrouter reads line by line until the **first line whose JSON extraction (the same content rule as above) yields text or an attachment**; lines that yield nothing, such as control and metadata lines, are held. It routes on that line, replays every held line to the child byte-for-byte, and then relays the rest of stdin live. Later messages in the session run on the model chosen for the first. The rule knows no message schema, so it has no notion of roles: if the first line with content is system, assistant or history text rather than the user's request, routing is based on that. With `--cli` empty, the stream arguments of every eligible CLI are checked.
 - **Non-text input** is described to Jev, never sent. See [Non-text input](#non-text-input).
+
+#### Files mentioned in text
+
+A prompt often names the files the task is about (`fix src/auth/login.go`, `see [the plan](docs/plans/x.md)`). agrouter reads those too, so Jev sees what the task works on, not only its wording.
+
+- **Where it looks.** Only in captured text: stdin text (after JSON extraction, never control fields or base64; in the live stream, only the first line with content), `prompts` values, and files named by `prompt_args`. Text of a mentioned file is **not** scanned again: one level, no recursion.
+- **Finding candidates.** Quoted and backtick spans and Markdown link destinations (`[x](path)`) are taken first, so paths with spaces are found; the rest of the text is then split on whitespace. Candidates are then processed in order of their position in the original text, so a quoted mention and a plain one keep their textual order. Each candidate is tried as written first, then with surrounding brackets and trailing punctuation removed, then without a numeric `:line` or `:line:column` suffix (`src/a.go:42`). A Windows drive colon (`C:\x`) is never treated as a suffix.
+- **Scope: the working directory only.** A candidate is resolved against the caller's working directory and canonicalised (symlinks and Windows junctions followed, case-insensitive on Windows). It is read only if the result is a regular file **inside** the canonical working directory, checked by directory boundary, not by string prefix: `../cwd2/x` and a junction pointing out of the tree do not count. So `~/.ssh/id_rsa` or `/etc/passwd` in a prompt are never read. Files named by `prompt_args` are exempt; the caller passed those explicitly.
+- **What happens to it.** The same detection as argument files: text goes into `files` as `{"source": "mentioned", "text": …}`, binary becomes an `attachments` entry with `source: mentioned`. The path is never sent; the prompt text that contains it is sent as written. Missing files, directories and unreadable files are ignored.
+- **Order and duplicates.** Argument files are read first, then mentioned files in the order they appear. Each canonical path is read once; an argument file wins over a mention of the same file.
+- **URLs are not fetched.** `http://` and `https://` links stay text. Fetching them would add network calls, latency and a way to make agrouter request arbitrary addresses, for a routing hint.
+- **Limits.** Mentioned files count against the same `max_chunks` text capture limit and the same `timeout` as everything else. Over the limit, Jev cannot decide, as for any other oversized input.
+- **Trade-off.** Contents of any file the prompt names inside the working directory go to TypeSafe, including a `.env` the prompt happens to mention. agrouter reads it up front for routing, whether or not the CLI later chooses to read it, so Jev is one more service that sees it.
 
 #### Non-text input
 
@@ -336,8 +344,9 @@ Jev accepts text only, so images, PDFs and other binary data are never sent to i
   2. **Otherwise a heuristic:** NUL bytes, or invalid UTF-8 that is not just a character cut at the 8 KiB boundary, mean binary of type `unknown`.
 
   A PDF whose opening bytes look like ASCII is still caught by its `%PDF-` signature. The heuristic can misjudge unusual text encodings; that affects routing only.
-- **What Jev gets instead:** an `attachments` entry `{source, type, bytes}` and nothing else. No content, file name, path or base64 data. `attachment_args` names the flags whose value is an attachment path (Codex `-i`/`--image`). agrouter opens those files only to detect the type and size; a missing file is reported as `type: unknown`, `bytes: 0`.
-- **Known limit:** Codex `-i a.png b.png` is variadic, but template matching sees only the first value. Jev learns that there is at least one image, not how many.
+- **Always mentioned.** Every non-text input that capture sees gets its own `attachments` entry: binary stdin, each binary file named by a `prompt_args` value or mentioned in text, and each image or document block in JSON stdin (in the live stream, only the first line with content is read; see above). Only the first value of a variadic flag is seen; see *Known limit* below. A type that cannot be recognised is still reported, as `unknown`. Whenever a Jev request is made, every captured input goes with it, either as its own entry or inside a counted group, and none is silently dropped for budget: a single request carries them in `state.attachments`, and a split state carries them in every chunk's anchor (see [Splitting large state](#splitting-large-state)). So Jev always knows the task came with an image, a PDF or some other non-text input, even though it never sees the content.
+- **What Jev gets instead:** an `attachments` entry `{source, type, bytes}` and nothing else, or, when a split anchor groups a long list, `{source, type, count, bytes}` with `bytes` as the group total. No content, file name, path or base64 data. A binary file named by a `prompt_args` value (Codex `-i shot.png`, or a binary `--system-prompt-file`) is opened only to detect its type and size.
+- **Known limit:** Codex `-i a.png b.png` is variadic, but `prompt_args` matching sees only the first value. Jev learns that there is at least one image, not how many.
 - **What metadata can and cannot do.** It gives modality hints only ("this task includes an image or a PDF"). The descriptions can steer such tasks towards vision-capable or stronger options; Anthropic, for example, positions Opus 5.5 for vision-heavy work. A media type and a size do not determine the right model, and whether this helps is measured with the routing evaluation set, not assumed.
 - **Binary-only tasks** are still routed, since the state is non-empty, but on metadata alone. The choice then depends mostly on the descriptions and the `question` text.
 - **No conversion.** PDF-to-text, OCR or image captioning would add heavy dependencies and latency for a routing hint, so they are out of scope.
@@ -353,9 +362,8 @@ To keep the question small, the catalog goes **once** into a structured `instruc
   "model": "jev-latest",
   "state": {
     "stdin": "<stdin text; a state over budget is split instead>",
-    "prompt": "fix the flaky test in pkg/foo",
-    "system_prompts": ["<--append-system-prompt text>"],
-    "files": ["<--append-system-prompt-file contents>"],
+    "prompts": [{ "source": "-p", "text": "fix the flaky test in pkg/foo" }, { "source": "--append-system-prompt", "text": "<text>" }],
+    "files": [{ "source": "--append-system-prompt-file", "text": "<contents>" }, { "source": "mentioned", "text": "<contents of pkg/foo/foo_test.go>" }],
     "attachments": [{ "source": "-i", "type": "image/png", "bytes": 48213 }]
   },
   "questions": {
@@ -380,7 +388,7 @@ To keep the question small, the catalog goes **once** into a structured `instruc
 }
 ```
 
-- **Payload contents:** only the whitelisted state (stdin text, the positional prompt, system-prompt text, prompt-file contents, and attachment metadata: type and size only) and the catalog descriptions go to Jev. No other argument, file path, command, source URL or the API key ever does.
+- **Payload contents:** only the whitelisted state (stdin text, `prompt_args` values, the contents of text files they name or that captured text mentions inside the working directory, and attachment metadata: type and size only) and the catalog descriptions go to Jev. No other argument, command, source URL or the API key ever does. The path of a file agrouter reads is never sent; a captured value that is not an existing regular file is sent as written, even if it looks like a path (see [Prompt capture](#prompt-capture)).
 - **Needs validation:** this compact encoding is schema-valid, but its classification accuracy is not yet proven equivalent to a full description inside each criterion. The routing evaluation set (see [Testing](#testing)) decides. If the references prove unreliable, switch to full descriptions per criterion; 54 options × ~120 tokens still fits.
 
 ### Budget
@@ -398,10 +406,10 @@ Jev has no way to take one state in parts (see [Jev](#jev-typesafe)), so a state
 
 **Anchor.** Each request carries a bounded `anchor`: the short sources that say what the task is, labelled by field, repeated in every chunk request.
 
-- The anchor holds `prompt`, `system_prompts` and `attachments`, in that order, while they fit in **4k tokens**.
-- **When there is no separate prompt** (ralphex passes its whole task on stdin), the anchor would be nearly empty. The room left in the 4k is then filled with the head and tail of the stdin text, labelled as such, so every chunk request still says what the task is. Stdin is still split in full into the chunks.
+- The anchor always holds `attachments` first, never cut and never moved to chunks, so every chunk request knows about non-text input. Their serialized JSON gets at most **1k** of the anchor's 4k tokens, by the same token estimate as the rest of the budget (roughly 40 entries; the budget, not the count, is the limit). A longer list is **summarised**, not dropped: entries with the same `source` and `type` are merged into one `{source, type, count, bytes}` entry, where `bytes` is the total. That keeps every kind of input and its total size, and loses only the per-item sizes. If even the summary exceeds 1k (dozens of distinct sources and types), Jev cannot decide. agrouter stops building the anchor once that is clear, and the child still gets stdin and argv unchanged. Then come `prompts`, in argument order, while they fit in the rest of the **4k tokens**.
+- **Filling the rest.** Room left in the 4k after `attachments` and `prompts` is filled, while it lasts, with labelled head and tail of `stdin`, then of argument files, then of mentioned files. So a task given only on stdin (ralphex) or only as a file (`codex exec long-task.md`) still says what the task is in every chunk request, and material the task only refers to comes last. That text is still split in full into the chunks.
 - A field that does not fit in the anchor contributes its head and tail to the anchor, and its **full** text is split into chunks like stdin. So the anchor's copy is a summary, and the chunks are the lossless partition.
-- A field kept whole in the anchor is not repeated in the chunks. For an overflowing field, the head and tail in the anchor also appear in its chunks; that duplication is deliberate.
+- A field kept whole in the anchor is not repeated in the chunks. The head and tail copied into the anchor, of an overflowing `prompts` entry or of `stdin` or `files` filling the rest, also appear in the chunks; that duplication is deliberate.
 
 **Chunks.** The remaining text (stdin, prompt files, and anchor overflow) is cut into chunks that fit the budget beside the anchor:
 
@@ -413,7 +421,7 @@ Jev has no way to take one state in parts (see [Jev](#jev-typesafe)), so a state
 ```json
 {
   "state": {
-    "anchor": { "prompt": "run the next task in the plan", "attachments": [] },
+    "anchor": { "attachments": [{ "source": "-i", "type": "image/png", "bytes": 48213 }], "prompts": [{ "source": "exec", "text": "run the next task in the plan" }] },
     "chunk":  { "field": "stdin", "index": 3, "of": 9, "text": "<what fits after anchor, questions and envelope>" }
   },
   "questions": {
@@ -474,6 +482,7 @@ Jev cannot decide in these cases:
 - a timeout or network error;
 - an HTTP error on the request, or on any chunk request: `401`; `429` or `529` after backoff retries have used up `timeout`; `422` after the one re-split at half the budget;
 - a state that needs more than `max_chunks` chunks (see [Splitting large state](#splitting-large-state));
+- a split state whose `attachments` exceed their 1k anchor share even after summarising (see [Splitting large state](#splitting-large-state));
 - a malformed response, to the single request or to any chunk request: invalid JSON; a missing `route` answer, or a missing `relevance` answer in a chunk request; a `choice` that is not among the options sent; `confidence` missing, NaN or outside [0, 1]; `probabilities` whose keys are not exactly the options sent, with a value that is not finite or is outside [0, 1], or whose sum is not within 0.01 of 1; a `noul` that is not finite or is outside [0, 1].
 
 There is no fallback model, so what happens depends only on `--cli`:
@@ -582,17 +591,21 @@ pkg/runner/            # child process, stdin replay, signals / Job Object, exit
   - `max_chunks` and `chunk_parallel` below 1, and `relevance_floor` outside (0, 1];
   - a guard test that no embedded value carries a trailing inline comment;
   - API key precedence (flag > env > local > global > embedded placeholder), and an explicit empty flag clearing the key.
+- **CLI-agnostic:**
+  - a made-up CLI defined only in config (helper process, new command, flag and key names, its own `stream_input_args` sequence) is routed, captures prompts, files and attachments, gets its model and effort overridden, and works with both finite and live stdin; renaming its config section changes nothing;
+  - a guard that production source outside the embedded defaults contains no CLI names (`claude`, `codex`, ...); fixtures, vendor URLs and descriptions are data.
 - **`pkg/args`:**
-  - whitelist extraction: `prompt_after` (option or `-` after it is not taken; `exec resume` gives `resume`), `prompt_args` in split and `=` forms, `prompt_file_args` paths never sent, and a guard test that no other argument value (settings JSON, ids, model flags) ever appears in the Jev state; the child's argv unaffected;
-  - template-derived matching: split and `=` forms, key templates (`-c model=` keeps other `-c` keys), tokens after `--` untouched;
+  - whitelist extraction: `prompt_args` entries in split and `=` forms, `flag key` entries (`-c developer_instructions` in split and `-c=` forms, exact key only), an option or `-` not taken as a split value, `exec resume` giving `resume`, each value labelled with its entry, file values sent as contents and never as paths, value normalisation before the file lookup (quoted paths, escaped quotes and backslashes, invalid literals left raw, empty strings, numbers and booleans as text, under arbitrary flag and key names), a value naming a directory or a missing file sent as text, an unreadable existing file skipped, and a guard test that no other argument value (settings JSON, ids, model flags) ever appears in the Jev state; the child's argv unaffected;
+  - model/effort template matching: split and `=` forms, key templates (`-c model=` keeps other `-c` keys), tokens after `--` untouched;
   - replace-in-place of the first match, removal of later matches, prepend when absent, and effort removal for a model without efforts.
 - **`pkg/prompt`:**
   - stdin capture, and byte-exact replay;
   - JSONL extraction: nested content blocks, image/document blocks turned into attachments, base64 `data` never present in the state, mixed JSON and non-JSON input treated as text;
-  - non-text detection: PNG, JPEG and PDF signatures (including an ASCII-looking PDF), NUL bytes, a UTF-8 character cut at the 8 KiB boundary (still text), `attachment_args` with a missing file, and a binary-only task routed on metadata;
+  - non-text detection: PNG, JPEG and PDF signatures (including an ASCII-looking PDF), NUL bytes, a UTF-8 character cut at the 8 KiB boundary (still text), and a binary-only task routed on metadata; every kind of non-text input (binary stdin, binary file named by a `prompt_args` value, stream-json image block, `unknown` type) yields an `attachments` entry;
   - prompt files: relative paths, missing and binary files, a large binary file giving metadata rather than an oversize failure, the total text capture limit across files;
+  - mentioned files: quoted, backtick and Markdown-link paths with spaces, `path:line` and `path:line:col` suffixes, a Windows drive path, trailing punctuation; `../` traversal, an absolute path outside, a sibling `cwd2` directory, and a symlink or junction escaping the tree all not read; a binary mention giving an attachment; dedupe with an argument file; mixed quoted and plain mentions kept in text order; no recursion into a mentioned file's text; URLs not fetched; JSON control fields not scanned; mentioned text counted in the shared capture limit and timeout;
   - the empty-state rule: a one-word prompt and a flag-only argv are both routed, and only an empty state is not;
-  - chunking: a state under budget is not split; anchor fields kept whole up to 4k, an oversized anchor field gives head and tail to the anchor and its full text to the chunks; the chunks plus the anchor-only fields reproduce every whitelisted byte (lossless coverage; only the head and tail of an overflowing field are duplicated, in the anchor); capture over the `max_chunks` limit, including across several prompt files, gives "cannot decide" with stdin still replayed in full; cuts on line and multibyte UTF-8 boundaries; route question, relevance question and envelope counted against 32k and 64k.
+  - chunking: a state under budget is not split; a stdin-only task and a file-only task (`codex exec long-task.md`) both get labelled head and tail in every anchor, with the full text in the chunks; `attachments` present in every chunk's anchor, even when the prompt alone overflows the 4k anchor; a long attachment list summarised by `source` and `type` with counts and total bytes; a summary still over 1k gives "cannot decide" with stdin and argv replayed unchanged; anchor fields kept whole up to 4k, an oversized anchor field gives head and tail to the anchor and its full text to the chunks; the chunks plus the anchor-only fields reproduce every whitelisted byte (lossless coverage; the only duplicates are the head-and-tail copies in the anchor); capture over the `max_chunks` limit, including across several prompt files, gives "cannot decide" with stdin still replayed in full; cuts on line and multibyte UTF-8 boundaries; route question, relevance question and envelope counted against 32k and 64k.
 - **`pkg/router`:**
   - the golden JSON of the Jev request for a fixed catalog, with and without `--cli`;
   - every "cannot decide" case, via a mocked `JevClient`: untouched passthrough with `--cli`, exit `2` without it;
@@ -613,7 +626,7 @@ pkg/runner/            # child process, stdin replay, signals / Job Object, exit
   - the key appears only in the `Authorization` header and is redacted from debug output, including echoed error bodies.
 - **`pkg/runner`:**
   - agrouter's own flags (`--cli`, `--jev-api-key`) never reach the child's arguments;
-  - byte-exact stdin replay, including binary stdin, capture stopped at the text limit (buffered prefix replayed, then the rest relayed), and the stream path: held lines replayed, then live pass-through while stdin stays open; stream mode chosen by `stream_input_args`, not by content; an image-only first message ends the hold;
+  - byte-exact stdin replay, including binary stdin, capture stopped at the text limit (buffered prefix replayed, then the rest relayed), and the stream path: held lines replayed, then live pass-through while stdin stays open; stream mode chosen by `stream_input_args`, not by content; an image-only first content line ends the hold, and metadata-only lines keep holding;
   - `TYPESAFE_API_KEY` absent from the child's environment;
   - exit code propagation;
   - exit `127` on a missing command;
