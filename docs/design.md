@@ -422,7 +422,7 @@ caller argv + stdin
 Every filter runs **before** Jev, so Jev only scores options that fit the arguments given. **No filter ever empties the list:** a filter that would is skipped with a warning (see [Skipped arguments](#skipped-arguments)). They run in this order:
 
 - **`--cli`** keeps one CLI. An unknown or disabled name is skipped.
-- **`--model`** keeps exactly one model, found by `name` or `aliases` among enabled models. A model outside the catalog is [passed through](#pass-through-not-validation): the options become one per remaining CLI with that model fixed.
+- **`--model`** keeps exactly one model, found by `name` or `aliases` among enabled models. A model outside the catalog is [passed through](#pass-through-not-validation): the options become one per remaining CLI with that model fixed. So is a catalog model whose CLI an earlier filter removed (`--cli=claude --model gpt-6-sol`): it is passed through by its `name` to the remaining CLI rather than emptying the list.
 - **`--effort`** keeps only options with that effort. If none remains (`--model claude-haiku-4-5 --effort high`), the value is [passed through](#pass-through-not-validation) and the options keep their models without the effort.
 - **Mapped arguments** are a **preference**, not a filter: only the remaining CLIs that would **skip the fewest** of the caller's mapped arguments stay, counting both a missing key and a `[]` mapping as skipped; Jev chooses among those. So `--output-format json`, `--permission-mode manual` or `--verbose` routes to Claude (Codex would skip them), `--sandbox` or a `-c` routes to Codex, and `--cli=codex --output-format json` runs Codex with the format skipped. A tie keeps every tied CLI.
 

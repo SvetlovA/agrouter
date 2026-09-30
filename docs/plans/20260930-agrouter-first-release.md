@@ -356,19 +356,21 @@
 - Create: `pkg/router/eligibility.go`
 - Create: `pkg/router/eligibility_test.go`
 
-- [ ] implement eligibility in design order:
+- [x] implement eligibility in design order:
   - `--cli`: an unknown or disabled name is skipped with a warning;
   - `--model`: a catalog model narrows to it (by name or alias); a model outside the catalog gives one option per remaining CLI with the model passed through;
   - `--effort`: an effort nothing has is passed through, with efforts dropped from the ids;
   - the mapped-argument preference: keep the CLIs with the fewest skips, `[]` counting as skipped, never emptying the list.
-- [ ] report which CLIs were dropped and why, for debug output
-- [ ] write tests:
+- [x] report which CLIs were dropped and why, for debug output
+- [x] write tests:
   - each filter and the preference: `--output-format json` → Claude, `--verbose` → Claude, `--permission-mode manual`/`dontAsk` → Claude (skipped when `--cli=codex`), `--sandbox`/`-c` → Codex, `--cli=codex --output-format json` → Codex with a skip;
   - fewest-skips ties kept;
   - `--model` by name and by alias, `--model` outside the catalog with and without `--cli`;
   - `--effort` alone, `--effort` with a model without efforts passed through;
   - no filter ever empties the list; ralphex's Claude and Codex argv produce no skips.
-- [ ] run tests - must pass before next task
+- [x] run tests - must pass before next task
+- ➕ `router.Eligible(cfg, cat, req) *Eligibility`: `Options` (never empty, catalog order), `Pinned` (a valid `--cli`), `ModelPassthrough`/`EffortPassthrough`, `Dropped []Drop{CLI, Reason}` and `Warnings`; `EffortFor(o)` gives the option's effort or the caller's passed-through one. A passed-through model gives options with `ID` = the CLI name and no section. The preference counts skips with `args.Build` itself (pinned, so raw passthrough is not counted, and with the caller's `--effort`), so routing and the argv never disagree on what is skipped. A catalog `--model` of a CLI that `--cli` already removed (`--cli=claude --model gpt-6-sol`) is passed through to the pinned CLI by its name rather than emptying the list; recorded in the design's Eligibility
+- ➕ tests use the embedded catalog plus a local config disabling codex (a disabled `--cli` is skipped with the warning); `make lint` resolves the chocolatey golangci-lint 2.12.2 first in Git Bash, so lint ran with `$(go env GOPATH)/bin/golangci-lint` (v2.13.0) for GOOS=windows, linux and darwin, 0 issues
 
 ### Task 13: Jev question, decision and cannot-decide policy (`pkg/router`)
 
