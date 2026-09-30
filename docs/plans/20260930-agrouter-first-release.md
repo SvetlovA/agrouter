@@ -460,20 +460,23 @@
 - Create: `cmd/agrouter/app_test.go`
 - Create: `cmd/agrouter/guard_test.go`
 
-- [ ] wire the pipeline:
+- [x] wire the pipeline:
   - parse, then config, then catalog;
   - start the routing deadline before prompt capture, then capture, route, and build argv;
   - decision mode prints one JSON line `{"cli","model","effort","argv","skipped"}` on stdout; exec mode runs the child through `CommandRunner`.
-- [ ] print one stderr warning per skipped argument in both modes; errors as one `agrouter:` line each; `--help` includes the API key cautions from the design
-- [ ] exit codes: `2` for argument/prompt/config errors and cannot-decide with the CLI unknown, `127` for startup failure, the child's code otherwise
-- [ ] write end-to-end tests (fake CLIs via the helper process, Jev via `httptest`):
+- [x] print one stderr warning per skipped argument in both modes; errors as one `agrouter:` line each; `--help` includes the API key cautions from the design
+- [x] exit codes: `2` for argument/prompt/config errors and cannot-decide with the CLI unknown, `127` for startup failure, the child's code otherwise
+- [x] write end-to-end tests (fake CLIs via the helper process, Jev via `httptest`):
   - the ralphex Claude-mode argv, ralphex Codex-mode argv and external-review argv, with no skip warnings;
   - decision JSON including `null` model/effort and `skipped`;
   - a prompt-only invocation, the `--cli=codex --output-format json` skip warning, no-prompt exit `2`;
   - raw tokens and flags never in the Jev state;
   - a made-up CLI defined only in config, routed and run with the `{prompt}` token and stdin unchanged, where renaming its section changes nothing.
-- [ ] write the repo-level guard test: production sources outside `pkg/config/defaults` contain no CLI names (excluding `--help` text and test files)
-- [ ] run tests - must pass before next task
+- [x] write the repo-level guard test: production sources outside `pkg/config/defaults` contain no CLI names (excluding `--help` text and test files)
+- [x] run tests - must pass before next task
+- ➕ `cmd/agrouter/app.go` holds the pipeline in an `app` struct (stdin, stdout/stderr, getenv, working directory, embedded config, a `newJev(key)` factory and the `CommandRunner`), so the end-to-end tests swap in an `httptest` Jev and point the CLIs' `command` at the helper binary through a global config. Eligibility warnings print after prompt capture, so a missing prompt stays a single `agrouter:` line. Mentioned files are read only when more than one option is eligible, since a single option never reaches Jev. A multi-violation config error prints one `agrouter: config: ...` line per violation. The decision JSON is written without HTML escaping (`<`, `>` and `&` stay literal).
+- ➕ the guard test (`cmd/agrouter/guard_test.go`) takes the CLI names from the embedded config and checks identifiers, literals and comments of every non-test Go file outside `pkg/config/defaults`, `vendor`, `mocks` and `testdata`; struct tags (go-flags' `--help` descriptions) and `helpText` are exempt. The `flags_test.go` helper `prompt(...)` became `positional(...)`, because `app.go` imports `pkg/prompt`.
+- ⚠️ as in Tasks 11–15, `make lint` in Git Bash picks up the old golangci-lint 2.12.2, which cannot typecheck the Go 1.27 stdlib; lint ran with the locally built v2.13.0 for `GOOS=windows`, `linux` and `darwin` (0 issues).
 
 ### Task 17: Debug output and routing evaluation
 

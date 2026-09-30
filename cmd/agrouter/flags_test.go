@@ -25,7 +25,7 @@ func parseOK(t *testing.T, argv []string, getenv func(string) string) *args.Requ
 	return cmd.req
 }
 
-func prompt(v string) args.Optional { return args.Optional{Value: v, Set: true} }
+func positional(v string) args.Optional { return args.Optional{Value: v, Set: true} }
 
 func TestParseArgs_FlagsAroundPositional(t *testing.T) {
 	want := []args.Arg{
@@ -45,7 +45,7 @@ func TestParseArgs_FlagsAroundPositional(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := parseOK(t, tc.argv, noEnv)
 			assert.Equal(t, args.ModeDecision, req.Mode)
-			assert.Equal(t, prompt("fix it"), req.Prompt)
+			assert.Equal(t, positional("fix it"), req.Prompt)
 			assert.Equal(t, want, req.Args)
 			assert.Empty(t, req.Raw)
 		})
@@ -60,12 +60,12 @@ func TestParseArgs_Mode(t *testing.T) {
 		wantPrompt args.Optional
 	}{
 		{"decision, no prompt", []string{"--verbose"}, args.ModeDecision, args.Optional{}},
-		{"decision with prompt", []string{"hello"}, args.ModeDecision, prompt("hello")},
-		{"exec first", []string{"exec", "hello"}, args.ModeExec, prompt("hello")},
+		{"decision with prompt", []string{"hello"}, args.ModeDecision, positional("hello")},
+		{"exec first", []string{"exec", "hello"}, args.ModeExec, positional("hello")},
 		{"exec alone", []string{"exec"}, args.ModeExec, args.Optional{}},
-		{"later exec is the positional", []string{"--verbose", "exec"}, args.ModeDecision, prompt("exec")},
-		{"exec then exec as the prompt", []string{"exec", "exec"}, args.ModeExec, prompt("exec")},
-		{"empty positional is still a prompt", []string{""}, args.ModeDecision, prompt("")},
+		{"later exec is the positional", []string{"--verbose", "exec"}, args.ModeDecision, positional("exec")},
+		{"exec then exec as the prompt", []string{"exec", "exec"}, args.ModeExec, positional("exec")},
+		{"empty positional is still a prompt", []string{""}, args.ModeDecision, positional("")},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -81,7 +81,7 @@ func TestParseArgs_OwnFlags(t *testing.T) {
 		for _, f := range []string{"-p", "--print"} {
 			req := parseOK(t, []string{f, "x"}, noEnv)
 			assert.Empty(t, req.Args)
-			assert.Equal(t, prompt("x"), req.Prompt)
+			assert.Equal(t, positional("x"), req.Prompt)
 		}
 	})
 	t.Run("AGROUTER_CLI used without --cli", func(t *testing.T) {
@@ -235,13 +235,13 @@ func TestParseArgs_RalphexCodex(t *testing.T) {
 func TestParseArgs_Raw(t *testing.T) {
 	t.Run("raw tokens kept apart from the positional", func(t *testing.T) {
 		req := parseOK(t, []string{"--cli", "claude", "fix it", "--", "--add-dir", "../x", "--", "extra"}, noEnv)
-		assert.Equal(t, prompt("fix it"), req.Prompt)
+		assert.Equal(t, positional("fix it"), req.Prompt)
 		assert.Equal(t, []string{"--add-dir", "../x", "--", "extra"}, req.Raw)
 		assert.Empty(t, req.Args)
 	})
 	t.Run("a positional-looking raw token is not a second positional", func(t *testing.T) {
 		req := parseOK(t, []string{"fix it", "--", "other"}, noEnv)
-		assert.Equal(t, prompt("fix it"), req.Prompt)
+		assert.Equal(t, positional("fix it"), req.Prompt)
 		assert.Equal(t, []string{"other"}, req.Raw)
 	})
 	t.Run("-- with nothing after", func(t *testing.T) {
@@ -253,7 +253,7 @@ func TestParseArgs_Raw(t *testing.T) {
 func TestParseArgs_SlashTokens(t *testing.T) {
 	// go-flags on Windows takes "/x" as an option; prompts and values starting with "/" must survive
 	req := parseOK(t, []string{"--model", "/models/m", "--sandbox=/weird", "/review the diff"}, noEnv)
-	assert.Equal(t, prompt("/review the diff"), req.Prompt)
+	assert.Equal(t, positional("/review the diff"), req.Prompt)
 	assert.Equal(t, "/models/m", req.Model)
 	assert.Equal(t, []args.Arg{{Spelling: "--sandbox /weird", Key: "sandbox./weird"}}, req.Args)
 }
