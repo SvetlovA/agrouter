@@ -56,7 +56,7 @@ ralphex is the first caller and fixes the constraints agrouter must respect (`ra
   - stdout and stderr are read through separate pipes (`codex.go:78-85`, `238-267`).
 - The child environment is inherited, minus Claude session markers, so `AGROUTER_*` variables reach agrouter in both modes (`codex.go:46-68`).
 
-As a result, agrouter prints nothing on stderr by default. In Claude mode it would corrupt error detection; in Codex mode it is merely noise.
+As a result, agrouter's only stderr output on a run that starts a child is one warning line per [skipped argument](#skipped-arguments), and ralphex's own calls map fully, so they get none. In Claude mode a warning would not be neutral: ralphex keeps non-JSON lines of the merged stream as diagnostics and scans them against its error and limit patterns even on a clean run (`executor.go:443-447`, `508-519`). The default patterns (`You've hit your limit`, `API Error: 4xx`, ...; `config/defaults/config:252-265`) do not match `agrouter: warning:`, but a caller's own patterns might. In Codex mode it is merely noise.
 
 ## CLI
 
@@ -100,12 +100,19 @@ agrouter's argument names and style follow Claude Code. They fall into three gro
 | `--output-format=json` | `--output-format json` | *(unsupported)* |
 | `--output-format=stream-json` | `--output-format stream-json` | `--json` |
 | `--verbose` | `--verbose` | *(nothing)* |
+| `--sandbox=read-only`, `workspace-write`, `danger-full-access` | *(unsupported)* | `--sandbox <value>` |
+| `-c`, `--config key=value` (repeatable; keys in the Codex mapping) | *(unsupported)* | `-c key=value` |
 
 `{prompt}` is the positional prompt (see [Prompt](#prompt)); it may instead sit after the other mapped arguments, before raw passthrough (see [Argument mapping](#argument-mapping)).
 
-**Permission modes** use Claude's names. `--dangerously-skip-permissions` is agrouter's alias for `--permission-mode=bypassPermissions`, as it is in Claude, so both hit the one mapping key and never emit duplicate tokens (Codex rejects a repeated `--skip-git-repo-check`); given with a different `--permission-mode`, it is an error (exit `2`). Codex's `--skip-git-repo-check` lives in these mappings, not in `print`: relaxing the git-repository guard is a permission decision, so a Codex call without `--permission-mode` fails outside a git repository, as `codex exec` itself does. The v1 defaults relax it for `bypassPermissions` and for read-only `plan`; a config that wants it with other modes adds it to those mappings. **≈ marks the closest Codex setting, not an equivalent:** Claude's `acceptEdits` auto-approves file edits while Codex `workspace-write` sandboxes all commands to the workspace; Claude's `auto` classifies every tool call while Codex `--approve-for-me` reviews only requests beyond its workspace sandbox. For `plan`, `approval_policy="never"` stops Codex from asking to leave the read-only sandbox, so, like Claude's `plan`, it cannot edit. `manual` (Claude asks before edits and shell) and `dontAsk` (deny anything not pre-allowed) have no Codex counterpart, so those modes route only to Claude.
+**Permission modes** use Claude's names. `--dangerously-skip-permissions` is agrouter's alias for `--permission-mode=bypassPermissions`, as it is in Claude, and so is Codex's spelling `--dangerously-bypass-approvals-and-sandbox`, so both hit the one mapping key and never emit duplicate tokens (Codex rejects a repeated `--skip-git-repo-check`); given with a different `--permission-mode`, it is an error (exit `2`): the two contradict each other, and picking one could silently weaken what the caller asked for. Codex's `--skip-git-repo-check` lives in these mappings, not in `print`: relaxing the git-repository guard is a permission decision, so a Codex call without `--permission-mode` fails outside a git repository, as `codex exec` itself does. The v1 defaults relax it for `bypassPermissions` and for read-only `plan`; a config that wants it with other modes adds it to those mappings. **≈ marks the closest Codex setting, not an equivalent:** Claude's `acceptEdits` auto-approves file edits while Codex `workspace-write` sandboxes all commands to the workspace; Claude's `auto` classifies every tool call while Codex `--approve-for-me` reviews only requests beyond its workspace sandbox. For `plan`, `approval_policy="never"` stops Codex from asking to leave the read-only sandbox, so, like Claude's `plan`, it cannot edit. `manual` (Claude asks before edits and shell) and `dontAsk` (deny anything not pre-allowed) have no Codex counterpart, so routing prefers Claude for them, and on Codex they are skipped.
 
-Every Claude output format is mapped. Codex has no single-result JSON on stdout (`-o` writes the last message to a file), so its mapping has no `output-format.json` key and `--output-format json` routes only to Claude. Which values are accepted is decided by the mappings, not code (see [Eligibility](#eligibility)). The vocabulary grows by adding a flag to agrouter and a key to each CLI's mapping; see [Open questions](#open-questions).
+**Codex-spelled arguments** exist so that ralphex's Codex executor can call agrouter unchanged (see [ralphex integration](#ralphex-integration)):
+
+- **`--sandbox`** is value-keyed like `--output-format`. Claude has no sandbox mapping, so routing prefers Codex. Given together with a `--permission-mode` other than `bypassPermissions`, it is an error (exit `2`): both set Codex's sandbox, and dropping either could weaken it (`--sandbox read-only --permission-mode acceptEdits` would become `workspace-write`). With `bypassPermissions` it is allowed; Codex accepts `--sandbox` beside `--dangerously-bypass-approvals-and-sandbox`, which is what ralphex sends in Docker.
+- **`-c key=value`** is Codex's config override, and agrouter spells it the same way; agrouter has no `--continue`, so Claude's `-c` does not clash. The token is split at the first `=`. Two keys are **constraints**, not passthrough: `-c model=<id>` is `--model <id>`, and `-c model_reasoning_effort=<level>` is `--effort <level>`; a TOML-quoted value (`"gpt-6-sol"`) is unquoted first. Given together with `--model` or `--effort`, they are an error (exit `2`), a contradiction like the permission ones. Every other key must have a `config.<key>` mapping, keyed by the part before `=` like a value-keyed flag, and is emitted once per occurrence, in the caller's order, with the whole `key=value`, byte-exact, as `{value}`. The v1 Codex mapping lists exactly the keys ralphex sends (`codex.go:137-147,195-205`): `stream_idle_timeout_ms`, `project_doc`, `project_doc_fallback_filenames`, `features.multi_agent` and `agents.reviewer.description`. Any other key is unmapped and skipped, so `-c approval_policy=...` or `-c sandbox_mode=...` never overrides a `--permission-mode`. Claude has no `config.*` mapping, so a `-c` makes routing prefer Codex.
+
+Every Claude output format is mapped. Codex has no single-result JSON on stdout (`-o` writes the last message to a file), so its mapping has no `output-format.json` key and `--output-format json` prefers Claude, and on Codex it is skipped. Which values are accepted is decided by the mappings, not code (see [Eligibility](#eligibility)). The vocabulary grows by adding a flag to agrouter and a key to each CLI's mapping; see [Open questions](#open-questions).
 
 **Prompt**: at most one positional argument, and/or stdin. See [Prompt](#prompt).
 
@@ -113,14 +120,34 @@ Parsing rules:
 
 - `exec`, if present, must be the first token. Everything else may come in any order, as in Claude: agrouter knows all of its flags, so the positional prompt is found exactly, wherever it is.
 - Flags take values in split (`--model M`) or `=` (`--model=M`) form.
-- **An unknown flag is an error** (exit `2`, one `agrouter:` line). agrouter does not guess what an unknown flag means for the chosen CLI.
+- **An unknown flag is an error** (exit `2`, one `agrouter:` line). This is the one kind of argument that cannot be skipped: agrouter cannot know whether it takes a value, so it could not tell where the positional prompt is.
 - A second positional argument is an error.
 - Parsing uses `jessevdk/go-flags`, following ralphex; `exec` is a go-flags command.
-- `AGROUTER_CLI` exists because ralphex's `codex_command` cannot carry arguments.
+- `AGROUTER_CLI` exists because ralphex's `codex_command` cannot carry arguments. ralphex's Codex calls usually do not need it: their `--sandbox` and `-c` already leave only Codex eligible.
 
 ### Raw passthrough
 
-Tokens after `--` are appended to the child's argv unchanged, after the mapped arguments. This is the escape hatch for CLI-specific flags outside the vocabulary, and it is allowed **only with `--cli` set**: a raw flag is written for one CLI and cannot be valid for whichever one Jev picks. `--` without `--cli` is an error (exit `2`). Raw tokens are never read for routing and never sent to Jev.
+Tokens after `--` are appended to the child's argv unchanged, after the mapped arguments. This is the escape hatch for CLI-specific flags outside the vocabulary, and it takes effect **only with `--cli` set**: a raw flag is written for one CLI and cannot be valid for whichever one Jev picks. Without `--cli`, the raw tokens are skipped with one warning. Raw tokens are never read for routing and never sent to Jev.
+
+### Skipped arguments
+
+Every agrouter argument is translated through the chosen CLI's mapping. **An argument the chosen CLI does not map, or maps to `[]`, is skipped, never an error:** the child runs without it, and agrouter prints one line to stderr:
+
+```
+agrouter: warning: skipped --output-format json: codex has no mapping for it
+agrouter: warning: skipped --verbose: maps to nothing for codex
+```
+
+Decision mode prints the same lines on stderr and also lists the skipped arguments, as the caller spelled them, in a `skipped` array in its JSON. The **prompt is the only required input**: with no positional prompt and no stdin, agrouter exits `2`.
+
+What else is skipped with a warning rather than failing:
+
+- a `--model` (or `-c model=`) naming no enabled model, or one on a CLI that `--cli` excludes; Jev then chooses the model;
+- an `--effort` (or `-c model_reasoning_effort=`) that no remaining option has, such as `--model claude-haiku-4-5 --effort high`; Jev then chooses the effort;
+- an unknown or disabled `--cli`; routing then spans every CLI;
+- raw tokens after `--` without `--cli`.
+
+Still errors (exit `2`): an unknown flag, a second positional argument, no prompt at all, **contradictory arguments** (`--dangerously-skip-permissions` or `--sandbox` beside a different `--permission-mode`, `-c model=` or `-c model_reasoning_effort=` beside `--model` or `--effort`), a configuration error, and Jev failing to decide while more than one CLI is still possible (see [When Jev cannot decide](#when-jev-cannot-decide)). A gap is skipped; a contradiction is not, because resolving it means guessing which of two explicit requests the caller meant.
 
 ### Decision mode
 
@@ -133,7 +160,8 @@ Tokens after `--` are appended to the child's argv unchanged, after the mapped a
 - `argv` is exactly what exec mode would run: the CLI's `command`, then its `print` mapping, the mapped arguments, model and effort, the `prompt` mapping if configured, and raw passthrough (see [Execution](#execution)).
 - `argv` holds the positional prompt, if one was given, as the `{prompt}` token; the example above had none. It never holds stdin: the caller sends that on the child's stdin, as exec mode does. If agrouter read the caller's stdin, it is consumed; the caller must still have its own copy to send.
 - `effort` is `null` for a model without efforts (Claude Haiku 4.5).
-- When Jev cannot decide and the CLI is known (`--cli`, or implied by `--model`), the line holds only what the caller fixed: `--model` and `--effort` if given, `null` otherwise, and an `argv` without the unchosen arguments, so the CLI's own defaults apply. With the CLI unknown, exit `2` (see [When Jev cannot decide](#when-jev-cannot-decide)).
+- `skipped` lists the arguments left out of `argv` (see [Skipped arguments](#skipped-arguments)); it is `[]` when nothing was.
+- When Jev cannot decide and the CLI is known (`--cli`, implied by `--model`, or the only CLI left), the line holds only what the caller fixed: `--model` and `--effort` if given, `null` otherwise, and an `argv` without the unchosen arguments, so the CLI's own defaults apply. With the CLI unknown, exit `2` (see [When Jev cannot decide](#when-jev-cannot-decide)).
 
 ### Exec mode
 
@@ -166,7 +194,7 @@ The embedded defaults ship `api_key =` as an empty placeholder, which means no k
   - Prefer the environment variable, or the global config with user-only file permissions.
   - A key in a local `.agrouter/config` is accepted but risky, because that file is easy to commit.
 
-  agrouter does not print a runtime warning about any of this, because stderr must stay quiet. The cautions live in `--help` and in this document; `AGROUTER_DEBUG` notes the key's source, never its value.
+  agrouter does not print a runtime warning about any of this: stderr carries only [skipped-argument](#skipped-arguments) warnings. The cautions live in `--help` and in this document; `AGROUTER_DEBUG` notes the key's source, never its value.
 
 ## Configuration
 
@@ -244,6 +272,16 @@ permission-mode.bypassPermissions = ["--dangerously-bypass-approvals-and-sandbox
 permission-mode.plan         = ["--sandbox", "read-only", "-c", "approval_policy=\"never\"", "--skip-git-repo-check"]
 permission-mode.acceptEdits  = ["--sandbox", "workspace-write"]
 permission-mode.auto         = ["--approve-for-me"]
+sandbox.read-only            = ["--sandbox", "read-only"]
+sandbox.workspace-write      = ["--sandbox", "workspace-write"]
+sandbox.danger-full-access   = ["--sandbox", "danger-full-access"]
+# -c keys accepted, keyed by the part before "="; {value} = the whole key=value, byte-exact.
+# exactly what ralphex sends; model and model_reasoning_effort are constraints and never get here
+config.stream_idle_timeout_ms         = ["-c", "{value}"]
+config.project_doc                    = ["-c", "{value}"]
+config.project_doc_fallback_filenames = ["-c", "{value}"]
+config.features.multi_agent           = ["-c", "{value}"]
+config.agents.reviewer.description    = ["-c", "{value}"]
 # default output: final message on stdout. No single-result JSON: output-format.json is absent
 output-format.text           = []
 output-format.stream-json    = ["--json"]
@@ -266,8 +304,8 @@ source      = https://platform.claude.com/docs/en/build-with-claude/effort
 
 Rules:
 
-- **Every `[cli.*.args]` value is a template, as a JSON string array,** because agrouter writes them: `{model}` and `{effort}` are substituted inside each token, and the result goes straight to `os/exec` with no shell. This avoids all quoting problems and works the same on Windows. A template may hold any number of tokens, including none.
-- **Mapping keys** are agrouter flag names without the leading `--`. A flag with a value is keyed per value, `<flag>.<value>` (`output-format.stream-json`), so each value maps to whatever that CLI needs, even a different flag (`--json`). `model` and `effort` are the exception: one template each, with a placeholder.
+- **Every `[cli.*.args]` value is a template, as a JSON string array,** because agrouter writes them: `{model}`, `{effort}` and `{value}` are substituted inside each token, and the result goes straight to `os/exec` with no shell. This avoids all quoting problems and works the same on Windows. A template may hold any number of tokens, including none.
+- **Mapping keys** are agrouter flag names without the leading `--`. A flag with a value is keyed per value, `<flag>.<value>` (`output-format.stream-json`), so each value maps to whatever that CLI needs, even a different flag (`--json`). `model` and `effort` are the exception: one template each, with a placeholder. `-c` is keyed by its config key, `config.<key>`, and its templates take the whole `key=value` as `{value}`, emitted once per occurrence.
 - **`print` is required and always emitted, first,** so a subcommand such as Codex `exec` precedes everything else. Its spelling is the config's choice: `["-p", "{prompt}"]`, `["--print", "{prompt}"]`, `["exec", "{prompt}"]`.
 - **`{prompt}` goes in `print`, or in the optional `prompt` key,** which is emitted at the end of the mapped arguments. So `print = ["exec", "{prompt}"]` puts the prompt right after `exec`, and `print = ["exec"]` with `prompt = ["{prompt}"]` puts it after every other mapped argument. It is a whole token, in exactly one of the two: it becomes the positional prompt, or **zero tokens** when there is none (never an empty string, which Codex would take as an empty prompt). A CLI without `print`, `{prompt}` in both or in neither, anywhere else, or inside a longer token, is a config error.
 - **agrouter knows only what the config says about each CLI:** its command and how each agrouter argument is spelled, `print` included. It never parses a CLI's own flags.
@@ -317,10 +355,6 @@ Sources: `developers.openai.com/api/docs/models/<id>`, the [reasoning guide](htt
 | `gpt-6-astra` | low, medium, high, xhigh, max, ultra (low) | Frontier intelligence for the most demanding end-to-end reasoning, coding, computer use, research and documents, where quality and judgment dominate. | $10 / $50 |
 | `gpt-6-sol` | low, medium, high, xhigh, max, ultra (low) | Workhorse for complex coding and agent workflows; better factual reliability than 5.6 Sol. The capable everyday choice. | $2 / $10 |
 | `gpt-6-luna` | low, medium, high, xhigh, max (medium) | Fast and affordable: focused, high-volume extraction, classification, transformations, structured summaries and focused coding. | $0.10 / $0.50 |
-| `gpt-5.6-sol` | low, medium, high, xhigh, max, ultra (low) | Previous flagship for complex professional reasoning and coding. | $4 / $20 |
-| `gpt-5.6-terra` | low, medium, high, xhigh, max, ultra (medium) | Previous balanced tier for straightforward, everyday work. | $2 / $12 |
-| `gpt-5.6-luna` | low, medium, high, xhigh, max (medium) | Previous efficient tier for cost-sensitive, high-volume narrow work. | $0.20 / $1.20 |
-| `gpt-5.5` | low, medium, high, xhigh (medium) | Legacy flagship for coding and professional work. **Leaves ChatGPT Codex on 2026-10-14**; API access is unaffected. | $5 / $30 |
 
 Codex effort levels:
 
@@ -333,9 +367,9 @@ Codex effort levels:
 | `max` | The most demanding problems: more exploration and verification, depth over speed. |
 | `ultra` | CLI-level orchestration that spawns parallel subagents automatically. Only for complex work that divides into meaningful independent parts. |
 
-This gives 38 options. Hidden models (`gpt-reserve`, `codex-auto-review`) are not public choices and are excluded.
+This gives 17 options. Only the latest generation (GPT-6) ships: older models (`gpt-5.6-*`, `gpt-5.5`) would only add options Jev must weigh against a newer tier that is stronger and no more expensive (GPT-6 Sol is $2 / $10 against 5.6 Sol at $4 / $20), and a user who wants one adds a `[model.*]` section in their own config. Hidden models (`gpt-reserve`, `codex-auto-review`) are not public choices and are excluded.
 
-With `--cli` empty the catalog is **54 options**, well under Jev's 255. API prices are shown for comparison only; subscription plans bill differently.
+With `--cli` empty the catalog is **33 options**, well under Jev's 255. API prices are shown for comparison only; subscription plans bill differently.
 
 Keeping the catalog current is a documentation task, not a code task. Each release re-checks the vendor pages and the Codex model cache.
 
@@ -345,12 +379,12 @@ Keeping the catalog current is a documentation task, not a code task. Each relea
 caller argv + stdin
       │
       ▼
- parse agrouter arguments ──unknown flag, or `--` without --cli──► exit 2
+ parse agrouter arguments ──unknown flag, second positional, or no prompt──► exit 2
       │
       ▼
- eligible options = enabled (model, effort) of CLIs that match --cli,
- map every mapped argument used, and satisfy --model / --effort
-      │  none ──► exit 2
+ eligible options = enabled (model, effort) of CLIs that match --cli and
+ satisfy --model / --effort (a constraint nothing satisfies is skipped),
+ preferring CLIs that map every argument used (never emptying the list)
       ▼
  build Jev state (prompt text + mentioned files + attachments)
       │
@@ -374,12 +408,12 @@ caller argv + stdin
 
 ### Eligibility
 
-Every filter runs **before** Jev, so Jev only ever scores options that can actually run with the arguments given. An empty result is exit `2`, with one `agrouter:` line naming the filter that emptied it.
+Every filter runs **before** Jev, so Jev only scores options that fit the arguments given. **No filter ever empties the list:** a filter that would is skipped with a warning (see [Skipped arguments](#skipped-arguments)). They run in this order:
 
-- **`--cli`** keeps one CLI. An unknown or disabled name is a configuration error.
-- **Mapped arguments.** A CLI stays only if its `[cli.*.args]` has a key for every mapped argument the caller used: `permission-mode.bypassPermissions` for `--dangerously-skip-permissions`, `output-format.stream-json` for `--output-format stream-json`. Which values `--output-format` and `--permission-mode` accept is therefore decided by config, not code: `--output-format json` or `--permission-mode manual` drops Codex, and with `--cli=codex` empties the list.
-- **`--model`** keeps exactly one model, found by `name` or `aliases` among enabled models. An unknown model, or one whose CLI is excluded by `--cli` or by a mapped argument, empties the list; it is never silently replaced.
-- **`--effort`** keeps only options with that effort. A model without efforts (Haiku) never matches, so `--model claude-haiku-4-5 --effort high` empties the list.
+- **`--cli`** keeps one CLI. An unknown or disabled name is skipped.
+- **`--model`** keeps exactly one model, found by `name` or `aliases` among enabled models. An unknown model, or one on a CLI that `--cli` excludes, is skipped and Jev chooses the model; a known model is never replaced by another.
+- **`--effort`** keeps only options with that effort. If none remains (`--model claude-haiku-4-5 --effort high`), it is skipped and Jev chooses the effort.
+- **Mapped arguments** are a **preference**, not a filter: only the remaining CLIs that would **skip the fewest** of the caller's mapped arguments stay, counting both a missing key and a `[]` mapping as skipped; Jev chooses among those. So `--output-format json`, `--permission-mode manual` or `--verbose` routes to Claude (Codex would skip them), `--sandbox` or a `-c` routes to Codex, and `--cli=codex --output-format json` runs Codex with the format skipped. A tie keeps every tied CLI.
 
 With `--model` and `--effort` both given, at most one option is left and Jev is not called.
 
@@ -392,14 +426,14 @@ The prompt comes from the positional argument, from stdin, or both.
 | positional only | the `{prompt}` token; empty stdin | the positional text |
 | stdin only | no prompt token; stdin replayed byte-for-byte | stdin text |
 | both | the `{prompt}` token, and stdin byte-for-byte; the CLI combines them | the positional text, two LF bytes (`0x0A 0x0A`), then stdin text; for binary stdin, the positional text only |
-| neither | no prompt token; empty stdin | empty: Jev cannot decide |
+| neither | not started: exit `2`, the prompt is required | — |
 
 - **The positional prompt goes in argv, stdin stays on stdin.** The positional text becomes the `{prompt}` token of the `print` or `prompt` mapping, one argv token, unchanged. Both CLIs read stdin when no positional prompt is given. Large material stays on stdin, which avoids the Windows command-line length limit, the same reason ralphex uses stdin (`codex.go:207-210`); a positional prompt already fit in agrouter's own command line. It never starts with `-`, because agrouter's parser would have taken it as a flag, so the CLI cannot mistake it for an option either. In decision mode the printed `argv` carries it, and the caller sends stdin.
 - **Both given** mirrors `claude -p "summarize" < file`: the instruction first, the material after. The child gets the two separately and its CLI combines them its own way: Claude appends stdin to the prompt; Codex appends it as a `<stdin>` block (`codex exec --help`). What the model reads therefore contains both sources but is not byte-identical to Jev's `prompt`. agrouter adds nothing to stdin and normalises nothing (no CRLF conversion, no trailing newline). Binary stdin stays out of Jev's `prompt` and is reported as an `attachments` entry with `source: stdin`, so the two sources stay distinguishable.
 - **Reading stdin.** When stdin is not a TTY, it is read to EOF. v1 has no live stream input (no `--input-format`), and v1 requires the caller to close stdin before it waits for output: a caller that keeps stdin open while waiting would hang, because routing needs the whole prompt before the child starts. ralphex writes the prompt and closes stdin.
 - **Binary stdin** is not sent to Jev; it becomes an `attachments` entry (see [Non-text input](#non-text-input)) and Jev's `prompt` holds only the positional text. The whole captured stdin is validated, not just a prefix: NUL bytes or invalid UTF-8 anywhere make it binary. Unknown binary that happens to look like valid text cannot be told apart and is sent as text.
 - **What Jev sees** is the `prompt`, the files it mentions (see below), and attachment metadata. No other argument is ever sent: not flags, not raw passthrough, not model or effort.
-- **When Jev is called.** Whenever the state is non-empty, including a one-word prompt. When it is empty, see [When Jev cannot decide](#when-jev-cannot-decide).
+- **When Jev is called.** Whenever more than one option is eligible, including for a one-word prompt. With no prompt at all agrouter exits `2` before routing (see [Skipped arguments](#skipped-arguments)).
 - **Capture limit.** Text capture, stdin and mentioned files together, is bounded by `max_chunks` (see [Splitting large state](#splitting-large-state)). Past it, Jev cannot decide and agrouter stops reading; in exec mode the child still gets all of stdin, the buffered bytes first, then the rest relayed live.
 
 | State field | Content |
@@ -472,7 +506,7 @@ To keep the question small, the catalog goes **once** into a structured `instruc
 ```
 
 - **Payload contents:** only the state (the prompt text, the contents of text files it mentions inside the working directory, and attachment metadata: type and size only) and the catalog descriptions go to Jev. No argument, command, source URL or the API key ever does. The path of a file agrouter reads is never sent (see [Prompt](#prompt)).
-- **Needs validation:** this compact encoding is schema-valid, but its classification accuracy is not yet proven equivalent to a full description inside each criterion. The routing evaluation set (see [Testing](#testing)) decides. If the references prove unreliable, switch to full descriptions per criterion; 54 options × ~120 tokens still fits.
+- **Needs validation:** this compact encoding is schema-valid, but its classification accuracy is not yet proven equivalent to a full description inside each criterion. The routing evaluation set (see [Testing](#testing)) decides. If the references prove unreliable, switch to full descriptions per criterion; 33 options × ~120 tokens still fits.
 
 ### Budget
 
@@ -560,7 +594,6 @@ With exactly one eligible option, it is used without a Jev call.
 
 Jev cannot decide in these cases:
 
-- the state is empty: no prompt text, no mentioned files and no attachment metadata, which in practice means neither a positional prompt nor stdin (see [Prompt](#prompt)); binary-only stdin is not empty, it is routed on its attachment entry;
 - no API key from any source (flag, env, config), or an explicit empty `--jev-api-key=`;
 - a timeout or network error;
 - an HTTP error on the request, or on any chunk request: `401`; `429` or `529` after backoff retries have used up `timeout`; `422` after the one re-split at half the budget;
@@ -572,21 +605,21 @@ There is no fallback model, so what happens depends only on whether the CLI is a
 
 | CLI | Result |
 |---|---|
-| known: `--cli` set, or implied by `--model` | Use that CLI with only what the caller fixed: the caller's `--model` and `--effort` if given, and no model or effort argument otherwise, so the CLI's own defaults apply. A fixed value is a hard constraint and is never dropped: `agrouter exec --cli=claude --effort high` still runs `--effort high` when Jev is unavailable. Eligibility has already checked that the CLI supports it. Every other mapped argument is still translated. Exec mode runs it; decision mode prints it, with `null` for what was not chosen. Routing never blocks the run. |
-| unknown | Exit `2` with one `agrouter:` line. Picking a CLI anyway, such as the first one in the config, would be a hidden fallback that depends on section order. |
+| known: `--cli` set, implied by `--model`, or the only CLI left after [eligibility](#eligibility) | Use that CLI with only what the caller fixed: the caller's `--model` and `--effort` if given, and no model or effort argument otherwise, so the CLI's own defaults apply. A fixed value is a hard constraint and is never dropped: `agrouter exec --cli=claude --effort high` still runs `--effort high` when Jev is unavailable. Eligibility has already checked that the CLI supports it. Every other mapped argument is still translated. Exec mode runs it; decision mode prints it, with `null` for what was not chosen. Routing never blocks the run. |
+| unknown: more than one CLI still eligible | Exit `2` with one `agrouter:` line. This is not a skipped argument: there is nothing to run without a choice. Picking a CLI anyway, such as the first one in the config, would be a hidden fallback that depends on section order. |
 
 With `--model` and `--effort` both given, Jev is never called (at most one option is left), so this case does not arise.
 
 Other errors that stop agrouter before any child starts (exit `2`):
 
-- argument errors: an unknown flag, a second positional argument, `--` without `--cli`;
-- no eligible option (see [Eligibility](#eligibility));
-- configuration errors: an unknown `--cli`, no enabled options, more than 255 options, a question over budget, `max_chunks` or `chunk_parallel` below 1, `relevance_floor` outside (0, 1], a malformed template, a CLI without a `model` mapping, a duplicate model name or alias;
+- argument errors: an unknown flag, a second positional argument, contradictory arguments (see [Skipped arguments](#skipped-arguments));
+- no prompt: neither a positional prompt nor stdin (binary-only stdin counts as a prompt, routed on its attachment entry);
+- configuration errors: no enabled options, more than 255 options, a question over budget, `max_chunks` or `chunk_parallel` below 1, `relevance_floor` outside (0, 1], a malformed template, a CLI without a `model` mapping, a duplicate model name or alias;
 - in exec mode, a child that cannot be started (exit `127`, see [Execution](#execution)).
 
 ## Model and effort
 
-`--model` and `--effort` are **constraints** on the choice, applied in [eligibility](#eligibility): `--model` fixes the model and leaves the effort to Jev, `--effort` fixes the effort and leaves the model to Jev, both together skip Jev. A value that no option satisfies is exit `2`; agrouter never silently runs something other than what the caller named.
+`--model` and `--effort` are **constraints** on the choice, applied in [eligibility](#eligibility): `--model` fixes the model and leaves the effort to Jev, `--effort` fixes the effort and leaves the model to Jev, both together skip Jev. A value that no option satisfies is skipped with a warning and Jev chooses that part instead (see [Skipped arguments](#skipped-arguments)); a model that exists is never swapped for a different one.
 
 The chosen model and effort are then passed through the CLI's `model` and `effort` templates in `[cli.*.args]`, the same mapping as every other argument:
 
@@ -627,7 +660,7 @@ Exec mode only; decision mode prints the argv and exits.
   - **Unix:** SIGINT and SIGTERM are forwarded to the child's process group. When agrouter is cancelled, the group is killed.
   - **Windows:** the child runs in a Job Object with kill-on-close, so closing or killing agrouter kills the whole tree. Console Ctrl events are delivered to the shared console group. Windows has no native SIGTERM equivalent; termination goes through the Job Object.
 - **Exit code.** agrouter exits with the child's exit code. On Unix, a child killed by a signal exits as `128 + signal`. agrouter's own errors (arguments, configuration, no eligible option, or no decision with the CLI unknown) exit with `2`, before any child starts.
-- **Diagnostics.** agrouter prints nothing on success, including when routing failed with the CLI known. Errors that stop agrouter get one `agrouter:` line each. Everything else goes to stderr only under `AGROUTER_DEBUG=1`.
+- **Diagnostics.** agrouter prints nothing on success, including when routing failed with the CLI known, except one warning per [skipped argument](#skipped-arguments). Errors that stop agrouter get one `agrouter:` line each. Everything else goes to stderr only under `AGROUTER_DEBUG=1`.
 
 ## ralphex integration
 
@@ -641,11 +674,22 @@ claude_args    = exec --cli=claude --dangerously-skip-permissions --output-forma
 
 ralphex runs `agrouter exec --cli=claude ... [--model M] [--effort E] --print` with the prompt on stdin (`executor.go:375-378`). Every token is in agrouter's vocabulary, and `exec` comes first because ralphex puts `claude_args` before its own flags. A `--model` or `--effort` that ralphex adds from `task_model`, `review_model` or `plan_model` is a **constraint**: set, it fixes that value; leave those settings empty to let Jev choose.
 
-**`idle_timeout`.** ralphex starts its idle timer before launching agrouter and resets it only on output (`executor.go:393-407`), while agrouter is silent during routing: up to `[jev] timeout` (10s by default), longer for a split state. A ralphex `idle_timeout` must therefore exceed routing time plus the child's time to its first output line, or ralphex kills every run while it routes. It is off by default.
+**`idle_timeout`.** ralphex starts its idle timer before launching agrouter and resets it only on output (`executor.go:393-407`), while agrouter is silent during routing: up to `[jev] timeout` (10s by default), the single budget for capture, every chunk request and retries. A ralphex `idle_timeout` must therefore exceed that budget plus the child's startup and time to its first output line, or ralphex kills every run while it routes. It is off by default.
 
-**Codex mode is not supported in v1.** ralphex's Codex executor passes `--sandbox`, `-c stream_idle_timeout_ms=...` and `-c project_doc=...` (`codex.go:180-205`), which are outside agrouter's vocabulary, and `codex_command` cannot carry the `--cli` needed for raw passthrough. Supporting it means growing the vocabulary (see [Open questions](#open-questions)).
+**Codex mode** (`executor = codex`, and the external Codex review in Claude mode), also in exec mode:
 
-Leaving `--cli` unset under ralphex is unsupported: ralphex's prompts and output parsing are executor-specific ("Use the Task tool" versus `spawn_agent`, Claude stream-json versus Codex output). A caller that wants cross-CLI routing uses decision mode and handles each CLI's output itself.
+```ini
+# ~/.config/ralphex/config
+codex_command          = agrouter
+# empty, so Jev chooses; the embedded defaults (gpt-5.6-sol, high) would otherwise fix both,
+# and gpt-5.6-sol is not in agrouter's catalog, so every run would skip it with a warning
+codex_model            =
+codex_reasoning_effort =
+```
+
+ralphex runs `agrouter exec [-c model="M"] [-c model_reasoning_effort=E] -c stream_idle_timeout_ms=N [-c project_doc="P"] [--dangerously-bypass-approvals-and-sandbox] --sandbox S` with the prompt on stdin (`codex.go:180-210`). Its first token `exec` is agrouter's exec mode, and every other token is in the vocabulary. `--sandbox` and `-c stream_idle_timeout_ms` map only for Codex, so routing prefers Codex without `--cli`, and Codex counts as known when Jev cannot decide. `-c model=` and `-c model_reasoning_effort=`, which ralphex emits when `codex_model`, `codex_reasoning_effort`, `task_model` or `review_model` set them, are constraints like `--model` and `--effort`. A model missing from the catalog is skipped with a warning, and Jev chooses. Codex's stdout (the final answer) and stderr (the header ralphex reads the session id from) pass through untouched, so ralphex's rollout tail works. The `idle_timeout` note above applies too.
+
+**Choosing the CLI per call is not possible under ralphex as it stands.** ralphex picks its executor once at startup (`processor/executor_factory.go:19`), and its prompts (`processor/prompts.go:134,216,248`: the Task tool versus `spawn_agent`) and output handling (Claude stream-json on merged stdout versus Codex's stderr header, rollout tail and final stdout, `executor/codex.go:156-260`) all follow that choice. If agrouter ran Codex under ralphex's Claude executor, ralphex would receive output it cannot parse, from a CLI following prompts written for the other one. Translating the output would be lossy and would still leave the prompts wrong. So `--cli=claude` stays in `claude_args`, and a Codex run is a Codex run. Per-call CLI choice needs a ralphex change (see [Open questions](#open-questions)).
 
 ## Project layout
 
@@ -678,7 +722,9 @@ pkg/runner/            # child process, stdin replay, signals / Job Object, exit
   - decision mode by default, exec mode only with `exec` as the first token;
   - flags in any order around the positional prompt, split and `=` forms;
   - `-p`/`--print` accepted; the `print` mapping emitted whether or not it is given;
-  - an unknown flag, a second positional, and `--` without `--cli` are exit `2`;
+  - ralphex's Codex argv parsed unchanged: `exec`, `-c key=value` split at the first `=` (a value containing `=` kept whole), `-c model="M"` and `-c model_reasoning_effort=E` becoming constraints with TOML quotes removed, other `-c` kept in order, `--sandbox`, `--dangerously-bypass-approvals-and-sandbox` as the bypass alias; each of the five `config.<key>` entries forwarded byte-exact, an unknown key rejected, repeated `-c` kept in the caller's order; the full ralphex `--codex` argv (`features.multi_agent`, `agents.reviewer.description`, bypass alias, `--sandbox danger-full-access`, `stream_idle_timeout_ms`, and `project_doc_fallback_filenames` with `--pass-claude-md`) and the external-review argv (`--sandbox read-only`) giving the expected Codex argv;
+  - skipped with one warning each, never exit `2`: a `-c` key the chosen CLI does not map (`-c approval_policy=never` with `--cli=codex`), `--` without `--cli`, an unknown `--cli`, an unknown `--model`, an unsatisfiable `--effort`;
+  - an unknown flag, a second positional, no prompt at all, and contradictions (`--sandbox` with a non-bypass `--permission-mode`, `-c model=` with `--model`) are exit `2`;
   - raw tokens after `--` with `--cli` reach argv unchanged and never the Jev state.
 - **`pkg/config`:**
   - layering and per-key merges, including one key of a `[cli.*.args]` section overridden locally;
@@ -698,7 +744,7 @@ pkg/runner/            # child process, stdin replay, signals / Job Object, exit
   - a guard that production source outside the embedded defaults contains no CLI names (`claude`, `codex`, ...); fixtures, vendor URLs and descriptions are data.
 - **`pkg/args`:**
   - argv order: command, `print`, mapped args in the caller's order, model, effort, `prompt`, raw passthrough; the prompt right after `exec` and at the end of the mapped arguments;
-  - `--dangerously-skip-permissions` and `--permission-mode=bypassPermissions` giving the same argv, once each even when both are given; with another `--permission-mode`, exit `2`; `--permission-mode manual` or `dontAsk` dropping Codex; Codex without `--permission-mode` getting no `--skip-git-repo-check`;
+  - `--dangerously-skip-permissions` and `--permission-mode=bypassPermissions` giving the same argv, once each even when both are given; with another `--permission-mode`, exit `2`; `--permission-mode manual` or `dontAsk` preferring Claude, and skipped when Codex is pinned; Codex without `--permission-mode` getting no `--skip-git-repo-check`;
   - `{model}`/`{effort}` substitution inside a token (`model_reasoning_effort="{effort}"`), no shell quoting;
   - `[]` mappings adding nothing, a repeated flag mapped once, a model without efforts getting no effort argument;
   - the v1 golden argv for Claude and Codex, matching the mappings table, for every `--output-format` value (`json` has no Codex argv);
@@ -707,12 +753,13 @@ pkg/runner/            # child process, stdin replay, signals / Job Object, exit
   - the positional/stdin table: each of the four cases, the `\n\n` join in Jev's `prompt` only, byte-exact replay of stdin;
   - non-text detection: PNG, JPEG and PDF signatures (including an ASCII-looking PDF), NUL bytes, a UTF-8 character cut at the 8 KiB boundary (still text), binary stdin with a positional prompt (prompt only in state, attachment for stdin), and a binary-only task routed on metadata;
   - mentioned files: quoted, backtick and Markdown-link paths with spaces, `path:line` and `path:line:col` suffixes, a Windows drive path, trailing punctuation; `../` traversal, an absolute path outside, a sibling `cwd2` directory, and a symlink or junction escaping the tree all not read; a binary mention giving an attachment; dedupe of the same file; mixed quoted and plain mentions kept in text order; no recursion into a mentioned file's text; URLs not fetched; mentioned text counted in the shared capture limit and timeout;
-  - the empty-state rule: a one-word prompt is routed; binary-only stdin is routed on its attachment entry; neither positional prompt nor stdin is not routed;
+  - the empty-state rule: a one-word prompt is routed; binary-only stdin is routed on its attachment entry; neither positional prompt nor stdin is exit `2`;
   - chunking: a state under budget is not split; a long stdin with a short positional instruction keeps the instruction in every anchor; `attachments` present in every chunk's anchor, even when the prompt alone overflows the 4k anchor; a long attachment list summarised by `source` and `type` with counts and total bytes; a summary still over 1k gives "cannot decide" with stdin replayed unchanged; the chunks plus the anchor-only fields reproduce every captured byte (lossless coverage; the only duplicates are the head-and-tail copies in the anchor); capture over the `max_chunks` limit gives "cannot decide" with stdin still replayed in full; cuts on line and multibyte UTF-8 boundaries; route question, relevance question and envelope counted against 32k and 64k.
 - **`pkg/router`:**
-  - eligibility: `--cli`; an unmapped argument or value dropping a CLI (`--output-format json` dropping Codex); `--model` by name and by alias; `--model` conflicting with `--cli` or with a mapped argument; `--effort` alone; `--model` with `--effort` skipping Jev; `--effort` with a model without efforts; each empty result naming its filter;
+  - eligibility: `--cli`; the mapped-argument preference (`--output-format json` preferring Claude; with `--cli=codex`, Codex chosen and the format skipped); `[]` counting as skipped in the preference (`--verbose` preferring Claude), fewest-skips ties kept; `--model` by name and by alias; an unknown `--model`, or one conflicting with `--cli`, skipped; `--effort` alone; `--model` with `--effort` skipping Jev; `--effort` with a model without efforts skipped; no filter ever emptying the list;
+  - skip warnings: exact stderr lines, one per skipped argument, and the decision-mode `skipped` array; none when everything maps (ralphex's Claude and Codex argv);
   - the golden JSON of the Jev request for a fixed catalog, with and without `--cli`;
-  - every "cannot decide" case, via a mocked `JevClient`: CLI known by `--cli` or by `--model` gives an argv with the caller's `--model`/`--effort` kept and nothing else chosen (including `--cli=claude --effort high` keeping `--effort high`); CLI unknown gives exit `2`;
+  - every "cannot decide" case, via a mocked `JevClient`: CLI known by `--cli`, by `--model`, or as the only CLI left (ralphex's Codex argv without `--cli`) gives an argv with the caller's `--model`/`--effort` kept and nothing else chosen (including `--cli=claude --effort high` keeping `--effort high`); CLI unknown gives exit `2`;
   - the single-option short-circuit;
   - pooling with a mocked `JevClient`: a short hard requirement plus a few long filler chunks (the relevant chunk outweighs them), and a `max_chunks` case where floored filler outweighs it (documents the known limit), weights floored at `relevance_floor`, all-low relevance giving equal weights, stable tie order by catalog, per-chunk confidence never averaged;
   - chunk failure policy: `max_chunks` exceeded, and one chunk failing after retries while the others succeed, both give "cannot decide"; a `422` on one chunk re-splits it once, a second `422` or one on a chunk under 2k tokens gives "cannot decide", and `max_chunks` is rechecked after the re-split; invalid probability maps (missing or extra keys, NaN, sum off by more than 0.01) and an invalid `noul` are malformed;
@@ -748,5 +795,6 @@ pkg/runner/            # child process, stdin replay, signals / Job Object, exit
 3. **Two-pass splitting.** If the eval shows pooled chunks route worse than a prompt that fits, an alternative is to use the relevance Nouls first and then ask one Choice over the anchor plus the most relevant chunks. That drops chunks, so it only becomes the default if the eval shows the loss is worth it.
 4. **Decision log.** Is `AGROUTER_DEBUG` enough, or do users want a persistent decision log (JSONL) for tuning descriptions against outcomes?
 5. **Catalog freshness.** Automate a `make catalog-check` that diffs `~/.codex/models_cache.json` and the Claude Models API against the embedded defaults, or keep it a manual release step?
-6. **Growing the vocabulary.** Candidates after v1, each needing a mapping for every CLI or an explicit "unsupported": `--system-prompt` / `--append-system-prompt` (Codex `-c developer_instructions`), images (Codex `-i`), `--input-format stream-json` (which would bring back live stdin), resume. Also what ralphex's Codex executor needs (`--sandbox`, `-c stream_idle_timeout_ms`, `-c project_doc`). Resume differs in meaning across CLIs, so it needs its semantics written down, not just a spelling, as the permission modes have.
+6. **Growing the vocabulary.** Candidates after v1, each needing a mapping for every CLI or an explicit "unsupported": `--system-prompt` / `--append-system-prompt` (Codex `-c developer_instructions`), images (Codex `-i`), `--input-format stream-json` (which would bring back live stdin), resume. Resume differs in meaning across CLIs, so it needs its semantics written down, not just a spelling, as the permission modes have.
 7. **Knowing which CLI ran in exec mode.** Output is untranslated, so a caller that does not pin `--cli` cannot tell Claude stream-json from Codex JSONL without inspecting it. Options: an `AGROUTER_DECISION_FILE` the caller names, or recommending decision mode for such callers. stdout and stderr cannot carry it (see [Caller contract](#caller-contract-ralphex)).
+8. **Per-call CLI choice in ralphex.** A new ralphex executor mode would call agrouter's decision mode on each phase's prompt, read `cli`, `model` and `effort` from the JSON, build that executor's prompt variant, and run its own Claude or Codex executor with that model and effort. agrouter needs nothing new for it. Open points: routing on one CLI's prompt variant before the other is built, and one Jev call per phase.
