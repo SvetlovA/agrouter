@@ -105,12 +105,12 @@ agrouter's argument names and style follow Claude Code. They fall into three gro
 
 `{prompt}` is the positional prompt (see [Prompt](#prompt)); it may instead sit after the other mapped arguments, before raw passthrough (see [Argument mapping](#argument-mapping)).
 
-**Permission modes** use Claude's names. `--dangerously-skip-permissions` is agrouter's alias for `--permission-mode=bypassPermissions`, as it is in Claude, and so is Codex's spelling `--dangerously-bypass-approvals-and-sandbox`, so both hit the one mapping key and never emit duplicate tokens (Codex rejects a repeated `--skip-git-repo-check`); given with a different `--permission-mode`, it is an error (exit `2`): the two contradict each other, and picking one could silently weaken what the caller asked for. Codex's `--skip-git-repo-check` lives in these mappings, not in `print`: relaxing the git-repository guard is a permission decision, so a Codex call without `--permission-mode` fails outside a git repository, as `codex exec` itself does. The v1 defaults relax it for `bypassPermissions` and for read-only `plan`; a config that wants it with other modes adds it to those mappings. **≈ marks the closest Codex setting, not an equivalent:** Claude's `acceptEdits` auto-approves file edits while Codex `workspace-write` sandboxes all commands to the workspace; Claude's `auto` classifies every tool call while Codex `--approve-for-me` reviews only requests beyond its workspace sandbox. For `plan`, `approval_policy="never"` stops Codex from asking to leave the read-only sandbox, so, like Claude's `plan`, it cannot edit. `manual` (Claude asks before edits and shell) and `dontAsk` (deny anything not pre-allowed) have no Codex counterpart, so routing prefers Claude for them, and on Codex they are skipped.
+**Permission modes** use Claude's names. `--dangerously-skip-permissions` is agrouter's alias for `--permission-mode=bypassPermissions`, as it is in Claude, and so is Codex's spelling `--dangerously-bypass-approvals-and-sandbox`, so both hit the one mapping key and never emit duplicate tokens (Codex rejects a repeated `--skip-git-repo-check`); given with a different `--permission-mode`, both are translated and the CLI applies its own precedence or fails with its own error (see [Pass-through, not validation](#pass-through-not-validation)). Codex's `--skip-git-repo-check` lives in these mappings, not in `print`: relaxing the git-repository guard is a permission decision, so a Codex call without `--permission-mode` fails outside a git repository, as `codex exec` itself does. The v1 defaults relax it for `bypassPermissions` and for read-only `plan`; a config that wants it with other modes adds it to those mappings. **≈ marks the closest Codex setting, not an equivalent:** Claude's `acceptEdits` auto-approves file edits while Codex `workspace-write` sandboxes all commands to the workspace; Claude's `auto` classifies every tool call while Codex `--approve-for-me` reviews only requests beyond its workspace sandbox. For `plan`, `approval_policy="never"` stops Codex from asking to leave the read-only sandbox, so, like Claude's `plan`, it cannot edit. `manual` (Claude asks before edits and shell) and `dontAsk` (deny anything not pre-allowed) have no Codex counterpart, so routing prefers Claude for them, and on Codex they are skipped.
 
 **Codex-spelled arguments** exist so that ralphex's Codex executor can call agrouter unchanged (see [ralphex integration](#ralphex-integration)):
 
-- **`--sandbox`** is value-keyed like `--output-format`. Claude has no sandbox mapping, so routing prefers Codex. Given together with a `--permission-mode` other than `bypassPermissions`, it is an error (exit `2`): both set Codex's sandbox, and dropping either could weaken it (`--sandbox read-only --permission-mode acceptEdits` would become `workspace-write`). With `bypassPermissions` it is allowed; Codex accepts `--sandbox` beside `--dangerously-bypass-approvals-and-sandbox`, which is what ralphex sends in Docker.
-- **`-c key=value`** is Codex's config override, and agrouter spells it the same way; agrouter has no `--continue`, so Claude's `-c` does not clash. The token is split at the first `=`. Two keys are **constraints**, not passthrough: `-c model=<id>` is `--model <id>`, and `-c model_reasoning_effort=<level>` is `--effort <level>`; a TOML-quoted value (`"gpt-6-sol"`) is unquoted first. Given together with `--model` or `--effort`, they are an error (exit `2`), a contradiction like the permission ones. Every other key must have a `config.<key>` mapping, keyed by the part before `=` like a value-keyed flag, and is emitted once per occurrence, in the caller's order, with the whole `key=value`, byte-exact, as `{value}`. The v1 Codex mapping lists exactly the keys ralphex sends (`codex.go:137-147,195-205`): `stream_idle_timeout_ms`, `project_doc`, `project_doc_fallback_filenames`, `features.multi_agent` and `agents.reviewer.description`. Any other key is unmapped and skipped, so `-c approval_policy=...` or `-c sandbox_mode=...` never overrides a `--permission-mode`. Claude has no `config.*` mapping, so a `-c` makes routing prefer Codex.
+- **`--sandbox`** is value-keyed like `--output-format`. Claude has no sandbox mapping, so routing prefers Codex. Given together with a `--permission-mode` whose Codex mapping also sets the sandbox, both are emitted and Codex rejects the repeated `--sandbox` with its own error; agrouter does not pick one, because dropping either could weaken what the caller asked for. With `bypassPermissions` there is no clash; Codex accepts `--sandbox` beside `--dangerously-bypass-approvals-and-sandbox`, which is what ralphex sends in Docker.
+- **`-c key=value`** is Codex's config override, and agrouter spells it the same way; agrouter has no `--continue`, so Claude's `-c` does not clash. The token is split at the first `=`. Two keys are **constraints**, not passthrough: `-c model=<id>` is `--model <id>`, and `-c model_reasoning_effort=<level>` is `--effort <level>`; a TOML-quoted value (`"gpt-6-sol"`) is unquoted first. Given together with `--model` or `--effort`, the flag is the constraint and the `-c` form is an ordinary key, forwarded unchanged through `config.model` or `config.model_reasoning_effort` for Codex to resolve. Every other key must have a `config.<key>` mapping, keyed by the part before `=` like a value-keyed flag, and is emitted once per occurrence, in the caller's order, with the whole `key=value`, byte-exact, as `{value}`. The v1 Codex mapping lists exactly the keys ralphex sends (`codex.go:137-147,195-205`): `stream_idle_timeout_ms`, `project_doc`, `project_doc_fallback_filenames`, `features.multi_agent` and `agents.reviewer.description`. Any other key is unmapped and skipped, so `-c approval_policy=...` or `-c sandbox_mode=...` never overrides a `--permission-mode`. Claude has no `config.*` mapping, so a `-c` makes routing prefer Codex.
 
 Every Claude output format is mapped. Codex has no single-result JSON on stdout (`-o` writes the last message to a file), so its mapping has no `output-format.json` key and `--output-format json` prefers Claude, and on Codex it is skipped. Which values are accepted is decided by the mappings, not code (see [Eligibility](#eligibility)). The vocabulary grows by adding a flag to agrouter and a key to each CLI's mapping; see [Open questions](#open-questions).
 
@@ -142,12 +142,19 @@ Decision mode prints the same lines on stderr and also lists the skipped argumen
 
 What else is skipped with a warning rather than failing:
 
-- a `--model` (or `-c model=`) naming no enabled model, or one on a CLI that `--cli` excludes; Jev then chooses the model;
-- an `--effort` (or `-c model_reasoning_effort=`) that no remaining option has, such as `--model claude-haiku-4-5 --effort high`; Jev then chooses the effort;
 - an unknown or disabled `--cli`; routing then spans every CLI;
 - raw tokens after `--` without `--cli`.
 
-Still errors (exit `2`): an unknown flag, a second positional argument, no prompt at all, **contradictory arguments** (`--dangerously-skip-permissions` or `--sandbox` beside a different `--permission-mode`, `-c model=` or `-c model_reasoning_effort=` beside `--model` or `--effort`), a configuration error, and Jev failing to decide while more than one CLI is still possible (see [When Jev cannot decide](#when-jev-cannot-decide)). A gap is skipped; a contradiction is not, because resolving it means guessing which of two explicit requests the caller meant.
+Still errors (exit `2`): an unknown flag, a second positional argument, no prompt at all, a configuration error, and Jev failing to decide while more than one CLI is still possible (see [When Jev cannot decide](#when-jev-cannot-decide)).
+
+### Pass-through, not validation
+
+agrouter translates; **the real CLI validates.** agrouter never rejects a value because it thinks the CLI would:
+
+- **A `--model` outside the catalog** is passed through as given, unresolved, through the chosen CLI's `model` template. If the model does not exist, Claude or Codex fails with its own error. The CLI is `--cli`, or the only CLI the mapped-argument preference leaves (ralphex's Codex argv); otherwise Jev chooses the CLI, with one option per remaining CLI and that model fixed. Jev picks no effort for a model outside the catalog: the caller's `--effort` is passed through if given, and otherwise the CLI's default applies.
+- **An `--effort` a model does not list** (`--model claude-haiku-4-5 --effort high`), or that no catalog option has, is passed through the same way through the `effort` template. With `--model` absent, Jev chooses among the models with the effort left out of the option ids, and the caller's value is emitted.
+- **Contradictory arguments are both translated,** in the caller's order: `--dangerously-skip-permissions --permission-mode plan` gives Claude both flags, and `--sandbox read-only --permission-mode acceptEdits` gives Codex two `--sandbox` flags, which it rejects. Arguments that hit the same mapping key (the bypass aliases, a repeated flag) are still emitted once.
+- Aliases in the catalog are still resolved to the model's `name`; only values the catalog does not know pass through unchanged.
 
 ### Decision mode
 
@@ -276,12 +283,15 @@ sandbox.read-only            = ["--sandbox", "read-only"]
 sandbox.workspace-write      = ["--sandbox", "workspace-write"]
 sandbox.danger-full-access   = ["--sandbox", "danger-full-access"]
 # -c keys accepted, keyed by the part before "="; {value} = the whole key=value, byte-exact.
-# exactly what ralphex sends; model and model_reasoning_effort are constraints and never get here
+# exactly what ralphex sends
 config.stream_idle_timeout_ms         = ["-c", "{value}"]
 config.project_doc                    = ["-c", "{value}"]
 config.project_doc_fallback_filenames = ["-c", "{value}"]
 config.features.multi_agent           = ["-c", "{value}"]
 config.agents.reviewer.description    = ["-c", "{value}"]
+# only when --model / --effort is also given; otherwise these two -c keys are constraints
+config.model                          = ["-c", "{value}"]
+config.model_reasoning_effort         = ["-c", "{value}"]
 # default output: final message on stdout. No single-result JSON: output-format.json is absent
 output-format.text           = []
 output-format.stream-json    = ["--json"]
@@ -411,8 +421,8 @@ caller argv + stdin
 Every filter runs **before** Jev, so Jev only scores options that fit the arguments given. **No filter ever empties the list:** a filter that would is skipped with a warning (see [Skipped arguments](#skipped-arguments)). They run in this order:
 
 - **`--cli`** keeps one CLI. An unknown or disabled name is skipped.
-- **`--model`** keeps exactly one model, found by `name` or `aliases` among enabled models. An unknown model, or one on a CLI that `--cli` excludes, is skipped and Jev chooses the model; a known model is never replaced by another.
-- **`--effort`** keeps only options with that effort. If none remains (`--model claude-haiku-4-5 --effort high`), it is skipped and Jev chooses the effort.
+- **`--model`** keeps exactly one model, found by `name` or `aliases` among enabled models. A model outside the catalog is [passed through](#pass-through-not-validation): the options become one per remaining CLI with that model fixed.
+- **`--effort`** keeps only options with that effort. If none remains (`--model claude-haiku-4-5 --effort high`), the value is [passed through](#pass-through-not-validation) and the options keep their models without the effort.
 - **Mapped arguments** are a **preference**, not a filter: only the remaining CLIs that would **skip the fewest** of the caller's mapped arguments stay, counting both a missing key and a `[]` mapping as skipped; Jev chooses among those. So `--output-format json`, `--permission-mode manual` or `--verbose` routes to Claude (Codex would skip them), `--sandbox` or a `-c` routes to Codex, and `--cli=codex --output-format json` runs Codex with the format skipped. A tie keeps every tied CLI.
 
 With `--model` and `--effort` both given, at most one option is left and Jev is not called.
@@ -612,14 +622,14 @@ With `--model` and `--effort` both given, Jev is never called (at most one optio
 
 Other errors that stop agrouter before any child starts (exit `2`):
 
-- argument errors: an unknown flag, a second positional argument, contradictory arguments (see [Skipped arguments](#skipped-arguments));
+- argument errors: an unknown flag, a second positional argument;
 - no prompt: neither a positional prompt nor stdin (binary-only stdin counts as a prompt, routed on its attachment entry);
 - configuration errors: no enabled options, more than 255 options, a question over budget, `max_chunks` or `chunk_parallel` below 1, `relevance_floor` outside (0, 1], a malformed template, a CLI without a `model` mapping, a duplicate model name or alias;
 - in exec mode, a child that cannot be started (exit `127`, see [Execution](#execution)).
 
 ## Model and effort
 
-`--model` and `--effort` are **constraints** on the choice, applied in [eligibility](#eligibility): `--model` fixes the model and leaves the effort to Jev, `--effort` fixes the effort and leaves the model to Jev, both together skip Jev. A value that no option satisfies is skipped with a warning and Jev chooses that part instead (see [Skipped arguments](#skipped-arguments)); a model that exists is never swapped for a different one.
+`--model` and `--effort` are **constraints** on the choice, applied in [eligibility](#eligibility): `--model` fixes the model and leaves the effort to Jev, `--effort` fixes the effort and leaves the model to Jev, both together skip Jev. A value the catalog does not know is passed through to the CLI unchanged, and the CLI reports an invalid one (see [Pass-through, not validation](#pass-through-not-validation)); agrouter never swaps it for a different model.
 
 The chosen model and effort are then passed through the CLI's `model` and `effort` templates in `[cli.*.args]`, the same mapping as every other argument:
 
@@ -659,7 +669,7 @@ Exec mode only; decision mode prints the argv and exits.
 - **Cancellation.** Platform-specific implementations, each tested on its own platform:
   - **Unix:** SIGINT and SIGTERM are forwarded to the child's process group. When agrouter is cancelled, the group is killed.
   - **Windows:** the child runs in a Job Object with kill-on-close, so closing or killing agrouter kills the whole tree. Console Ctrl events are delivered to the shared console group. Windows has no native SIGTERM equivalent; termination goes through the Job Object.
-- **Exit code.** agrouter exits with the child's exit code. On Unix, a child killed by a signal exits as `128 + signal`. agrouter's own errors (arguments, configuration, no eligible option, or no decision with the CLI unknown) exit with `2`, before any child starts.
+- **Exit code.** agrouter exits with the child's exit code. On Unix, a child killed by a signal exits as `128 + signal`. agrouter's own errors (arguments, no prompt, configuration, or no decision with the CLI unknown) exit with `2`, before any child starts.
 - **Diagnostics.** agrouter prints nothing on success, including when routing failed with the CLI known, except one warning per [skipped argument](#skipped-arguments). Errors that stop agrouter get one `agrouter:` line each. Everything else goes to stderr only under `AGROUTER_DEBUG=1`.
 
 ## ralphex integration
@@ -681,13 +691,13 @@ ralphex runs `agrouter exec --cli=claude ... [--model M] [--effort E] --print` w
 ```ini
 # ~/.config/ralphex/config
 codex_command          = agrouter
-# empty, so Jev chooses; the embedded defaults (gpt-5.6-sol, high) would otherwise fix both,
-# and gpt-5.6-sol is not in agrouter's catalog, so every run would skip it with a warning
+# empty, so Jev chooses; the embedded defaults (gpt-5.6-sol, high) would otherwise fix both
+# (gpt-5.6-sol is not in agrouter's catalog, so it would be passed through to codex as is)
 codex_model            =
 codex_reasoning_effort =
 ```
 
-ralphex runs `agrouter exec [-c model="M"] [-c model_reasoning_effort=E] -c stream_idle_timeout_ms=N [-c project_doc="P"] [--dangerously-bypass-approvals-and-sandbox] --sandbox S` with the prompt on stdin (`codex.go:180-210`). Its first token `exec` is agrouter's exec mode, and every other token is in the vocabulary. `--sandbox` and `-c stream_idle_timeout_ms` map only for Codex, so routing prefers Codex without `--cli`, and Codex counts as known when Jev cannot decide. `-c model=` and `-c model_reasoning_effort=`, which ralphex emits when `codex_model`, `codex_reasoning_effort`, `task_model` or `review_model` set them, are constraints like `--model` and `--effort`. A model missing from the catalog is skipped with a warning, and Jev chooses. Codex's stdout (the final answer) and stderr (the header ralphex reads the session id from) pass through untouched, so ralphex's rollout tail works. The `idle_timeout` note above applies too.
+ralphex runs `agrouter exec [-c model="M"] [-c model_reasoning_effort=E] -c stream_idle_timeout_ms=N [-c project_doc="P"] [--dangerously-bypass-approvals-and-sandbox] --sandbox S` with the prompt on stdin (`codex.go:180-210`). Its first token `exec` is agrouter's exec mode, and every other token is in the vocabulary. `--sandbox` and `-c stream_idle_timeout_ms` map only for Codex, so routing prefers Codex without `--cli`, and Codex counts as known when Jev cannot decide. `-c model=` and `-c model_reasoning_effort=`, which ralphex emits when `codex_model`, `codex_reasoning_effort`, `task_model` or `review_model` set them, are constraints like `--model` and `--effort`. A model missing from the catalog is passed through to Codex unchanged. Codex's stdout (the final answer) and stderr (the header ralphex reads the session id from) pass through untouched, so ralphex's rollout tail works. The `idle_timeout` note above applies too.
 
 **Choosing the CLI per call is not possible under ralphex as it stands.** ralphex picks its executor once at startup (`processor/executor_factory.go:19`), and its prompts (`processor/prompts.go:134,216,248`: the Task tool versus `spawn_agent`) and output handling (Claude stream-json on merged stdout versus Codex's stderr header, rollout tail and final stdout, `executor/codex.go:156-260`) all follow that choice. If agrouter ran Codex under ralphex's Claude executor, ralphex would receive output it cannot parse, from a CLI following prompts written for the other one. Translating the output would be lossy and would still leave the prompts wrong. So `--cli=claude` stays in `claude_args`, and a Codex run is a Codex run. Per-call CLI choice needs a ralphex change (see [Open questions](#open-questions)).
 
@@ -723,8 +733,9 @@ pkg/runner/            # child process, stdin replay, signals / Job Object, exit
   - flags in any order around the positional prompt, split and `=` forms;
   - `-p`/`--print` accepted; the `print` mapping emitted whether or not it is given;
   - ralphex's Codex argv parsed unchanged: `exec`, `-c key=value` split at the first `=` (a value containing `=` kept whole), `-c model="M"` and `-c model_reasoning_effort=E` becoming constraints with TOML quotes removed, other `-c` kept in order, `--sandbox`, `--dangerously-bypass-approvals-and-sandbox` as the bypass alias; each of the five `config.<key>` entries forwarded byte-exact, an unknown key rejected, repeated `-c` kept in the caller's order; the full ralphex `--codex` argv (`features.multi_agent`, `agents.reviewer.description`, bypass alias, `--sandbox danger-full-access`, `stream_idle_timeout_ms`, and `project_doc_fallback_filenames` with `--pass-claude-md`) and the external-review argv (`--sandbox read-only`) giving the expected Codex argv;
-  - skipped with one warning each, never exit `2`: a `-c` key the chosen CLI does not map (`-c approval_policy=never` with `--cli=codex`), `--` without `--cli`, an unknown `--cli`, an unknown `--model`, an unsatisfiable `--effort`;
-  - an unknown flag, a second positional, no prompt at all, and contradictions (`--sandbox` with a non-bypass `--permission-mode`, `-c model=` with `--model`) are exit `2`;
+  - skipped with one warning each, never exit `2`: a `-c` key the chosen CLI does not map (`-c approval_policy=never` with `--cli=codex`), `--` without `--cli`, an unknown `--cli`;
+  - passed through unvalidated: a `--model` outside the catalog (with `--cli`, and without it as one option per CLI), an `--effort` the model does not list, contradictions translated in order (`--sandbox` beside `--permission-mode acceptEdits` giving two `--sandbox`), `-c model=` beside `--model` forwarded as a `config.model` key;
+  - an unknown flag, a second positional, and no prompt at all are exit `2`;
   - raw tokens after `--` with `--cli` reach argv unchanged and never the Jev state.
 - **`pkg/config`:**
   - layering and per-key merges, including one key of a `[cli.*.args]` section overridden locally;
@@ -744,7 +755,7 @@ pkg/runner/            # child process, stdin replay, signals / Job Object, exit
   - a guard that production source outside the embedded defaults contains no CLI names (`claude`, `codex`, ...); fixtures, vendor URLs and descriptions are data.
 - **`pkg/args`:**
   - argv order: command, `print`, mapped args in the caller's order, model, effort, `prompt`, raw passthrough; the prompt right after `exec` and at the end of the mapped arguments;
-  - `--dangerously-skip-permissions` and `--permission-mode=bypassPermissions` giving the same argv, once each even when both are given; with another `--permission-mode`, exit `2`; `--permission-mode manual` or `dontAsk` preferring Claude, and skipped when Codex is pinned; Codex without `--permission-mode` getting no `--skip-git-repo-check`;
+  - `--dangerously-skip-permissions` and `--permission-mode=bypassPermissions` giving the same argv, once each even when both are given; with another `--permission-mode`, both translated; `--permission-mode manual` or `dontAsk` preferring Claude, and skipped when Codex is pinned; Codex without `--permission-mode` getting no `--skip-git-repo-check`;
   - `{model}`/`{effort}` substitution inside a token (`model_reasoning_effort="{effort}"`), no shell quoting;
   - `[]` mappings adding nothing, a repeated flag mapped once, a model without efforts getting no effort argument;
   - the v1 golden argv for Claude and Codex, matching the mappings table, for every `--output-format` value (`json` has no Codex argv);
@@ -756,7 +767,7 @@ pkg/runner/            # child process, stdin replay, signals / Job Object, exit
   - the empty-state rule: a one-word prompt is routed; binary-only stdin is routed on its attachment entry; neither positional prompt nor stdin is exit `2`;
   - chunking: a state under budget is not split; a long stdin with a short positional instruction keeps the instruction in every anchor; `attachments` present in every chunk's anchor, even when the prompt alone overflows the 4k anchor; a long attachment list summarised by `source` and `type` with counts and total bytes; a summary still over 1k gives "cannot decide" with stdin replayed unchanged; the chunks plus the anchor-only fields reproduce every captured byte (lossless coverage; the only duplicates are the head-and-tail copies in the anchor); capture over the `max_chunks` limit gives "cannot decide" with stdin still replayed in full; cuts on line and multibyte UTF-8 boundaries; route question, relevance question and envelope counted against 32k and 64k.
 - **`pkg/router`:**
-  - eligibility: `--cli`; the mapped-argument preference (`--output-format json` preferring Claude; with `--cli=codex`, Codex chosen and the format skipped); `[]` counting as skipped in the preference (`--verbose` preferring Claude), fewest-skips ties kept; `--model` by name and by alias; an unknown `--model`, or one conflicting with `--cli`, skipped; `--effort` alone; `--model` with `--effort` skipping Jev; `--effort` with a model without efforts skipped; no filter ever emptying the list;
+  - eligibility: `--cli`; the mapped-argument preference (`--output-format json` preferring Claude; with `--cli=codex`, Codex chosen and the format skipped); `[]` counting as skipped in the preference (`--verbose` preferring Claude), fewest-skips ties kept; `--model` by name and by alias; a `--model` outside the catalog passed through; `--effort` alone; `--model` with `--effort` skipping Jev; `--effort` with a model without efforts passed through; no filter ever emptying the list;
   - skip warnings: exact stderr lines, one per skipped argument, and the decision-mode `skipped` array; none when everything maps (ralphex's Claude and Codex argv);
   - the golden JSON of the Jev request for a fixed catalog, with and without `--cli`;
   - every "cannot decide" case, via a mocked `JevClient`: CLI known by `--cli`, by `--model`, or as the only CLI left (ralphex's Codex argv without `--cli`) gives an argv with the caller's `--model`/`--effort` kept and nothing else chosen (including `--cli=claude --effort high` keeping `--effort high`); CLI unknown gives exit `2`;
