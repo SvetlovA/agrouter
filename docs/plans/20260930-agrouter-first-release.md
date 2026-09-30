@@ -530,12 +530,14 @@ Effort …` string; goldens `request_full_*.json`. The default question ends wit
 **Files:**
 - Create: `.github/workflows/release.yml`
 
-- [ ] trigger on tags `v*`; `permissions: contents: write`; checkout with `fetch-depth: 0` and `git fetch origin master`
-- [ ] validate the tag: `^v[01]\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9a-z-]+(\.[0-9a-z-]+)*)?$` (no `/v2` module path, so v2+ is rejected; lowercase pre-releases avoid proxy case-escaping); require the tagged commit to be an ancestor of `origin/master`
-- [ ] re-run `go test ./...` on the tagged commit, then `gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes` (plus `--prerelease` for a suffix) with `env: GH_TOKEN: ${{ github.token }}`
-- [ ] warm the module proxy with a retry loop around `GOPROXY=https://proxy.golang.org GOFLAGS=-mod=mod go list -m "github.com/SvetlovA/agrouter@$GITHUB_REF_NAME"` (needs the repository to be public; note it in the workflow)
-- [ ] validate the workflow with `actionlint`; add a "Releasing" section to `README.md` (tag on master, push the tag, the install command)
-- [ ] run `make test` - must pass before next task
+- [x] trigger on tags `v*`; `permissions: contents: write`; checkout with `fetch-depth: 0` and `git fetch origin master`
+- [x] validate the tag: `^v[01]\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9a-z-]+(\.[0-9a-z-]+)*)?$` (no `/v2` module path, so v2+ is rejected; lowercase pre-releases avoid proxy case-escaping); require the tagged commit to be an ancestor of `origin/master`
+- [x] re-run `go test ./...` on the tagged commit, then `gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes` (plus `--prerelease` for a suffix) with `env: GH_TOKEN: ${{ github.token }}`
+- [x] warm the module proxy with a retry loop around `GOPROXY=https://proxy.golang.org GOFLAGS=-mod=mod go list -m "github.com/SvetlovA/agrouter@$GITHUB_REF_NAME"` (needs the repository to be public; note it in the workflow)
+- [x] validate the workflow with `actionlint`; add a "Releasing" section to `README.md` (tag on master, push the tag, the install command)
+- [x] run `make test` - must pass before next task
+- ➕ `--prerelease` is added when the tag contains `-`; the proxy warm-up retries 5 times with a growing delay (10s…50s); README gained an "Install" section next to "Releasing"
+- actionlint v1.7.12 reports no problems for `ci.yml` and `release.yml`
 
 ### Task 20: Verify acceptance criteria
 - [ ] verify every design section is implemented:
