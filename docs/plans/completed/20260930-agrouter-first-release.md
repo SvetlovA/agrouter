@@ -558,14 +558,16 @@ Effort …` string; goldens `request_full_*.json`. The default question ends wit
 - `go install ./cmd/agrouter` from a fresh `git clone` works; `agrouter --version` prints `v0.0.0-20260930203037-76f02b662c6e` (a pseudo-version from build info; a tagged `go install ...@vX` reports the tag)
 
 ### Task 21: [Final] Update documentation
-- [ ] expand `README.md` around the Task 19 "Releasing" section:
+- [x] expand `README.md` around the Task 19 "Releasing" section:
   - what agrouter does, `go install`, decision/exec usage examples;
   - config layering and overrides;
   - ralphex Claude and Codex configuration, including `codex_model =`/`codex_reasoning_effort =` and the `idle_timeout` note;
   - exit codes.
-- [ ] create `CLAUDE.md` with project conventions (layout, code style, test helpers, `go tool moq`, local tests without `-race`, "design.md is the spec")
-- [ ] update `docs/design.md` for any remaining deviation made during implementation, and change its "Status" line from "design, not implemented"
-- [ ] move this plan to `docs/plans/completed/`
+- [x] create `CLAUDE.md` with project conventions (layout, code style, test helpers, `go tool moq`, local tests without `-race`, "design.md is the spec")
+- [x] update `docs/design.md` for any remaining deviation made during implementation, and change its "Status" line from "design, not implemented"
+- [x] move this plan to `docs/plans/completed/`
+- README covers what agrouter does, install and API key, usage with decision/exec examples, config layering with a verified override example, ralphex Claude/Codex setup with `codex_model =`/`codex_reasoning_effort =` and the `idle_timeout` note, and exit codes
+- design.md: Status now "implemented in v1"; the ralphex `idle_timeout` note named `[jev] timeout`, corrected to `[agrouter] timeout`; the Tooling line lists `generate`, `eval-routing` and `RACE=-race`
 
 ## Post-Completion
 *Items requiring manual intervention or external systems - no checkboxes, informational only*

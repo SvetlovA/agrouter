@@ -14,7 +14,7 @@ agrouter -p "fix the flaky test in pkg/foo" --dangerously-skip-permissions --out
 agrouter exec --dangerously-skip-permissions --output-format stream-json --verbose --print < prompt.txt
 ```
 
-Status: design, not implemented. Last verified against upstream docs and CLIs on 2026-09-27; the v1 argument mappings were checked against the installed `claude --help` and `codex exec --help` on 2026-09-29.
+Status: implemented in v1 (see `docs/plans/completed/20260930-agrouter-first-release.md`). Last verified against upstream docs and CLIs on 2026-09-27; the v1 argument mappings were checked against the installed `claude --help` and `codex exec --help` on 2026-09-29.
 
 ## Goals
 
@@ -688,7 +688,7 @@ claude_args    = exec --cli=claude --dangerously-skip-permissions --output-forma
 
 ralphex runs `agrouter exec --cli=claude ... [--model M] [--effort E] --print` with the prompt on stdin (`executor.go:375-378`). Every token is in agrouter's vocabulary, and `exec` comes first because ralphex puts `claude_args` before its own flags. A `--model` or `--effort` that ralphex adds from `task_model`, `review_model` or `plan_model` is a **constraint**: set, it fixes that value; leave those settings empty to let Jev choose.
 
-**`idle_timeout`.** ralphex starts its idle timer before launching agrouter and resets it only on output (`executor.go:393-407`), while agrouter is silent during routing: up to `[jev] timeout` (10s by default), the single budget for capture, every chunk request and retries. A ralphex `idle_timeout` must therefore exceed that budget plus the child's startup and time to its first output line, or ralphex kills every run while it routes. It is off by default.
+**`idle_timeout`.** ralphex starts its idle timer before launching agrouter and resets it only on output (`executor.go:393-407`), while agrouter is silent during routing: up to `[agrouter] timeout` (10s by default), the single budget for capture, every chunk request and retries. A ralphex `idle_timeout` must therefore exceed that budget plus the child's startup and time to its first output line, or ralphex kills every run while it routes. It is off by default.
 
 **Codex mode** (`executor = codex`, and the external Codex review in Claude mode), also in exec mode:
 
@@ -722,7 +722,7 @@ pkg/runner/            # child process, stdin replay, signals / Job Object, exit
 ```
 
 - **Libraries:** Go 1.26, `jessevdk/go-flags`, `gopkg.in/ini.v1`, `stretchr/testify`; vendored dependencies.
-- **Tooling:** `Makefile` targets `build` (binary in `.bin/`), `test` (race and coverage), `lint` (golangci-lint v2) and `fmt`.
+- **Tooling:** `Makefile` targets `build` (binary in `.bin/`), `test` (coverage; `RACE=-race` in CI), `lint` (golangci-lint v2), `fmt`, `generate` (moq mocks) and `eval-routing` (real Jev, never in CI).
 - **Code style:**
   - Comments lowercase except godoc.
   - Errors wrapped with `%w` and context.
