@@ -213,24 +213,26 @@
 - Create: `cmd/agrouter/flags.go`
 - Create: `cmd/agrouter/flags_test.go`
 
-- [ ] define `args.Request` in `pkg/args` (mode, cli, api key with unset/empty distinction, model/effort constraints and their source, ordered mapped arguments with caller spelling and mapping key, positional prompt, raw tokens), so parsing stays in `cmd/agrouter` and building in `pkg/args`
-- [ ] implement go-flags parsing:
+- [x] define `args.Request` in `pkg/args` (mode, cli, api key with unset/empty distinction, model/effort constraints and their source, ordered mapped arguments with caller spelling and mapping key, positional prompt, raw tokens), so parsing stays in `cmd/agrouter` and building in `pkg/args`
+- [x] implement go-flags parsing:
   - pre-split argv at the first `--` into flags and raw tokens;
   - check `args[0] == "exec"` for exec mode, with a later `exec` being an ordinary word;
   - flags: `--cli` (+ `AGROUTER_CLI`), `--jev-api-key`, `-p/--print`, `--help`, `--version`, `--model`, `--effort`, `--permission-mode`, the two bypass aliases, `--output-format`, `--verbose`, `--sandbox`, repeatable `-c/--config`;
   - `func(string)` callback options, to record caller order across different flags;
   - one positional anywhere.
-- [ ] implement `-c` handling: split at the first `=`; `model`/`model_reasoning_effort` become constraints (TOML quotes removed) unless `--model`/`--effort` is also given, in which case they stay ordinary `config.*` keys
-- [ ] exit `2` with one `agrouter:` line for an unknown flag and a second positional
-- [ ] write tests:
+- [x] implement `-c` handling: split at the first `=`; `model`/`model_reasoning_effort` become constraints (TOML quotes removed) unless `--model`/`--effort` is also given, in which case they stay ordinary `config.*` keys
+- [x] exit `2` with one `agrouter:` line for an unknown flag and a second positional
+- [x] write tests:
   - flags in any order around the positional, split and `=` forms;
   - decision vs exec mode, a later `exec` as the positional;
   - `-p` accepted, `AGROUTER_CLI`, `--jev-api-key=` vs absent;
   - a `-c` value containing `=`, and `-c model=` beside `--model` kept as a `config.model` key;
   - the ralphex Claude argv and the full ralphex Codex argv (`features.multi_agent`, `agents.reviewer.description` with spaces, bypass alias, `--sandbox danger-full-access`, `stream_idle_timeout_ms`, `project_doc_fallback_filenames`) parsed unchanged;
   - raw tokens kept apart from the positional.
-- [ ] write tests for error cases: unknown flag, second positional
-- [ ] run tests - must pass before next task
+- [x] write tests for error cases: unknown flag, second positional
+- [x] run tests - must pass before next task
+- ➕ `exec` is a first-token check, not a go-flags command, and tokens starting with `/` are escaped before go-flags parses them (go-flags on Windows treats `/x` as an option). Values are parsed with `unquote:"false"` so they stay byte-exact. `design.md` updated to match
+- ➕ caller spellings are normalized to the split form (`--output-format json`, `-c key=value`); an explicit empty `--cli=` overrides `AGROUTER_CLI`; the last of several `-c model=` constraints wins
 
 ### Task 7: Argv building and skipped arguments (`pkg/args`)
 

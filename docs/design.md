@@ -123,7 +123,7 @@ Parsing rules:
 - Flags take values in split (`--model M`) or `=` (`--model=M`) form.
 - **An unknown flag is an error** (exit `2`, one `agrouter:` line). This is the one kind of argument that cannot be skipped: agrouter cannot know whether it takes a value, so it could not tell where the positional prompt is.
 - A second positional argument is an error.
-- Parsing uses `jessevdk/go-flags`, following ralphex; `exec` is a go-flags command.
+- Parsing uses `jessevdk/go-flags`, following ralphex. `exec` is checked as the first token before go-flags sees the rest, and the argv is split at the first `--` beforehand, so a later `exec` and the raw tokens never reach go-flags. go-flags on Windows treats a token starting with `/` as an option; agrouter escapes such tokens first, so a prompt like `/review` or a value like `/tmp/doc.md` is not taken as an unknown flag. Option values are kept byte-exact (no unquoting), so `-c model="x"` keeps its TOML quotes until the constraint rule removes them.
 - `AGROUTER_CLI` exists because ralphex's `codex_command` cannot carry arguments. ralphex's Codex calls usually do not need it: their `--sandbox` and `-c` already leave only Codex eligible.
 
 ### Raw passthrough

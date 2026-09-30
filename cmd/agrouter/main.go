@@ -3,19 +3,11 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"runtime/debug"
-
-	"github.com/jessevdk/go-flags"
 )
-
-// options are agrouter's command-line options.
-type options struct {
-	Version bool `long:"version" description:"print agrouter's version and exit"`
-}
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
@@ -23,22 +15,16 @@ func main() {
 
 // run executes agrouter with the given arguments and streams, returning the process exit code.
 func run(args []string, _ io.Reader, stdout, stderr io.Writer) int {
-	var opts options
-	parser := flags.NewParser(&opts, flags.HelpFlag|flags.PassDoubleDash)
-	parser.Name = "agrouter"
-	parser.Usage = "[OPTIONS] [exec] [PROMPT]"
-
-	if _, err := parser.ParseArgs(args); err != nil {
-		var flagsErr *flags.Error
-		if errors.As(err, &flagsErr) && flagsErr.Type == flags.ErrHelp {
-			fmt.Fprintln(stdout, flagsErr.Message)
-			return 0
-		}
+	cmd, err := parseArgs(args, os.Getenv)
+	if err != nil {
 		fmt.Fprintf(stderr, "agrouter: %v\n", err)
 		return 2
 	}
-
-	if opts.Version {
+	if cmd.help != "" {
+		fmt.Fprintln(stdout, cmd.help)
+		return 0
+	}
+	if cmd.version {
 		fmt.Fprintln(stdout, version())
 		return 0
 	}
