@@ -32,6 +32,7 @@ type Attachment struct {
 	Source string `json:"source"` // SourceStdin or SourceMentioned
 	Type   string `json:"type"`   // detected media type or TypeUnknown
 	Bytes  int64  `json:"bytes"`
+	Count  int    `json:"count,omitempty"` // set only on a chunk anchor's summary: entries merged, Bytes their total
 }
 
 // Stdin is the caller's stdin as the child gets it: the bytes agrouter buffered, then the rest.

@@ -310,20 +310,22 @@
 - Create: `pkg/prompt/chunk.go`
 - Create: `pkg/prompt/chunk_test.go`
 
-- [ ] implement the token estimate (UTF-8 bytes ÷ 3) and budget functions that take the serialized question sizes as parameters (so `prompt` has no dependency on `router`): state budget = 30k minus the longest question; total with all questions and the chunk envelope ≤ 64k
-- [ ] expose the text capture limit in bytes for a given `max_chunks` and budget, for Task 8's caller
-- [ ] build the 4k anchor:
+- [x] implement the token estimate (UTF-8 bytes ÷ 3) and budget functions that take the serialized question sizes as parameters (so `prompt` has no dependency on `router`): state budget = 30k minus the longest question; total with all questions and the chunk envelope ≤ 64k
+- [x] expose the text capture limit in bytes for a given `max_chunks` and budget, for Task 8's caller
+- [x] build the 4k anchor:
   - `attachments` first, ≤1k; summarised by `source`+`type` into `{source,type,count,bytes}` when needed; over 1k even summarised → cannot decide;
   - then `prompt`, whole or head+tail;
   - then head+tail of `files`.
-- [ ] split everything not whole in the anchor into chunks cut on line and multibyte UTF-8 boundaries; more than `max_chunks` → cannot decide
-- [ ] write tests:
+- [x] split everything not whole in the anchor into chunks cut on line and multibyte UTF-8 boundaries; more than `max_chunks` → cannot decide
+- [x] write tests:
   - a state under budget is not split;
   - a short positional instruction plus a long stdin keeps the instruction in every anchor;
   - attachments in every anchor even when the prompt overflows; summarisation and its over-1k failure;
   - lossless coverage (anchor-only fields + chunks reproduce every captured byte, the only duplicates being the anchor's head/tail copies);
   - multibyte cuts, the 64k total check, the `max_chunks` limit.
-- [ ] run tests - must pass before next task
+- [x] run tests - must pass before next task
+- ➕ `NewBudget(Questions{Route, ChunkRoute, Relevance})` takes serialized question sizes in bytes and returns `Budget{State, Chunk}` in tokens, with `ErrQuestionsOverBudget` when the single state, or a chunk state beside a maximal 4k anchor, gets under 2k (Task 13 reuses it for the load-time check). `CaptureLimit(b, maxChunks)` = maxChunks × the chunk text room beside a maximal anchor. `(*Result).Split(b, maxChunks)` returns nil when `Fits`, else `Split{Anchor, Chunks}`; `ChunkState{anchor, chunk}` is the per-chunk state and `(*Result).State()` the single one. Sizes are measured on the JSON encoding (escapes included, `encoding/json` with HTML escaping), not raw bytes
+- ➕ `index`/`of` count the whole chunk sequence, and no chunk spans two files (`Chunk.File` keeps the file index, not sent). Summarised attachments carry `count` (new `Attachment.Count`, omitted otherwise). An overflowing prompt's head+tail take all the anchor room left, so files get anchor room only when the prompt is whole; files share it equally in order and stop below 64 bytes each. When only the attachments overflow, the prompt moves from the anchor into the chunks so there is always a chunk (design updated)
 
 ### Task 11: Jev client (`pkg/jev`)
 

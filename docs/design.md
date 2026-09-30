@@ -542,7 +542,8 @@ Jev has no way to take one state in parts (see [Jev](#jev-typesafe)), so a state
 **Chunks.** The remaining text (the prompt if it overflowed, and mentioned files) is cut into chunks that fit the budget beside the anchor:
 
 - Cuts fall on line boundaries, and inside an overlong line on UTF-8 character boundaries. There is no overlap.
-- Each chunk keeps its origin: `{"field": "prompt", "index": 3, "of": 9, "text": "..."}`. Fields are chunked in state order, so the chunk sequence reads like the original.
+- Each chunk keeps its origin: `{"field": "prompt", "index": 3, "of": 9, "text": "..."}`. Fields are chunked in state order, so the chunk sequence reads like the original. `index` and `of` count the whole sequence, and no chunk spans two files.
+- If only the attachments overflow (the prompt fits whole in the anchor and there are no files), the prompt moves from the anchor into the chunks, so there is always at least one chunk to ask about.
 
 **Per-chunk request.** One request per chunk, carrying two questions over the same state (TypeSafe's [fan-out](https://docs.typesafe.ai/patterns/fan-out) of several questions in one request):
 
