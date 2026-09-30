@@ -404,20 +404,21 @@
 - Create: `pkg/router/pool.go`
 - Create: `pkg/router/pool_test.go`
 
-- [ ] fan out one request per chunk (same route question and catalog, the anchor repeated, plus the `relevance` Noul) with `chunk_parallel` in flight, inside the one routing deadline
-- [ ] pool: weight = max(noul, `relevance_floor`); score = weighted average of probabilities; argmax with catalog order breaking ties; no pooled confidence
-- [ ] failure policy:
+- [x] fan out one request per chunk (same route question and catalog, the anchor repeated, plus the `relevance` Noul) with `chunk_parallel` in flight, inside the one routing deadline
+- [x] pool: weight = max(noul, `relevance_floor`); score = weighted average of probabilities; argmax with catalog order breaking ties; no pooled confidence
+- [x] failure policy:
   - a `422` on the unsplit single request splits the whole state at half the budget, once, and takes the pooled path;
   - a `422` on a chunk re-splits that chunk once at half size;
   - `max_chunks` is rechecked after any re-split;
   - a second `422`, one on a chunk under 2k tokens, or any chunk failing after retries → cannot decide.
-- [ ] expose per-chunk results (field, index, relevance, top options) and the pooled top options for debug output
-- [ ] write tests:
+- [x] expose per-chunk results (field, index, relevance, top options) and the pooled top options for debug output
+- [x] write tests:
   - a short hard requirement outweighing long filler, and floored filler outweighing it at `max_chunks` (the documented limit);
   - all-low relevance giving equal weights, stable tie order, per-chunk confidence never averaged;
   - the per-chunk request golden JSON.
-- [ ] write tests for the failure policy cases above, including the single-request 422 re-split
-- [ ] run tests - must pass before next task
+- [x] write tests for the failure policy cases above, including the single-request 422 re-split
+- [x] run tests - must pass before next task
+- ➕ `Route` now splits via `captured.Split(budget, max_chunks)`: nil → the single request, else `pooled`. The single request's `422` re-splits with `prompt.Budget{State: 0, Chunk: Chunk/2}` (State 0 forces the split), unless the state is under 2k tokens. Chunks run in rounds of at most `chunk_parallel` requests; the first non-422 failure cancels the round, and 422'd chunks are replaced by `prompt.Halve` pieces (new, at most half the escaped text) and the sequence renumbered before `max_chunks` is rechecked. A "second 422" is per chunk lineage: pieces of a re-split (including every chunk of a whole-state re-split) cannot be re-split again. `Decision.Pooled{Chunks []ChunkResult{Field, Index, Of, Relevance, Top}, Top []Score}` (top 3) is for debug output; `Decision.Answer` stays nil for a pooled decision. A chunk answer missing `route`, `relevance`, or a probability for an option sent is `jev.ErrMalformed`. Recorded in the design's "Bounds and failures"
 
 ### Task 15: Child process execution (`pkg/runner`)
 

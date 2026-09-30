@@ -292,3 +292,34 @@ func TestHeadTail(t *testing.T) {
 	assert.Empty(t, head)
 	assert.Equal(t, "✓", tail)
 }
+
+func TestHalve(t *testing.T) {
+	t.Run("lines", func(t *testing.T) {
+		text := strings.Repeat("line of text\n", 100)
+		pieces := Halve(Chunk{Field: FieldFiles, File: 2, Index: 5, Of: 9, Text: text})
+		require.GreaterOrEqual(t, len(pieces), 2)
+		var joined strings.Builder
+		for _, p := range pieces {
+			assert.Equal(t, FieldFiles, p.Field)
+			assert.Equal(t, 2, p.File)
+			assert.Zero(t, p.Index, "numbering is the caller's")
+			assert.LessOrEqual(t, jsonLen(p.Text), (jsonLen(text)+1)/2)
+			assert.True(t, strings.HasSuffix(p.Text, "\n"), "cut on a line boundary")
+			joined.WriteString(p.Text)
+		}
+		assert.Equal(t, text, joined.String())
+	})
+	t.Run("multibyte without newlines", func(t *testing.T) {
+		text := strings.Repeat("é€", 50)
+		pieces := Halve(Chunk{Field: FieldPrompt, Text: text})
+		require.Len(t, pieces, 2)
+		for _, p := range pieces {
+			assert.True(t, utf8.ValidString(p.Text))
+		}
+		assert.Equal(t, text, pieces[0].Text+pieces[1].Text)
+	})
+	t.Run("tiny and empty", func(t *testing.T) {
+		assert.Equal(t, []Chunk{{Field: FieldPrompt, Text: "\x01"}}, Halve(Chunk{Field: FieldPrompt, Text: "\x01"}))
+		assert.Equal(t, []Chunk{{Field: FieldPrompt}}, Halve(Chunk{Field: FieldPrompt}))
+	})
+}

@@ -24,9 +24,6 @@ type JevClient interface {
 // nothing to run: exit 2.
 var ErrCannotDecide = errors.New("jev cannot decide")
 
-// errChunkedRouting marks a state over the single-request budget, which needs chunked routing.
-var errChunkedRouting = errors.New("state over the single-request budget: chunked routing is not available")
-
 // Router chooses among the eligible options with Jev.
 type Router struct {
 	cfg    *config.Config
@@ -63,6 +60,15 @@ type Decision struct {
 	Undecided error
 	// Answer is Jev's route answer to a single request, for debug output; nil without one.
 	Answer *jev.Answer
+	// Pooled is how a split state was decided, for debug output; nil unless it was split.
+	Pooled *Pooled
+}
+
+// outcome is what Jev decided: the option, with the single answer or the pooled chunks.
+type outcome struct {
+	option catalog.Option
+	answer *jev.Answer
+	pooled *Pooled
 }
 
 // Choice is the argv choice for args.Build.
@@ -77,24 +83,35 @@ func (r *Router) Route(ctx context.Context, el *Eligibility, req *args.Request, 
 	if len(el.Options) == 1 {
 		return r.chosen(el, el.Options[0], nil), nil
 	}
-	o, answer, err := r.ask(ctx, el, captured)
+	out, err := r.decide(ctx, el, captured)
 	if err != nil {
 		return r.cannotDecide(el, req, err)
 	}
-	return r.chosen(el, o, answer), nil
+	d := r.chosen(el, out.option, out.answer)
+	d.Pooled = out.pooled
+	return d, nil
 }
 
-// ask sends the whole state in one Choice request and returns the chosen option.
-func (r *Router) ask(ctx context.Context, el *Eligibility, captured *prompt.Result) (catalog.Option, *jev.Answer, error) {
+// decide sends the state whole when it fits, and otherwise one request per chunk, pooled.
+func (r *Router) decide(ctx context.Context, el *Eligibility, captured *prompt.Result) (outcome, error) {
 	if captured.Undecidable != nil {
-		return catalog.Option{}, nil, captured.Undecidable
+		return outcome{}, captured.Undecidable
 	}
-	if !captured.Fits(r.budget) {
-		return catalog.Option{}, nil, errChunkedRouting
+	split, err := captured.Split(r.budget, r.cfg.Agrouter.MaxChunks)
+	if err != nil {
+		return outcome{}, fmt.Errorf("split the state: %w", err)
 	}
+	if split == nil {
+		return r.single(ctx, el, captured)
+	}
+	return r.pooled(ctx, el, split, false)
+}
+
+// ask sends state in one Choice request and returns the chosen option.
+func (r *Router) ask(ctx context.Context, el *Eligibility, state prompt.State) (catalog.Option, *jev.Answer, error) {
 	req := jev.Request{
 		Model: r.cfg.Agrouter.JevModel,
-		State: captured.State(),
+		State: state,
 		Questions: map[string]jev.Question{
 			questionRoute: routeQuestion(r.cfg, r.cfg.Agrouter.Question, el.Options, el.effort, r.enc),
 		},

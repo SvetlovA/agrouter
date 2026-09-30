@@ -256,13 +256,14 @@ func TestRouteCannotDecideWithoutRequest(t *testing.T) {
 	}{
 		{name: "capture over the limit", captured: &prompt.Result{Undecidable: prompt.ErrCaptureLimit},
 			want: prompt.ErrCaptureLimit},
-		{name: "state over the single-request budget",
-			captured: captured(strings.Repeat("line of text\n", 20_000)), want: errChunkedRouting},
+		{name: "state over max_chunks",
+			captured: captured(strings.Repeat("line of text\n", 20_000)), want: prompt.ErrTooManyChunks},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			client := &mocks.JevClientMock{}
 			r := newRouter(t, cfg, cat, client)
+			r.cfg = withMaxChunks(r, 1)
 			req := &args.Request{CLI: "codex"}
 			d, err := r.Route(context.Background(), Eligible(cfg, cat, req), req, tc.captured)
 			require.NoError(t, err)
