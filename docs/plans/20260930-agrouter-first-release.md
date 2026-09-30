@@ -173,21 +173,23 @@
 - Create: `pkg/config/defaults/embed.go`
 - Create: `pkg/config/defaults/defaults_test.go`
 
-- [ ] write the `[agrouter]` defaults, including the `question`, `chunk_question` and `relevance` texts from the design
-- [ ] write `[cli.claude]`/`[cli.claude.args]` and `[cli.codex]`/`[cli.codex.args]` exactly as in the design's config block:
+- [x] write the `[agrouter]` defaults, including the `question`, `chunk_question` and `relevance` texts from the design
+- [x] write `[cli.claude]`/`[cli.claude.args]` and `[cli.codex]`/`[cli.codex.args]` exactly as in the design's config block:
   - `print`, `model`, `effort`;
   - all six `permission-mode.*` (Codex without `manual`/`dontAsk`);
   - `output-format.*` (Codex without `json`, and `text = []`);
   - `verbose`;
   - Codex `sandbox.*` and the `config.*` whitelist (`stream_idle_timeout_ms`, `project_doc`, `project_doc_fallback_filenames`, `features.multi_agent`, `agents.reviewer.description`, `model`, `model_reasoning_effort`).
-- [ ] write the `[model.*]` sections with full section names and descriptions/sources:
+- [x] write the `[model.*]` sections with full section names and descriptions/sources:
   - Claude: `claude-fable-5-1`, `claude-opus-5-5` (alias `opus`), `claude-sonnet-5`, `claude-haiku-4-5` (no efforts);
   - Codex: `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`;
   - the `[effort.<cli>.<level>]` descriptions.
 
   The design's catalog text is the source. If fuller text is taken from the linked vendor pages, record the sources checked here.
-- [ ] write tests: the embedded config loads and validates, the Haiku section has no efforts, and a guard that no value carries a trailing inline comment
-- [ ] run tests - must pass before next task
+- [x] write tests: the embedded config loads and validates, the Haiku section has no efforts, and a guard that no value carries a trailing inline comment
+- [x] run tests - must pass before next task
+- ➕ descriptions and efforts come from the design's catalog tables (price and latency appended, as in the design's opus example); no vendor pages were re-checked in this task. Per-model `source` URLs follow the design's `platform.claude.com/docs/en/models/<short id>/overview` and `developers.openai.com/api/docs/models/<id>` patterns; `effort.codex.ultra` cites learn.chatgpt.com, since `ultra` is CLI-only
+- ➕ `TestMatchesDesign` compares the `[agrouter]` and `[cli.*]` sections key by key against the ini block in `docs/design.md`, so the spec and the defaults cannot drift apart
 
 ### Task 5: Options, ids and lookup (`pkg/catalog`)
 
