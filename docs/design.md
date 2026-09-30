@@ -118,7 +118,7 @@ Every Claude output format is mapped. Codex has no single-result JSON on stdout 
 
 Parsing rules:
 
-- `exec`, if present, must be the first token. Everything else may come in any order, as in Claude: agrouter knows all of its flags, so the positional prompt is found exactly, wherever it is.
+- `exec` selects exec mode only as the first token; anywhere else it is an ordinary word (the positional prompt, if it is the only positional). Everything else may come in any order, as in Claude: agrouter knows all of its flags, so the positional prompt is found exactly, wherever it is.
 - Flags take values in split (`--model M`) or `=` (`--model=M`) form.
 - **An unknown flag is an error** (exit `2`, one `agrouter:` line). This is the one kind of argument that cannot be skipped: agrouter cannot know whether it takes a value, so it could not tell where the positional prompt is.
 - A second positional argument is an error.
@@ -732,7 +732,7 @@ pkg/runner/            # child process, stdin replay, signals / Job Object, exit
   - decision mode by default, exec mode only with `exec` as the first token;
   - flags in any order around the positional prompt, split and `=` forms;
   - `-p`/`--print` accepted; the `print` mapping emitted whether or not it is given;
-  - ralphex's Codex argv parsed unchanged: `exec`, `-c key=value` split at the first `=` (a value containing `=` kept whole), `-c model="M"` and `-c model_reasoning_effort=E` becoming constraints with TOML quotes removed, other `-c` kept in order, `--sandbox`, `--dangerously-bypass-approvals-and-sandbox` as the bypass alias; each of the five `config.<key>` entries forwarded byte-exact, an unknown key rejected, repeated `-c` kept in the caller's order; the full ralphex `--codex` argv (`features.multi_agent`, `agents.reviewer.description`, bypass alias, `--sandbox danger-full-access`, `stream_idle_timeout_ms`, and `project_doc_fallback_filenames` with `--pass-claude-md`) and the external-review argv (`--sandbox read-only`) giving the expected Codex argv;
+  - ralphex's Codex argv parsed unchanged: `exec`, `-c key=value` split at the first `=` (a value containing `=` kept whole), `-c model="M"` and `-c model_reasoning_effort=E` becoming constraints with TOML quotes removed, other `-c` kept in order, `--sandbox`, `--dangerously-bypass-approvals-and-sandbox` as the bypass alias; each of the `config.<key>` entries forwarded byte-exact, an unknown key skipped with a warning, repeated `-c` kept in the caller's order; the full ralphex `--codex` argv (`features.multi_agent`, `agents.reviewer.description`, bypass alias, `--sandbox danger-full-access`, `stream_idle_timeout_ms`, and `project_doc_fallback_filenames` with `--pass-claude-md`) and the external-review argv (`--sandbox read-only`) giving the expected Codex argv;
   - skipped with one warning each, never exit `2`: a `-c` key the chosen CLI does not map (`-c approval_policy=never` with `--cli=codex`), `--` without `--cli`, an unknown `--cli`;
   - passed through unvalidated: a `--model` outside the catalog (with `--cli`, and without it as one option per CLI), an `--effort` the model does not list, contradictions translated in order (`--sandbox` beside `--permission-mode acceptEdits` giving two `--sandbox`), `-c model=` beside `--model` forwarded as a `config.model` key;
   - an unknown flag, a second positional, and no prompt at all are exit `2`;
