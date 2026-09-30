@@ -430,22 +430,27 @@
 - Create: `pkg/runner/runner_unix_test.go`
 - Create: `pkg/runner/runner_windows_test.go`
 
-- [ ] define the consumer-side `CommandRunner` interface (used by `cmd/agrouter`) and implement it with `os/exec`:
+- [x] define the consumer-side `CommandRunner` interface (used by `cmd/agrouter`) and implement it with `os/exec`:
   - no shell; environment inherited minus `TYPESAFE_API_KEY`;
   - stdin = the replayed buffer, then the live remainder (or empty);
   - stdout/stderr = the parent's file descriptors;
   - `cmd.WaitDelay` set.
-- [ ] on Windows, resolve `.cmd`/`.bat` targets and quote arguments for them following ralphex's `pkg/execx` (a `{prompt}` token with quotes, `&`, `%` or newlines must arrive intact or fail safely); record a ⚠️ if some characters cannot be passed safely
-- [ ] exit `127` with one `agrouter:` line when the command is missing or fails to start; never retry another CLI; propagate the child's exit code (`128+signal` on Unix)
-- [ ] Unix: forward SIGINT/SIGTERM to the child's process group and kill the group on cancellation. Windows: assign the child to a Job Object with kill-on-close (ralphex `procgroup_windows.go`)
-- [ ] write tests with the helper process:
+- [x] on Windows, resolve `.cmd`/`.bat` targets and quote arguments for them following ralphex's `pkg/execx` (a `{prompt}` token with quotes, `&`, `%` or newlines must arrive intact or fail safely); record a ⚠️ if some characters cannot be passed safely
+- [x] exit `127` with one `agrouter:` line when the command is missing or fails to start; never retry another CLI; propagate the child's exit code (`128+signal` on Unix)
+- [x] Unix: forward SIGINT/SIGTERM to the child's process group and kill the group on cancellation. Windows: assign the child to a Job Object with kill-on-close (ralphex `procgroup_windows.go`)
+- [x] write tests with the helper process:
   - exact argv received;
   - byte-exact stdin including binary and the buffer + relay case;
   - `TYPESAFE_API_KEY` absent;
   - exit code propagation, `127` on a missing command;
   - no hang when the child exits while stdin stays open.
-- [ ] write the platform tests behind build tags (Unix signal forwarding; Windows tree killed when the Job is closed; a `.cmd` target receiving a prompt with special characters)
-- [ ] run tests - must pass before next task
+- [x] write the platform tests behind build tags (Unix signal forwarding; Windows tree killed when the Job is closed; a `.cmd` target receiving a prompt with special characters)
+- [x] run tests - must pass before next task
+- ➕ `CommandRunner` lives in `cmd/agrouter/runner.go` (moq mock in `cmd/agrouter/mocks`); `runner.Runner.Run(ctx, runner.Command{Argv, Stdin, Stdout, Stderr, Env})` returns the child's exit code, or `127` and a `*runner.StartError` (printing the `agrouter:` line is Task 16's). The key name comes from `config.EnvAPIKey`, matched case-insensitively on Windows.
+- ➕ stdin that is not an `*os.File` is relayed by the runner's own goroutine through `StdinPipe`, not by os/exec: `Cmd.Wait` awaits its copy goroutine even after `WaitDelay`, so a caller holding stdin open hung agrouter. `WaitDelay` (1s) still bounds stdout/stderr pipes and the kill after cancellation.
+- ➕ batch quoting does not use `""` or `^`: Go and `CommandLineToArgvW` (node) read `""` inside quotes with the pre-2008 rule, and each cmd.exe parse (`/c`, then the shim's `%*`) consumes one level of `^`. `batchCommandLine` tracks cmd.exe's and the program's quote states instead (`\"` for a literal quote; a bare `"` reopens whichever state a space or a cmd.exe special character needs) and keeps Rust's `%%cd:~,%` for `%`. Checked with the Go helper behind a `.cmd` shim in the tests, and once by hand against a real `node` shim.
+- ⚠️ CR, LF and NUL cannot pass through cmd.exe, so a multi-line positional prompt to a `.cmd`/`.bat` target is a startup failure (`127`) rather than a truncated or injected command. ralphex sends its prompt on stdin, so it is unaffected; the native `claude.exe`/`codex.exe` take any argument. Recorded in the design's "Execution".
+- ➕ Unix runs the child with `Setsid` (as ralphex does); cancellation sends SIGTERM to the group, `WaitDelay` kills the direct child, and the group gets SIGKILL after the child exits (reaping leftover descendants). Windows ignores Ctrl+C in agrouter while the child runs (the child gets it from the console) and kills the Job on cancellation; a Job that cannot be created degrades to the direct child. The Unix platform tests compile here (`GOOS=linux go vet`, `go test -c`) but only run in the CI matrix.
 
 ### Task 16: Wiring, decision and exec modes (`cmd/agrouter`)
 
