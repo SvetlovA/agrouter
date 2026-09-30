@@ -14,7 +14,7 @@ func openCanonical(path string) (*os.File, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve %s: %w", path, err)
 	}
-	f, err := os.Open(canon) //nolint:gosec // the caller checks the canonical path before reading
+	f, err := os.Open(canon)
 	if err != nil {
 		return nil, "", fmt.Errorf("open %s: %w", canon, err)
 	}

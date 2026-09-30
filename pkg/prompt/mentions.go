@@ -19,7 +19,7 @@ import (
 // an error only when cwd cannot be resolved.
 func (r *Result) ReadMentions(ctx context.Context, cwd string, limit int64) error {
 	if r.Undecidable != nil {
-		return nil
+		return nil //nolint:nilerr // Undecidable is a routing outcome, not a failure of this call
 	}
 	root, err := canonicalDir(cwd)
 	if err != nil {
@@ -31,7 +31,7 @@ func (r *Result) ReadMentions(ctx context.Context, cwd string, limit int64) erro
 	r.TextBytes += m.textBytes
 	if undecidable != nil {
 		r.Prompt, r.Files, r.Attachments, r.Undecidable = "", nil, nil, undecidable
-		return nil
+		return nil //nolint:nilerr // undecidable is recorded in r, not returned
 	}
 	r.Files = append(r.Files, m.files...)
 	r.Attachments = append(r.Attachments, m.attachments...)
@@ -97,12 +97,12 @@ func (m *mentions) try(name string) (bool, error) {
 	}
 	f, canon, err := openCanonical(path)
 	if err != nil {
-		return false, nil //nolint:nilerr // a missing or unreadable file is not a mention
+		return false, nil
 	}
 	defer f.Close()
 	fi, err := f.Stat()
 	if err != nil || !fi.Mode().IsRegular() || !inside(m.root, canon) {
-		return false, nil //nolint:nilerr // not a readable file in the tree: not a mention
+		return false, nil
 	}
 	key := samePathKey(canon)
 	if m.seen[key] {
@@ -201,13 +201,13 @@ func candidates(text string) []string {
 			i++
 			continue
 		}
-		for _, tok := range strings.Fields(text[last:start]) {
+		for tok := range strings.FieldsSeq(text[last:start]) {
 			add(tok)
 		}
 		add(inner)
 		last, i = end, end
 	}
-	for _, tok := range strings.Fields(text[last:]) {
+	for tok := range strings.FieldsSeq(text[last:]) {
 		add(tok)
 	}
 	return out
@@ -258,7 +258,7 @@ func variants(c string) []string {
 	if trimmed != c {
 		out = append(out, trimmed)
 	}
-	if mt := lineSuffix.FindStringSubmatch(trimmed); mt != nil && !isDrive(mt[1]) {
+	if mt := lineSuffix.FindStringSubmatch(trimmed); len(mt) > 1 && !isDrive(mt[1]) {
 		out = append(out, mt[1])
 	}
 	return out

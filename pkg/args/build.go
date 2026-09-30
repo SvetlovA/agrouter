@@ -101,9 +101,9 @@ func (b *builder) mapped(key, value, spelling string) {
 	tmpl, ok := b.cli.Args[key]
 	switch {
 	case !ok:
-		b.skip(spelling, fmt.Sprintf("%s has no mapping for it", b.cli.Name))
+		b.skip(spelling, b.cli.Name+" has no mapping for it")
 	case len(tmpl) == 0:
-		b.skip(spelling, fmt.Sprintf("maps to nothing for %s", b.cli.Name))
+		b.skip(spelling, "maps to nothing for "+b.cli.Name)
 	default:
 		b.emit(key, value)
 	}

@@ -94,7 +94,7 @@ func Capture(ctx context.Context, positional string, stdin io.Reader, limit int6
 		}
 		if undecidable != nil {
 			res.Undecidable = undecidable
-			return res, nil
+			return res, nil //nolint:nilerr // undecidable is recorded in res, not returned
 		}
 	}
 	if positional == "" && len(c.buf) == 0 {
@@ -143,24 +143,14 @@ func (c *capturer) run(stdin io.Reader, textLimit int64) (undecidable, err error
 	c.binary, c.mediaType = Detect(prefix, c.eof && len(c.buf) <= SniffLen)
 
 	if !c.binary {
-		// text: read one byte past the limit to tell "at the limit" from "over it"
-		if err := c.fill(max(textLimit+1, 0)); err != nil {
-			return c.split(err)
-		}
-		if int64(len(c.buf)) > textLimit {
-			// over the limit as text; binary anywhere in what was read still makes it an attachment
-			if c.binary, c.mediaType = Detect(c.buf, false); !c.binary {
-				return ErrCaptureLimit, nil
-			}
-		} else {
-			c.binary, c.mediaType = Detect(c.buf, true)
-		}
+		return c.readText(stdin, textLimit)
 	}
-	if !c.binary {
-		return nil, nil
-	}
+	return c.finishBinary(stdin)
+}
 
-	// binary stdin never counts against the text limit: the size comes from stat, or from counting
+// finishBinary measures binary stdin, which never counts against the text limit: the size comes
+// from stat, or from counting.
+func (c *capturer) finishBinary(stdin io.Reader) (undecidable, readErr error) {
 	if size, ok := regularSize(stdin); ok {
 		c.size = size
 		return nil, nil
@@ -170,6 +160,24 @@ func (c *capturer) run(stdin io.Reader, textLimit int64) (undecidable, err error
 	}
 	c.size = int64(len(c.buf))
 	return nil, nil
+}
+
+// readText reads text stdin one byte past the limit, to tell "at the limit" from "over it", and
+// detects again over everything read: binary anywhere still makes it an attachment, measured by
+// finishBinary.
+func (c *capturer) readText(stdin io.Reader, textLimit int64) (undecidable, readErr error) {
+	if err := c.fill(max(textLimit+1, 0)); err != nil {
+		return c.split(err)
+	}
+	over := int64(len(c.buf)) > textLimit
+	c.binary, c.mediaType = Detect(c.buf, !over)
+	if !c.binary {
+		if over {
+			return ErrCaptureLimit, nil
+		}
+		return nil, nil
+	}
+	return c.finishBinary(stdin)
 }
 
 // split sorts a fill error into "cannot decide" (the routing deadline) or a read error.

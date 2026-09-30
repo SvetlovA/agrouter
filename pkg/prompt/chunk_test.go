@@ -189,8 +189,8 @@ func TestSplit(t *testing.T) {
 		assert.Contains(t, string(data), `"chunk":{"field":"prompt","index":2,"of":`)
 	})
 
-	t.Run("long attachment list summarised by source and type", func(t *testing.T) {
-		var atts []Attachment
+	t.Run("long attachment list summarized by source and type", func(t *testing.T) {
+		atts := make([]Attachment, 0, 301)
 		for i := range 150 {
 			atts = append(atts,
 				Attachment{Source: SourceMentioned, Type: "image/png", Bytes: int64(i)},
@@ -213,7 +213,7 @@ func TestSplit(t *testing.T) {
 	})
 
 	t.Run("binary-only stdin with many attachments still has a chunk", func(t *testing.T) {
-		var atts []Attachment
+		atts := make([]Attachment, 0, 200)
 		for i := range 200 {
 			atts = append(atts, Attachment{Source: SourceStdin, Type: "image/png", Bytes: int64(i)})
 		}
@@ -224,7 +224,7 @@ func TestSplit(t *testing.T) {
 	})
 
 	t.Run("summary still over 1k", func(t *testing.T) {
-		var atts []Attachment
+		atts := make([]Attachment, 0, 200)
 		for i := range 200 {
 			atts = append(atts, Attachment{Source: SourceMentioned, Type: fmt.Sprintf("application/x-kind-%d", i), Bytes: 1})
 		}
@@ -289,6 +289,6 @@ func TestHeadTail(t *testing.T) {
 	assert.Empty(t, head)
 	assert.Empty(t, tail)
 	head, tail = headTail("✓✓✓✓", 5)
-	assert.Equal(t, "", head)
+	assert.Empty(t, head)
 	assert.Equal(t, "✓", tail)
 }

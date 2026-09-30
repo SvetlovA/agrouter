@@ -33,7 +33,7 @@ func Detect(data []byte, complete bool) (binary bool, mediaType string) {
 	return false, ""
 }
 
-// signature returns the media type named by data's magic bytes, or "" for text and unrecognised data.
+// signature returns the media type named by data's magic bytes, or "" for text and unrecognized data.
 func signature(data []byte) string {
 	if len(data) == 0 {
 		return ""

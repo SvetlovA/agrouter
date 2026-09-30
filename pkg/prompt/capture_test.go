@@ -36,7 +36,7 @@ func replay(t *testing.T, res *Result) []byte {
 // onlyReader hides every method but Read, so the input looks like a pipe.
 type onlyReader struct{ r io.Reader }
 
-func (o onlyReader) Read(b []byte) (int, error) { return o.r.Read(b) }
+func (o onlyReader) Read(b []byte) (int, error) { return o.r.Read(b) } //nolint:wrapcheck // a pipe stand-in passes errors through
 
 func TestCapture_PositionalAndStdin(t *testing.T) {
 	stdin := "line one\r\nline two, no trailing newline"
@@ -146,7 +146,7 @@ func TestCapture_LargeBinaryIsAnAttachment(t *testing.T) {
 	t.Run("regular file: size from stat, rest unread", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "big.png")
 		require.NoError(t, os.WriteFile(path, data, 0o600))
-		f, err := os.Open(path)
+		f, err := os.Open(path) //nolint:gosec // the test's own temp file
 		require.NoError(t, err)
 		defer f.Close()
 

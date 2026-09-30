@@ -14,7 +14,7 @@ const (
 )
 
 var (
-	// ErrAttachmentsOverAnchor means the attachments exceed their anchor share even summarised, so
+	// ErrAttachmentsOverAnchor means the attachments exceed their anchor share even summarized, so
 	// Jev cannot decide.
 	ErrAttachmentsOverAnchor = errors.New("attachments over their anchor share")
 	// ErrTooManyChunks means the state needs more than max_chunks chunks, so Jev cannot decide.
@@ -131,7 +131,7 @@ func (r *Result) Split(b Budget, maxChunks int) (*Split, error) {
 	return &Split{Anchor: anchor, Chunks: chunks}, nil
 }
 
-// anchor builds the anchor within AnchorTokens: attachments (summarised when over their share),
+// anchor builds the anchor within AnchorTokens: attachments (summarized when over their share),
 // then the prompt, whole or head and tail, then head and tail of the files while room lasts. It
 // reports whether the prompt is whole in it.
 func (r *Result) anchor() (Anchor, bool, error) {
@@ -140,10 +140,10 @@ func (r *Result) anchor() (Anchor, bool, error) {
 	if len(r.Attachments) > 0 {
 		a.Attachments = r.Attachments
 		if Tokens(mustLen(a.Attachments)) > attachmentShare {
-			a.Attachments = summarise(r.Attachments)
+			a.Attachments = summarize(r.Attachments)
 		}
 		if n := Tokens(mustLen(a.Attachments)); n > attachmentShare {
-			return Anchor{}, false, fmt.Errorf("%w: %d tokens summarised, share is %d", ErrAttachmentsOverAnchor, n, attachmentShare)
+			return Anchor{}, false, fmt.Errorf("%w: %d tokens summarized, share is %d", ErrAttachmentsOverAnchor, n, attachmentShare)
 		}
 	}
 
@@ -187,8 +187,8 @@ func headTail(s string, room int) (head, tail string) {
 	return head, tail
 }
 
-// summarise merges attachments with the same source and type, in order of first appearance.
-func summarise(atts []Attachment) []Attachment {
+// summarize merges attachments with the same source and type, in order of first appearance.
+func summarize(atts []Attachment) []Attachment {
 	type key struct{ source, typ string }
 	idx := map[key]int{}
 	var out []Attachment

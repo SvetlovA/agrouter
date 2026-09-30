@@ -1,6 +1,7 @@
 package args
 
 import (
+	"maps"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -43,7 +44,7 @@ func cfgArg(kv string) Arg {
 }
 
 func spellings(skipped []Skip) []string {
-	out := []string{}
+	out := make([]string, 0, len(skipped))
 	for _, s := range skipped {
 		out = append(out, s.Spelling)
 	}
@@ -330,8 +331,6 @@ func TestRedacted(t *testing.T) {
 
 func cloneArgs(m map[string][]string) map[string][]string {
 	out := make(map[string][]string, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
+	maps.Copy(out, m)
 	return out
 }

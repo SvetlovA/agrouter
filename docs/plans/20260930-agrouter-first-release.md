@@ -334,19 +334,21 @@
 - Create: `pkg/jev/types.go`
 - Create: `pkg/jev/client_test.go`
 
-- [ ] implement request/response types for Choice and Noul questions and the `POST /v1/systemone` call with `Authorization: Bearer`, honouring the routing context's deadline
-- [ ] retry `429`/`529` with backoff inside the deadline; surface `401`, `422` (as a distinct error so the router can re-split) and other statuses as typed errors
-- [ ] validate answers:
+- [x] implement request/response types for Choice and Noul questions and the `POST /v1/systemone` call with `Authorization: Bearer`, honouring the routing context's deadline
+- [x] retry `429`/`529` with backoff inside the deadline; surface `401`, `422` (as a distinct error so the router can re-split) and other statuses as typed errors
+- [x] validate answers:
   - `choice` among the options sent; `confidence` finite in [0,1];
   - `probabilities` keys exactly the options, with finite values in [0,1] summing to 1±0.01;
   - `noul` finite in [0,1]; a missing `route` or `relevance` answer is malformed.
-- [ ] redact the key from every error, including echoed response bodies
-- [ ] write tests with `httptest`:
+- [x] redact the key from every error, including echoed response bodies
+- [x] write tests with `httptest`:
   - 200, 401, 422, 429 then 200, 429/529 exhausted within the deadline, 529;
   - a slow response against the deadline, malformed JSON;
   - NaN/out-of-range confidence, an unknown choice, bad probability maps, a missing answer;
   - the key appearing only in the header.
-- [ ] run tests - must pass before next task
+- [x] run tests - must pass before next task
+- ➕ `jev.New(key).Ask(ctx, Request) (map[string]Answer, error)`: `Request{Model, State any, Questions}`, `Question{Type, Instructions any, Criteria}`; `Criteria` is an ordered `[]Criterion{Name, Value}` encoded as an object in slice (catalog) order. The response envelope is `{model, answers: {<question id>: answer}, usage}` (docs.typesafe.ai/api); every question sent must be answered, and an answer `type` that differs from the question's is malformed. Errors: `ErrNoKey` (no request made), `*StatusError{Status, Body}` matching `ErrUnauthorized`/`ErrUnprocessable`/`ErrOverloaded` via `errors.Is`, `ErrMalformed`, and context errors for the deadline. Backoff is exponential from 200ms to 2s, honouring a `Retry-After` in seconds, and stops without sleeping when the wait would pass the deadline. Error bodies are redacted, flattened to one line and cut at 512 bytes
+- ⚠️ the local golangci-lint 2.12.2 (built with Go 1.26) cannot type-check Go 1.27's standard library behind `net/http`, so it silently skipped `pkg/prompt` and failed on `pkg/jev`. Linting now uses v2.13.0 (the CI pin) built with local Go (`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.0`, ahead of the chocolatey one on PATH). It surfaced 30 issues in earlier packages, now fixed: `summarise`→`summarize` and `unrecognised`→`unrecognized` in code (misspell is US), `strings.FieldsSeq`, `nilerr` directives where `Undecidable` is an outcome rather than a failure, and `capture.go` split into `readText`/`finishBinary` (nestif). Lint is clean with GOOS=windows, linux and darwin
 
 ### Task 12: Eligibility and mapped-argument preference (`pkg/router`)
 
