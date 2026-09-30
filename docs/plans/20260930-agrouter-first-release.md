@@ -197,13 +197,14 @@
 - Create: `pkg/catalog/catalog.go`
 - Create: `pkg/catalog/catalog_test.go`
 
-- [ ] derive options (model × effort, or the bare model when it has no efforts) from enabled config, in catalog order, with ids `<section>@<effort>` / `<section>`
-- [ ] return config errors from `catalog.Build`: no enabled options, more than 255 options
-- [ ] implement model lookup by `name` or alias (resolving to `name`), and "not in catalog" reporting for pass-through
-- [ ] implement option filtering helpers used by eligibility (by CLI, by model, by effort)
-- [ ] write tests: the embedded catalog gives 16 Claude + 17 Codex = 33 options; ids; alias resolution; disabled sections; stable ordering; no enabled options; 256 options
-- [ ] write tests for lookup misses and a model section without efforts
-- [ ] run tests - must pass before next task
+- [x] derive options (model × effort, or the bare model when it has no efforts) from enabled config, in catalog order, with ids `<section>@<effort>` / `<section>`
+- [x] return config errors from `catalog.Build`: no enabled options, more than 255 options
+- [x] implement model lookup by `name` or alias (resolving to `name`), and "not in catalog" reporting for pass-through
+- [x] implement option filtering helpers used by eligibility (by CLI, by model, by effort)
+- [x] write tests: the embedded catalog gives 16 Claude + 17 Codex = 33 options; ids; alias resolution; disabled sections; stable ordering; no enabled options; 256 options
+- [x] write tests for lookup misses and a model section without efforts
+- [x] run tests - must pass before next task
+- ➕ besides the filters, `catalog.CLIs` (distinct CLIs in first-seen order) and `Catalog.HasEffort` (empty effort never matches) serve eligibility; `ResolveModel` returns the value unchanged with `inCatalog=false` for pass-through
 
 ### Task 6: Argument model and parsing (`cmd/agrouter`)
 
