@@ -1,6 +1,10 @@
 # RACE is empty locally (no cgo on the dev machine); CI passes RACE=-race
 RACE ?=
 
+# golangci-lint v2.13.0, the version pinned in .github/workflows/ci.yml
+# (go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.0)
+GOLANGCI_LINT ?= golangci-lint
+
 all: test build
 
 build:
@@ -14,7 +18,7 @@ test:
 	rm coverage.out coverage_no_mocks.out
 
 lint:
-	golangci-lint run --max-issues-per-linter=0 --max-same-issues=0
+	$(GOLANGCI_LINT) run --max-issues-per-linter=0 --max-same-issues=0
 
 fmt:
 	gofmt -s -w $$(find . -type f -name "*.go" -not -path "./vendor/*" -not -path "./mocks/*" -not -path "**/mocks/*")

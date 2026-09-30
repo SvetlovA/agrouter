@@ -514,12 +514,16 @@ Effort …` string; goldens `request_full_*.json`. The default question ends wit
 **Files:**
 - Create: `.github/workflows/ci.yml`
 
-- [ ] trigger on `push` and `pull_request`; `permissions: contents: read`; `defaults: run: shell: bash`; `actions/checkout@v7` with `persist-credentials: false`; `actions/setup-go@v7` with Go `1.26`
-- [ ] matrix `ubuntu-latest`, `windows-latest`, `macos-latest` with `fail-fast: false`: `make test RACE=-race` (Windows runners have gcc for cgo; if `-race` fails there, drop it for Windows only and record a ⚠️ here)
-- [ ] lint: `golangci/golangci-lint-action@v9` pinned to `v2.13.0` on ubuntu, plus a `GOOS=windows` lint run so `*_windows.go` is linted; align the local golangci-lint version
-- [ ] ubuntu-only: filter mocks out of coverage and submit with goveralls (`continue-on-error: true`)
-- [ ] validate the workflow with `actionlint` locally
-- [ ] run `make test` and `make lint` - must pass before next task
+- [x] trigger on `push` and `pull_request`; `permissions: contents: read`; `defaults: run: shell: bash`; `actions/checkout@v7` with `persist-credentials: false`; `actions/setup-go@v7` with Go `1.26`
+- [x] matrix `ubuntu-latest`, `windows-latest`, `macos-latest` with `fail-fast: false`: `make test RACE=-race` (Windows runners have gcc for cgo; if `-race` fails there, drop it for Windows only and record a ⚠️ here)
+- [x] lint: `golangci/golangci-lint-action@v9` pinned to `v2.13.0` on ubuntu, plus a `GOOS=windows` lint run so `*_windows.go` is linted; align the local golangci-lint version
+- [x] ubuntu-only: filter mocks out of coverage and submit with goveralls (`continue-on-error: true`)
+- [x] validate the workflow with `actionlint` locally
+- [x] run `make test` and `make lint` - must pass before next task
+- ➕ the ubuntu job re-runs `go test -race -coverprofile` after `make test` (which deletes its profile), filters mocks as the Makefile does, and submits `coverage_no_mocks.out` with goveralls (`COVERALLS_TOKEN: secrets.GITHUB_TOKEN`)
+- ➕ `Makefile` takes `GOLANGCI_LINT` (default `golangci-lint`) with a comment naming v2.13.0 as the CI pin; locally `make lint GOLANGCI_LINT=$(go env GOPATH)/bin/golangci-lint` (v2.13.0) gives 0 issues for the host, `GOOS=windows` and `GOOS=linux`
+- ⚠️ `-race` on the Windows runner could not be verified locally (no cgo here); if CI fails there, drop `RACE=-race` for Windows only
+- actionlint v1.7.12 (built via `go install`) reports no problems
 
 ### Task 19: Release workflow for `go install`
 

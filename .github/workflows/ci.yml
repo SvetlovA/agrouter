@@ -1,0 +1,74 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: set up go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+
+      - name: test
+        run: make test RACE=-race
+
+      - name: coverage profile without mocks
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          go test -race -coverprofile=coverage.out ./...
+          grep -v "_mock.go" coverage.out | grep -v mocks > coverage_no_mocks.out
+
+      - name: submit coverage
+        if: matrix.os == 'ubuntu-latest'
+        continue-on-error: true
+        env:
+          COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          go install github.com/mattn/goveralls@latest
+          goveralls -service=github -coverprofile=coverage_no_mocks.out
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: set up go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+
+      # keep in sync with the local golangci-lint (see Makefile)
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.0
+
+      # *_windows.go files are only linted with GOOS=windows
+      - name: golangci-lint (windows)
+        env:
+          GOOS: windows
+        run: golangci-lint run --max-issues-per-linter=0 --max-same-issues=0
