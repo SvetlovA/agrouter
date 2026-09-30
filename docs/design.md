@@ -625,7 +625,7 @@ Other errors that stop agrouter before any child starts (exit `2`):
 
 - argument errors: an unknown flag, a second positional argument;
 - no prompt: neither a positional prompt nor stdin (binary-only stdin counts as a prompt, routed on its attachment entry);
-- configuration errors: no enabled options, more than 255 options, a question over budget, `max_chunks` or `chunk_parallel` below 1, `relevance_floor` outside (0, 1], a malformed template, a CLI without a `model` mapping, a duplicate model name or alias;
+- configuration errors: no enabled options, more than 255 options, a question over budget, `max_chunks` or `chunk_parallel` below 1, `relevance_floor` outside (0, 1], a malformed template, a CLI without a `print` or `model` mapping (or without `effort` when its models have efforts), `{prompt}` misplaced, an unknown placeholder or `{value}` outside `config.*`, a model without a `name` or with an unknown `cli`, a duplicate model name or alias; every violation is reported at once, naming its section and key;
 - in exec mode, a child that cannot be started (exit `127`, see [Execution](#execution)).
 
 ## Model and effort

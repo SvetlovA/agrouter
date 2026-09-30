@@ -156,14 +156,15 @@
 - Create: `pkg/config/validate.go`
 - Create: `pkg/config/validate_test.go`
 
-- [ ] validate CLI mappings:
+- [x] validate CLI mappings:
   - `print` and `model` required; `effort` required when any of the CLI's models has efforts;
   - `{prompt}` exactly once across `print`/`prompt`, as a whole token only, nowhere else;
   - placeholders limited to `{model}`, `{effort}`, `{value}` (in `config.*` only), `{prompt}`.
-- [ ] validate models: `@` in section names rejected; duplicate `name`/alias across the catalog rejected; unknown `cli` rejected
-- [ ] validate `[agrouter]`: `max_chunks` and `chunk_parallel` ≥ 1, `relevance_floor` in (0, 1] (the option-count and question-budget checks live in Tasks 5 and 13, where their inputs exist)
-- [ ] write tests for each rule (valid config passes; each violation gives a clear error naming the section and key)
-- [ ] run tests - must pass before next task
+- [x] validate models: `@` in section names rejected; duplicate `name`/alias across the catalog rejected; unknown `cli` rejected
+- [x] validate `[agrouter]`: `max_chunks` and `chunk_parallel` ≥ 1, `relevance_floor` in (0, 1] (the option-count and question-budget checks live in Tasks 5 and 13, where their inputs exist)
+- [x] write tests for each rule (valid config passes; each violation gives a clear error naming the section and key)
+- [x] run tests - must pass before next task
+- ➕ `Load` runs `Validate`, which joins every violation into one error; a model without `name` and an unknown `{placeholder}` are also config errors. Recorded in `docs/design.md`
 
 ### Task 4: Embedded v1 catalog and mappings (`pkg/config/defaults`)
 

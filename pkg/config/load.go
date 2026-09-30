@@ -56,7 +56,7 @@ func ResolveAPIKey(flagValue string, flagSet bool, envValue string, cfg Agrouter
 	}
 }
 
-// Load reads and merges the layers per section and per key, then decodes the result.
+// Load reads and merges the layers per section and per key, then decodes and validates the result.
 func Load(src Sources) (*Config, error) {
 	m := &merged{sections: map[string]*section{}}
 	if err := m.add(LayerEmbedded, "", src.Embedded); err != nil {
@@ -77,7 +77,14 @@ func Load(src Sources) (*Config, error) {
 			return nil, err
 		}
 	}
-	return m.decode()
+	cfg, err := m.decode()
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // entry is one key's winning value and where it came from.
