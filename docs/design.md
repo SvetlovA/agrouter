@@ -77,6 +77,7 @@ agrouter's argument names and style follow Claude Code. They fall into three gro
 | `--jev-api-key=KEY` | `TYPESAFE_API_KEY` | TypeSafe API key for Jev. See [API key](#api-key). |
 | `-p`, `--print` | | Boolean, as in Claude, accepted so that `agrouter -p "x"` and ralphex's appended `--print` work. agrouter is always non-interactive, so the chosen CLI's `print` mapping is emitted **whether or not `-p` is given** (see [Argument mapping](#argument-mapping)): Claude's `--output-format` works only with `--print`, and Codex without `exec` starts its TUI. |
 | `--help` | | agrouter help. To see a CLI's own help, call that CLI directly. |
+| `--version` | | Print agrouter's version (the module version from `go install ...@<tag>`, or `unknown`) and exit `0`. |
 
 **Model and effort**, a constraint on the choice and then mapped (see [Model and effort](#model-and-effort)):
 

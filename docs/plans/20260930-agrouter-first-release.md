@@ -122,14 +122,16 @@
 - Create: `.gitignore`, `.gitattributes`
 - Modify: `docs/design.md`
 
-- [ ] create `go.mod` (`module github.com/SvetlovA/agrouter`, `go 1.26`, and make sure local Go 1.27 adds no `toolchain` line) with go-flags, ini.v1, testify and `golang.org/x/sys`; add moq with `go get -tool github.com/matryer/moq@<pinned>`; `go mod vendor`
-- [ ] create `.gitattributes` (`* text=auto eol=lf`, `-text` for binary fixtures such as `*.png`, `*.pdf`, `*.bin`) before any fixture is committed
-- [ ] create `cmd/agrouter/main.go` with a testable `run(args []string, stdin io.Reader, stdout, stderr io.Writer) int` (`main` only calls `os.Exit(run(...))`), and `--version` printing `debug.ReadBuildInfo().Main.Version` (falling back to `unknown`)
-- [ ] create `Makefile` following ralphex: `build` (to `.bin/`), `test` (coverage excluding mocks; `RACE ?=` empty locally, CI passes `RACE=-race`), `lint`, `fmt`, `generate` (`go generate ./...` running `go tool moq`), and a placeholder `eval-routing`
-- [ ] copy ralphex's `.golangci.yml` (linter set and gosec excludes), dropping ralphex-only settings; add `.gitignore` for `.bin/` and coverage files
-- [ ] add `--version` to the design's "agrouter's own" argument table
-- [ ] write tests for `run` with `--version` (non-empty version line on stdout, exit 0) and `--help` (exit 0)
-- [ ] run `make test` and `make lint` - must pass before next task
+- [x] create `go.mod` (`module github.com/SvetlovA/agrouter`, `go 1.26`, and make sure local Go 1.27 adds no `toolchain` line) with go-flags, ini.v1, testify and `golang.org/x/sys`; add moq with `go get -tool github.com/matryer/moq@<pinned>`; `go mod vendor`
+- [x] create `.gitattributes` (`* text=auto eol=lf`, `-text` for binary fixtures such as `*.png`, `*.pdf`, `*.bin`) before any fixture is committed
+- [x] create `cmd/agrouter/main.go` with a testable `run(args []string, stdin io.Reader, stdout, stderr io.Writer) int` (`main` only calls `os.Exit(run(...))`), and `--version` printing `debug.ReadBuildInfo().Main.Version` (falling back to `unknown`)
+- [x] create `Makefile` following ralphex: `build` (to `.bin/`), `test` (coverage excluding mocks; `RACE ?=` empty locally, CI passes `RACE=-race`), `lint`, `fmt`, `generate` (`go generate ./...` running `go tool moq`), and a placeholder `eval-routing`
+- [x] copy ralphex's `.golangci.yml` (linter set and gosec excludes), dropping ralphex-only settings; add `.gitignore` for `.bin/` and coverage files
+- [x] add `--version` to the design's "agrouter's own" argument table
+- [x] write tests for `run` with `--version` (non-empty version line on stdout, exit 0) and `--help` (exit 0)
+- [x] run `make test` and `make lint` - must pass before next task
+- ⚠️ go-flags without the `forceposix` build tag uses Windows option style: `--help` lists `/version`, and any argument starting with `/` (for example a prompt `/review this`) is parsed as an option. `go install` can't pass build tags, so Task 6 must handle this (for example by parsing with a POSIX-style front end or re-routing `/`-prefixed tokens to the positional prompt) and test it on Windows
+- ⚠️ local golangci-lint 2.12.2 (chocolatey) can't typecheck the Go 1.27 stdlib; `make lint` passes with v2.13.0 built locally (`GOBIN=/tmp/gl go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.0`, then `PATH=/tmp/gl:$PATH make lint`)
 
 ### Task 2: Config loading and layering (`pkg/config`)
 
