@@ -289,17 +289,19 @@
 - Create: `pkg/prompt/mentions.go`
 - Create: `pkg/prompt/mentions_test.go`
 
-- [ ] extract candidates: quoted, backtick and Markdown-link spans first, then whitespace tokens, processed in textual order; try as written, then without surrounding brackets/trailing punctuation, then without `:line`/`:line:col` (never a Windows drive colon)
-- [ ] resolve against the canonical working directory (symlinks and junctions followed, case-insensitive on Windows) and read only regular files inside it by directory boundary; dedupe by canonical path; never fetch URLs; no recursion
-- [ ] text files go into `files`, binary into `attachments` (`source: mentioned`); mentioned text counts against the shared capture limit and the routing context
-- [ ] write tests:
+- [x] extract candidates: quoted, backtick and Markdown-link spans first, then whitespace tokens, processed in textual order; try as written, then without surrounding brackets/trailing punctuation, then without `:line`/`:line:col` (never a Windows drive colon)
+- [x] resolve against the canonical working directory (symlinks and junctions followed, case-insensitive on Windows) and read only regular files inside it by directory boundary; dedupe by canonical path; never fetch URLs; no recursion
+- [x] text files go into `files`, binary into `attachments` (`source: mentioned`); mentioned text counts against the shared capture limit and the routing context
+- [x] write tests:
   - paths with spaces in quotes/backticks/links, `path:line` and `path:line:col`;
   - a Windows drive path, trailing punctuation;
   - dedupe, mixed quoted and plain order, URLs not fetched, no recursion;
   - a binary mention giving an attachment;
   - mentioned text counted in the limit and the deadline.
-- [ ] write tests for escapes: `../` traversal, an absolute path outside, a sibling `cwd2` directory, a symlink (Unix) or junction (Windows) escaping the tree, missing files and directories ignored
-- [ ] run tests - must pass before next task
+- [x] write tests for escapes: `../` traversal, an absolute path outside, a sibling `cwd2` directory, a symlink (Unix) or junction (Windows) escaping the tree, missing files and directories ignored
+- [x] run tests - must pass before next task
+- ➕ `(*Result).ReadMentions(ctx, cwd, limit)` scans `Result.Prompt` (the text prompt only), appends to the new `Result.Files` and `Result.Attachments`, and adds mentioned text to `TextBytes`; over the limit or past the deadline it sets `Undecidable` and empties prompt, files and attachments. It errors only when `cwd` cannot be resolved. Single-quoted spans count only at word boundaries, so apostrophes stay words; `[x](<a b>)` destinations drop the angle brackets
+- ➕ `canon_windows.go`/`canon_other.go`: on Windows the file is opened first and canonicalised from its handle (`GetFinalPathNameByHandle`), because `filepath.EvalSymlinks` stopped resolving junctions in Go 1.23; elsewhere `EvalSymlinks`. `golang.org/x/sys/windows` is now vendored (x/sys became a direct dependency)
 
 ### Task 10: Budget, anchor and chunking (`pkg/prompt`)
 

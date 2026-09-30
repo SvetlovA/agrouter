@@ -51,11 +51,12 @@ func (s *Stdin) Reader() io.Reader {
 // Result is the captured prompt.
 type Result struct {
 	Prompt      string       // Jev's prompt: positional, stdin text, or both joined by "\n\n"
-	Attachments []Attachment // binary stdin, if any
-	TextBytes   int64        // text counted against the capture limit (positional + stdin text)
+	Files       []string     // contents of the text files the prompt mentions (ReadMentions)
+	Attachments []Attachment // binary stdin and binary mentioned files, if any
+	TextBytes   int64        // text counted against the capture limit (positional, stdin, mentioned files)
 	Stdin       *Stdin       // nil when there was no stdin
 	// Undecidable is why Jev cannot decide from this capture (ErrCaptureLimit or the routing
-	// context's error); Prompt and Attachments are then empty, and Stdin still replays everything.
+	// context's error); Prompt, Files and Attachments are then empty, and Stdin still replays everything.
 	Undecidable error
 }
 
