@@ -140,13 +140,15 @@
 - Create: `pkg/config/load.go`
 - Create: `pkg/config/config_test.go`
 
-- [ ] define the config types: `Agrouter` settings (the `[agrouter]` section), `CLI` (command, description, enabled, args map of key → template), `Model` (cli, name, aliases, efforts, description, source, enabled), `Effort` descriptions keyed `<cli>.<level>`
-- [ ] implement loading with `ini.v1` (`IgnoreInlineComment: true`) and layering embedded < global (`AGROUTER_CONFIG_DIR` or `~/.config/agrouter/config`) < local `.agrouter/config`, merged per section and per key
-- [ ] parse `[cli.*.args]` values as JSON string arrays; `enabled = false` removes a section
-- [ ] implement API key resolution: flag > `TYPESAFE_API_KEY` > local > global > embedded placeholder, with an explicit empty flag clearing it (the caller passes "unset" vs "set to empty")
-- [ ] write tests for layering and per-key merges (one `[cli.*.args]` key overridden locally), `enabled = false`, `AGROUTER_CONFIG_DIR`, API key precedence and explicit-empty flag
-- [ ] write tests for error cases: malformed JSON template, unreadable file, bad duration/int values
-- [ ] run tests - must pass before next task
+- [x] define the config types: `Agrouter` settings (the `[agrouter]` section), `CLI` (command, description, enabled, args map of key → template), `Model` (cli, name, aliases, efforts, description, source, enabled), `Effort` descriptions keyed `<cli>.<level>`
+- [x] implement loading with `ini.v1` (`IgnoreInlineComment: true`) and layering embedded < global (`AGROUTER_CONFIG_DIR` or `~/.config/agrouter/config`) < local `.agrouter/config`, merged per section and per key
+- [x] parse `[cli.*.args]` values as JSON string arrays; `enabled = false` removes a section
+- [x] implement API key resolution: flag > `TYPESAFE_API_KEY` > local > global > embedded placeholder, with an explicit empty flag clearing it (the caller passes "unset" vs "set to empty")
+- [x] write tests for layering and per-key merges (one `[cli.*.args]` key overridden locally), `enabled = false`, `AGROUTER_CONFIG_DIR`, API key precedence and explicit-empty flag
+- [x] write tests for error cases: malformed JSON template, unreadable file, bad duration/int values
+- [x] run tests - must pass before next task
+- ➕ disabling a `[cli.*]` section also drops its args, models and effort descriptions; an empty `TYPESAFE_API_KEY` counts as unset. Both recorded in `docs/design.md`
+- ➕ unknown sections and unknown keys in `[agrouter]`, `[cli.*]`, `[model.*]` and `[effort.*]` are load errors (typos would otherwise be ignored silently); ini.v1's parent-section key inheritance is bypassed by merging layers by hand
 
 ### Task 3: Config validation rules (`pkg/config`)
 

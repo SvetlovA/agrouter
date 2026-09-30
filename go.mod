@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/jessevdk/go-flags v1.6.1
 	github.com/stretchr/testify v1.12.1
+	gopkg.in/ini.v1 v1.67.3
 )
 
 require (
@@ -14,7 +15,6 @@ require (
 	golang.org/x/sync v0.11.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/tools v0.30.0 // indirect
-	gopkg.in/ini.v1 v1.67.3 // indirect
 )
 
 tool github.com/matryer/moq

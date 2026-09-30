@@ -54,3 +54,4 @@ golang.org/x/tools/internal/typesinternal
 golang.org/x/tools/internal/versions
 # gopkg.in/ini.v1 v1.67.3
 ## explicit; go 1.13
+gopkg.in/ini.v1

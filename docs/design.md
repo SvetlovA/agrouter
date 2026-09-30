@@ -188,7 +188,7 @@ Other runtime settings are environment variables only, which keeps agrouter's ow
 The Jev key can come from three places. The first one that is set wins:
 
 1. `--jev-api-key=KEY`
-2. the `TYPESAFE_API_KEY` environment variable
+2. the `TYPESAFE_API_KEY` environment variable (an empty value counts as unset)
 3. `api_key` in `[agrouter]`, following the usual config layering (local > global > embedded)
 
 The embedded defaults ship `api_key =` as an empty placeholder, which means no key.
@@ -212,7 +212,7 @@ INI, loaded with `gopkg.in/ini.v1` using `IgnoreInlineComment: true`, as ralphex
 - **Global:** `~/.config/agrouter/config`, overridable with `AGROUTER_CONFIG_DIR`.
 - **Local:** `.agrouter/config` in the working directory.
 - **Precedence:** env > local > global > embedded, merged **per section and per key**. A local file can change one model's description without redefining the catalog.
-- **Removal:** a section can be removed from the catalog with `enabled = false`.
+- **Removal:** a section can be removed from the catalog with `enabled = false`. Disabling a `[cli.*]` section also removes its `[cli.*.args]`, its models and its effort descriptions.
 
 ### Sections
 
