@@ -540,17 +540,22 @@ Effort …` string; goldens `request_full_*.json`. The default question ends wit
 - actionlint v1.7.12 reports no problems for `ci.yml` and `release.yml`
 
 ### Task 20: Verify acceptance criteria
-- [ ] verify every design section is implemented:
+- [x] verify every design section is implemented:
   - CLI and arguments, skipped arguments, pass-through, decision and exec modes, API key;
   - configuration and catalog;
   - routing and eligibility, prompt/mentions/non-text, Jev request, budget, chunking, cannot-decide;
   - argument mapping, execution;
   - ralphex Claude and Codex integration.
-- [ ] verify every item in the design's Testing section is covered by a test
-- [ ] run full test suite: `make test`
-- [ ] run linter: `make lint`
-- [ ] verify coverage ≥ 80% per package (mocks excluded)
-- [ ] verify `go install ./cmd/agrouter` from a clean checkout and `agrouter --version`
+- [x] verify every item in the design's Testing section is covered by a test
+- [x] run full test suite: `make test`
+- [x] run linter: `make lint`
+- [x] verify coverage ≥ 80% per package (mocks excluded)
+- [x] verify `go install ./cmd/agrouter` from a clean checkout and `agrouter --version`
+- all four design areas trace to packages and tests: `cmd/agrouter` (flags, modes, API key, skipped args, passthrough, ralphex Claude/Codex argv in `TestApp_RalphexClaudeMode`/`TestApp_RalphexCodexMode`), `pkg/config`+`defaults`+`pkg/catalog`, `pkg/router`+`pkg/prompt`+`pkg/jev`, `pkg/args`+`pkg/runner`
+- the Testing section checked item by item against test names and fixtures (cwd2/symlink escapes, PNG/JPEG/PDF, 255 options, `{prompt}` placement, 422 re-split, 529, NaN, made-up CLI renamed `acme`→`zeta`, CLI-name guard); no gaps found
+- coverage (mocks excluded): cmd/agrouter 96.7%, args 100%, catalog 100%, config 97.2%, jev 97.7%, prompt 97.2%, router 98.4%, runner 89.0% (Windows host); total 96.8%
+- lint: golangci-lint v2.13.0 reports 0 issues for the host (windows), `GOOS=linux`, `GOOS=darwin` and `--build-tags=eval`
+- `go install ./cmd/agrouter` from a fresh `git clone` works; `agrouter --version` prints `v0.0.0-20260930203037-76f02b662c6e` (a pseudo-version from build info; a tagged `go install ...@vX` reports the tag)
 
 ### Task 21: [Final] Update documentation
 - [ ] expand `README.md` around the Task 19 "Releasing" section:
