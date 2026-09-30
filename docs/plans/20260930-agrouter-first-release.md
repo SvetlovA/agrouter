@@ -268,18 +268,20 @@
 - Create: `pkg/prompt/detect.go`
 - Create: `pkg/prompt/capture_test.go`
 
-- [ ] read non-TTY stdin to EOF under the routing context and a text capture limit in bytes (both passed in), keeping the buffered bytes for replay and exposing the unread remainder for live relay; a deadline hit during capture means cannot decide, with stdin still replayed in full
-- [ ] build Jev's `prompt` per the design's table: positional, stdin text, or `positional + "\n\n" + stdin`; binary stdin stays out and becomes an `attachments` entry (`source: stdin`)
-- [ ] implement binary detection: `http.DetectContentType` signatures first, then NUL/invalid-UTF-8 over the whole captured stdin (a character cut at the 8 KiB prefix boundary is still text for files)
-- [ ] large binary stdin is never an oversize failure: the type comes from the prefix, the size from `stat` for a regular file or from counting otherwise, and it never counts against the text limit (if a non-file pipe forces buffering all of it, record a ⚠️ and ask before deviating)
-- [ ] report "no prompt" (no positional, empty stdin) so the caller exits `2`; binary-only stdin counts as a prompt
-- [ ] write tests:
+- [x] read non-TTY stdin to EOF under the routing context and a text capture limit in bytes (both passed in), keeping the buffered bytes for replay and exposing the unread remainder for live relay; a deadline hit during capture means cannot decide, with stdin still replayed in full
+- [x] build Jev's `prompt` per the design's table: positional, stdin text, or `positional + "\n\n" + stdin`; binary stdin stays out and becomes an `attachments` entry (`source: stdin`)
+- [x] implement binary detection: `http.DetectContentType` signatures first, then NUL/invalid-UTF-8 over the whole captured stdin (a character cut at the 8 KiB prefix boundary is still text for files)
+- [x] large binary stdin is never an oversize failure: the type comes from the prefix, the size from `stat` for a regular file or from counting otherwise, and it never counts against the text limit (if a non-file pipe forces buffering all of it, record a ⚠️ and ask before deviating)
+- [x] report "no prompt" (no positional, empty stdin) so the caller exits `2`; binary-only stdin counts as a prompt
+- [x] write tests:
   - the four positional/stdin cases, the `\n\n` join in Jev's prompt only, byte-exact replay;
   - PNG/JPEG/PDF signatures (including an ASCII-looking PDF), NUL bytes, the UTF-8 boundary case;
   - binary stdin with a positional, and a large binary stdin becoming an attachment rather than oversize;
   - capture stopping at the limit with buffer + rest reproducing stdin exactly;
   - a slow stdin hitting the deadline (cannot decide, stdin still replayed).
-- [ ] run tests - must pass before next task
+- [x] run tests - must pass before next task
+- ➕ `prompt.Capture(ctx, positional, stdin, limit)` returns a `Result` with Jev's `Prompt`, `Attachments`, `TextBytes` (positional + stdin text, for Task 9's shared limit), `Stdin{Buffered, Rest}` and `Undecidable` (`ErrCaptureLimit` or the context's error); `ErrNoPrompt` for no prompt. The positional prompt counts against the text limit; an empty positional counts as none. `StdinOf(os.Stdin)` returns nil for a terminal (any character device, so `< /dev/null` is "no stdin"). Stdin is read through a goroutine pump so a read blocked at the deadline loses no bytes; after capture the pump is `Rest`
+- ⚠️ binary stdin from a non-file pipe is buffered in memory to EOF to count its size (routing needs the size before the child starts, and the bytes must be replayed); it still never counts against the text limit and is bounded by the routing deadline. Not confirmed with the user (non-interactive run): alternatives are spooling to a temp file or reporting only the prefix size
 
 ### Task 9: Files mentioned in the prompt (`pkg/prompt`)
 
