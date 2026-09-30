@@ -380,20 +380,23 @@
 - Create: `pkg/router/router_test.go`
 - Create: `pkg/router/mocks/jev_client.go` (moq, via `go:generate`)
 
-- [ ] define the consumer-side `JevClient` interface and generate its mock
-- [ ] short-circuit a single remaining option without calling Jev
-- [ ] build the Choice request (compact encoding): structured `instructions` (question, clis, models, efforts for the remaining options only) and per-option criteria objects, as in the design's JSON; keep the encoding behind a small option so Task 17 can switch to full per-criterion descriptions
-- [ ] implement the load-time budget check on the serialized questions (route `question`, and `chunk_question` + `relevance` + a maximal anchor, leave ≥2k tokens for the state) as a config error
-- [ ] implement the decision and the cannot-decide policy: CLI known (`--cli`, implied by `--model`, or the only CLI left) → only the caller's fixed values; otherwise exit `2`
-- [ ] write tests:
+- [x] define the consumer-side `JevClient` interface and generate its mock
+- [x] short-circuit a single remaining option without calling Jev
+- [x] build the Choice request (compact encoding): structured `instructions` (question, clis, models, efforts for the remaining options only) and per-option criteria objects, as in the design's JSON; keep the encoding behind a small option so Task 17 can switch to full per-criterion descriptions
+- [x] implement the load-time budget check on the serialized questions (route `question`, and `chunk_question` + `relevance` + a maximal anchor, leave ≥2k tokens for the state) as a config error
+- [x] implement the decision and the cannot-decide policy: CLI known (`--cli`, implied by `--model`, or the only CLI left) → only the caller's fixed values; otherwise exit `2`
+- [x] write tests:
   - the single-option short-circuit;
   - the golden Jev request JSON with and without `--cli`;
   - a question over budget.
-- [ ] write tests for every cannot-decide case via the mocked `JevClient`:
+- [x] write tests for every cannot-decide case via the mocked `JevClient`:
   - no key, timeout, 401, 429/529 exhausted, malformed;
   - CLI known by `--cli`, by `--model`, and as the only CLI left (ralphex's Codex argv without `--cli`);
   - `--cli=claude --effort high` keeping `--effort high`; CLI unknown giving exit `2`.
-- [ ] run tests - must pass before next task
+- [x] run tests - must pass before next task
+- ➕ `router.New(cfg, cat, client, EncodingCompact) (*Router, error)` checks the budget once, over the questions built from the **whole** catalog (the largest they can be), and `Budget()` feeds `prompt.CaptureLimit`; a question over budget is a `config:` error wrapping `prompt.ErrQuestionsOverBudget`. `Route(ctx, el, req, captured) (Decision, error)`: `Decision{CLI, Model, Effort, OptionID, Pinned, Undecided, Answer}` with `Choice()` for `args.Build`; empty Model/Effort are JSON `null`. Cannot decide with more than one CLI returns an error matching `router.ErrCannotDecide` (and the cause) for exit `2`. Capture over its limit and a state over the single-request budget are cannot-decide causes without a request; the latter is replaced by chunked routing in Task 14. A `route` answer missing or naming an option not sent is `jev.ErrMalformed` (the mock bypasses the client's validation)
+- ➕ criteria and instructions: `models` keyed by model name, `efforts` per CLI with only the levels in use; a model outside the catalog is described as passed through, a passed-through `--effort` is each option's effort with a "passed through" description, and a model without efforts is `none (not supported)`. Golden requests in `pkg/router/testdata` (`go test ./pkg/router -update` rewrites them)
+- ⚠️ `go generate` (moq) failed on Go 1.27's standard library with `golang.org/x/tools` v0.30 (same cause as the golangci-lint issue in Task 11); bumped the indirect `golang.org/x/tools` to v0.50.0 (`x/mod` v0.41.0, `x/sync` v0.23.0), `go` line unchanged at 1.26.0, re-vendored
 
 ### Task 14: Chunked routing and pooling (`pkg/router`)
 

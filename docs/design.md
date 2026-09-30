@@ -517,6 +517,7 @@ To keep the question small, the catalog goes **once** into a structured `instruc
 ```
 
 - **Payload contents:** only the state (the prompt text, the contents of text files it mentions inside the working directory, and attachment metadata: type and size only) and the catalog descriptions go to Jev. No argument, command, source URL or the API key ever does. The path of a file agrouter reads is never sent (see [Prompt](#prompt)).
+- **Passed-through values.** A `--model` outside the catalog is listed in `models` as passed through as given; a passed-through `--effort` is every option's `effort`, listed under `efforts` as passed through. A model without efforts has `"effort": "none (not supported)"`.
 - **Needs validation:** this compact encoding is schema-valid, but its classification accuracy is not yet proven equivalent to a full description inside each criterion. The routing evaluation set (see [Testing](#testing)) decides. If the references prove unreliable, switch to full descriptions per criterion; 33 options × ~120 tokens still fits.
 
 ### Budget
