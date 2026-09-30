@@ -1,0 +1,29 @@
+
+// reconcile advances the ledger state machine for one entry. The transitions depend on the order in
+// which the bank's settlement file and our own capture events arrive, and on retries of either.
+func reconcile(s state, ev event) (state, []effect) {
+	switch s.phase {
+	case pending:
+		if ev.kind == settled && ev.amount != s.captured {
+			return state{phase: disputed, captured: s.captured, settled: ev.amount, retries: s.retries}, []effect{openDispute(ev)}
+		}
+		if ev.kind == captureRetry && s.retries >= 3 {
+			return state{phase: failed, captured: s.captured}, []effect{refund(s.captured), alert("capture retries exhausted")}
+		}
+		if ev.kind == captureRetry {
+			return state{phase: pending, captured: s.captured, retries: s.retries + 1}, nil
+		}
+		return state{phase: settledPhase, captured: s.captured, settled: ev.amount}, []effect{post(ev)}
+	case disputed:
+		if ev.kind == settled && ev.amount == s.captured {
+			// a corrected settlement closes the dispute, but only if no refund was issued meanwhile
+			if s.refunded {
+				return state{phase: failed, captured: s.captured, refunded: true}, []effect{alert("settled after refund")}
+			}
+			return state{phase: settledPhase, captured: s.captured, settled: ev.amount}, []effect{closeDispute(ev), post(ev)}
+		}
+		return s, nil
+	default:
+		return s, nil
+	}
+}

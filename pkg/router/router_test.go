@@ -107,8 +107,12 @@ func TestRouteGoldenRequest(t *testing.T) {
 		name   string
 		req    *args.Request
 		choice string
+		enc    Encoding
 	}{
 		{name: "all", req: &args.Request{}, choice: "claude-haiku-4-5"},
+		{name: "full_cli_codex", req: &args.Request{CLI: "codex"}, choice: "gpt-6-sol@low", enc: EncodingFull},
+		{name: "full_effort_passthrough", req: &args.Request{CLI: "claude", Effort: "turbo", EffortSource: args.SourceFlag},
+			choice: "claude-haiku-4-5", enc: EncodingFull},
 		{name: "cli_claude", req: &args.Request{CLI: "claude"}, choice: "claude-haiku-4-5"},
 		{name: "effort_passthrough", req: &args.Request{CLI: "claude", Effort: "turbo", EffortSource: args.SourceFlag},
 			choice: "claude-haiku-4-5"},
@@ -116,11 +120,12 @@ func TestRouteGoldenRequest(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			client := answering(tc.choice)
-			r := newRouter(t, cfg, cat, client)
+			r, err := New(cfg, cat, client, tc.enc)
+			require.NoError(t, err)
 			el := Eligible(cfg, cat, tc.req)
 			captured := &prompt.Result{Prompt: "fix the flaky test in pkg/foo/foo_test.go", Files: []string{"package foo\n"},
 				Attachments: []prompt.Attachment{{Source: "mentioned", Type: "image/png", Bytes: 48213}}}
-			_, err := r.Route(context.Background(), el, tc.req, captured)
+			_, err = r.Route(context.Background(), el, tc.req, captured)
 			require.NoError(t, err)
 			require.Len(t, client.AskCalls(), 1)
 
@@ -154,6 +159,32 @@ func TestRouteQuestionContents(t *testing.T) {
 			assert.Equal(t, routeCriterion{CLI: "claude", Model: "claude-haiku-4-5", Effort: effortNone}, c.Value)
 		}
 	}
+}
+
+func TestFullEncodingCriteria(t *testing.T) {
+	cfg, cat := embedded(t)
+	el := Eligible(cfg, cat, &args.Request{})
+	q := routeQuestion(cfg, "Q?", el.Options, "", EncodingFull)
+
+	assert.Equal(t, "Q?", q.Instructions)
+	assert.Equal(t, ids(el.Options), q.Criteria.Names())
+	for _, c := range q.Criteria {
+		desc, ok := c.Value.(string)
+		require.True(t, ok)
+		assert.Contains(t, desc, "CLI ")
+		assert.Contains(t, desc, "Model ")
+		if c.Name == "claude-haiku-4-5" {
+			assert.Contains(t, desc, "Effort: "+effortNone)
+		}
+	}
+	assert.Equal(t, "full", EncodingFull.String())
+	assert.Equal(t, "compact", EncodingCompact.String())
+
+	// the full encoding is larger but still fits the budget over the whole catalog
+	_, err := New(cfg, cat, &mocks.JevClientMock{}, EncodingFull)
+	require.NoError(t, err)
+	assert.Greater(t, questionLen(questionRoute, routeQuestion(cfg, "Q?", cat.Options, "", EncodingFull)),
+		questionLen(questionRoute, routeQuestion(cfg, "Q?", cat.Options, "", EncodingCompact)))
 }
 
 func TestNewQuestionOverBudget(t *testing.T) {

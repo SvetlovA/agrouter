@@ -1,0 +1,41 @@
+{
+  "model": "jev-latest",
+  "state": {
+    "prompt": "fix the flaky test in pkg/foo/foo_test.go",
+    "files": [
+      "package foo\n"
+    ],
+    "attachments": [
+      {
+        "source": "mentioned",
+        "type": "image/png",
+        "bytes": 48213
+      }
+    ]
+  },
+  "questions": {
+    "route": {
+      "type": "choice",
+      "instructions": "Which coding-agent CLI, model and reasoning effort should run the task described in `state` (its `prompt`, the `files` the prompt mentions, and `attachments`, where `attachments` lists images, PDFs and other non-text inputs the task includes, by type and size only)? Judge each option as a whole: the model and effort together must be strong enough to complete the task well, at the lowest cost and time that achieves that. Look up each option's `model` in `models` and its `cli` and `effort` in `efforts`.",
+      "criteria": {
+        "gpt-6-astra@low": "CLI codex: Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.\nModel gpt-6-astra: Frontier intelligence for the most demanding end-to-end reasoning, coding, computer use, research and documents, where quality and judgment dominate. $10 / $50 per MTok.\nEffort low: Modest reasoning for scoped tool use, planning and coding; favours latency and cost.",
+        "gpt-6-astra@medium": "CLI codex: Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.\nModel gpt-6-astra: Frontier intelligence for the most demanding end-to-end reasoning, coding, computer use, research and documents, where quality and judgment dominate. $10 / $50 per MTok.\nEffort medium: Balanced depth and reliability for multi-step agentic coding, research and everyday work.",
+        "gpt-6-astra@high": "CLI codex: Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.\nModel gpt-6-astra: Frontier intelligence for the most demanding end-to-end reasoning, coding, computer use, research and documents, where quality and judgment dominate. $10 / $50 per MTok.\nEffort high: Harder debugging and planning; favours quality over latency.",
+        "gpt-6-astra@xhigh": "CLI codex: Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.\nModel gpt-6-astra: Frontier intelligence for the most demanding end-to-end reasoning, coding, computer use, research and documents, where quality and judgment dominate. $10 / $50 per MTok.\nEffort xhigh: Long-running deep research, security or code review, where the gain justifies the extra cost and time.",
+        "gpt-6-astra@max": "CLI codex: Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.\nModel gpt-6-astra: Frontier intelligence for the most demanding end-to-end reasoning, coding, computer use, research and documents, where quality and judgment dominate. $10 / $50 per MTok.\nEffort max: The most demanding problems: more exploration and verification, depth over speed.",
+        "gpt-6-astra@ultra": "CLI codex: Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.\nModel gpt-6-astra: Frontier intelligence for the most demanding end-to-end reasoning, coding, computer use, research and documents, where quality and judgment dominate. $10 / $50 per MTok.\nEffort ultra: CLI-level orchestration that spawns parallel subagents automatically. Only for complex work that divides into meaningful independent parts.",
+        "gpt-6-sol@low": "CLI codex: Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.\nModel gpt-6-sol: Workhorse for complex coding and agent workflows; better factual reliability than 5.6 Sol. The capable everyday choice. $2 / $10 per MTok.\nEffort low: Modest reasoning for scoped tool use, planning and coding; favours latency and cost.",
+        "gpt-6-sol@medium": "CLI codex: Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.\nModel gpt-6-sol: Workhorse for complex coding and agent workflows; better factual reliability than 5.6 Sol. The capable everyday choice. $2 / $10 per MTok.\nEffort medium: Balanced depth and reliability for multi-step agentic coding, research and everyday work.",
+        "gpt-6-sol@high": "CLI codex: Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.\nModel gpt-6-sol: Workhorse for complex coding and agent workflows; better factual reliability than 5.6 Sol. The capable everyday choice. $2 / $10 per MTok.\nEffort high: Harder debugging and planning; favours quality over latency.",
+        "gpt-6-sol@xhigh": "CLI codex: Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.\nModel gpt-6-sol: Workhorse for complex coding and agent workflows; better factual reliability than 5.6 Sol. The capable everyday choice. $2 / $10 per MTok.\nEffort xhigh: Long-running deep research, security or code review, where the gain justifies the extra cost and time.",
+        "gpt-6-sol@max": "CLI codex: Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.\nModel gpt-6-sol: Workhorse for complex coding and agent workflows; better factual reliability than 5.6 Sol. The capable everyday choice. $2 / $10 per MTok.\nEffort max: The most demanding problems: more exploration and verification, depth over speed.",
+        "gpt-6-sol@ultra": "CLI codex: Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.\nModel gpt-6-sol: Workhorse for complex coding and agent workflows; better factual reliability than 5.6 Sol. The capable everyday choice. $2 / $10 per MTok.\nEffort ultra: CLI-level orchestration that spawns parallel subagents automatically. Only for complex work that divides into meaningful independent parts.",
+        "gpt-6-luna@low": "CLI codex: Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.\nModel gpt-6-luna: Fast and affordable: focused, high-volume extraction, classification, transformations, structured summaries and focused coding. $0.10 / $0.50 per MTok.\nEffort low: Modest reasoning for scoped tool use, planning and coding; favours latency and cost.",
+        "gpt-6-luna@medium": "CLI codex: Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.\nModel gpt-6-luna: Fast and affordable: focused, high-volume extraction, classification, transformations, structured summaries and focused coding. $0.10 / $0.50 per MTok.\nEffort medium: Balanced depth and reliability for multi-step agentic coding, research and everyday work.",
+        "gpt-6-luna@high": "CLI codex: Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.\nModel gpt-6-luna: Fast and affordable: focused, high-volume extraction, classification, transformations, structured summaries and focused coding. $0.10 / $0.50 per MTok.\nEffort high: Harder debugging and planning; favours quality over latency.",
+        "gpt-6-luna@xhigh": "CLI codex: Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.\nModel gpt-6-luna: Fast and affordable: focused, high-volume extraction, classification, transformations, structured summaries and focused coding. $0.10 / $0.50 per MTok.\nEffort xhigh: Long-running deep research, security or code review, where the gain justifies the extra cost and time.",
+        "gpt-6-luna@max": "CLI codex: Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.\nModel gpt-6-luna: Fast and affordable: focused, high-volume extraction, classification, transformations, structured summaries and focused coding. $0.10 / $0.50 per MTok.\nEffort max: The most demanding problems: more exploration and verification, depth over speed."
+      }
+    }
+  }
+}

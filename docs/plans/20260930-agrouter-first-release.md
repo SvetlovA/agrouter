@@ -488,20 +488,26 @@
 - Modify: `pkg/router/question.go`
 - Modify: `Makefile`
 
-- [ ] implement `AGROUTER_DEBUG=1`:
+- [x] implement `AGROUTER_DEBUG=1`:
   - option count, choice, top probabilities, confidence, the Jev failure reason;
   - eligible CLIs and why others were dropped;
   - per-chunk lines (field, index, relevance, top options) and the pooled top options;
   - the redacted final command, and the API key's source (never its value).
-- [ ] add the full per-criterion encoding option to the Choice request builder
-- [ ] define the eval case format (prompt or stdin file, optional mentioned files, acceptable option ids) and seed cases:
+- [x] add the full per-criterion encoding option to the Choice request builder
+- [x] define the eval case format (prompt or stdin file, optional mentioned files, acceptable option ids) and seed cases:
   - ralphex task, review and plan prompts; trivial edits; large refactors;
   - an oversized prompt with a buried requirement;
   - a requirement whose meaning depends on a distant chunk.
-- [ ] implement the `eval`-tagged test: route every case against the real Jev for both encodings, and report accuracy and the confidence distribution (split cases on accuracy only)
-- [ ] make `make eval-routing` run `go test -tags=eval ./pkg/router/...` (needs `TYPESAFE_API_KEY`; excluded from `make test` and CI)
-- [ ] write tests for debug output redaction (prompt shown as `<prompt>`, raw tokens counted, key never present) and for eval case loading/scoring against the mocked `JevClient`
-- [ ] run tests - must pass before next task
+- [x] implement the `eval`-tagged test: route every case against the real Jev for both encodings, and report accuracy and the confidence distribution (split cases on accuracy only)
+- [x] make `make eval-routing` run `go test -tags=eval ./pkg/router/...` (needs `TYPESAFE_API_KEY`; excluded from `make test` and CI)
+- [x] write tests for debug output redaction (prompt shown as `<prompt>`, raw tokens counted, key never present) and for eval case loading/scoring against the mocked `JevClient`
+- [x] run tests - must pass before next task
+- ➕ debug lines are `agrouter debug: ...` on stderr (`cmd/agrouter/debug.go`, a nil `*debugLog` when `AGROUTER_DEBUG` is not exactly `1`): `api key: from <layer>` (or `none (<layer>)`), `eligible: N option(s) on <clis>`, one `dropped <cli>: <reason>` per drop, model/effort passthrough, then `jev: choice …, confidence …, top [...]` (top 3, ties by id), per-chunk `chunk <field> i/of: relevance …, top [...]` plus `pooled: choice …`, `jev failed: …` when the CLI was known anyway, or `one option, jev not asked`; `no decision: …` before a cannot-decide exit; `command: <args.Result.Redacted()>`. Every line has the resolved key replaced with `<redacted>` as a second guard behind the Jev client's own redaction
+- ➕ `router.EncodingFull` (`Encoding.String()` gives `compact`/`full`): `instructions` is the question string, each criterion a `CLI …
+Model …
+Effort …` string; goldens `request_full_*.json`. The default question ends with a sentence pointing at the compact `instructions`, so the eval drops it for the full encoding (`evalQuestions`); the full encoding over the whole catalog still passes the budget check (capture limit ≈3.98 MB vs 4.60 MB compact)
+- ➕ the eval harness lives in `pkg/router/evalcase_test.go` (untagged, so loading, capture, routing and scoring are tested against the mock in `make test`); only `TestEvalRouting` is behind `//go:build eval`. Case format recorded in the design's Testing section; 10 seed cases, the largest (`oversized-buried-requirement-max`, ~3.8 MB of generated filler) split within `max_chunks` for both encodings. `make eval-routing` fails fast without `TYPESAFE_API_KEY`; the real run is in Post-Completion
+- ⚠️ as before, lint ran with the locally built golangci-lint v2.13.0 for `GOOS=windows`, `linux`, `darwin`, and with `--build-tags=eval` (0 issues)
 
 ### Task 18: CI workflow
 

@@ -34,6 +34,7 @@ type app struct {
 	embedded       []byte
 	newJev         func(key string) router.JevClient
 	runner         CommandRunner
+	debug          *debugLog // nil unless AGROUTER_DEBUG=1
 }
 
 // newApp returns an app wired to the real process environment.
@@ -84,6 +85,7 @@ func (a *app) run(argv []string) int {
 		return exitOK
 	}
 	req := cmd.req
+	a.debug = newDebugLog(a.getenv(envDebug), a.stderr)
 
 	cfg, cat, rt, err := a.setup(req)
 	if err != nil {
@@ -92,14 +94,17 @@ func (a *app) run(argv []string) int {
 
 	d, err := a.route(cfg, cat, rt, req)
 	if err != nil {
+		a.debug.failed(err)
 		return a.fail(err)
 	}
+	a.debug.decision(d.Decision)
 
 	cli, _ := cfg.CLIByName(d.CLI)
 	res := args.Build(cli, req, d.Choice())
 	for _, s := range res.Skipped {
 		fmt.Fprintln(a.stderr, s.Warning)
 	}
+	a.debug.command(res)
 
 	if req.Mode == args.ModeDecision {
 		return a.printDecision(d.Decision, res)
@@ -122,7 +127,8 @@ func (a *app) setup(req *args.Request) (*config.Config, *catalog.Catalog, *route
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("%w", err)
 	}
-	key, _ := config.ResolveAPIKey(req.APIKey.Value, req.APIKey.Set, a.getenv(config.EnvAPIKey), cfg.Agrouter)
+	key, source := config.ResolveAPIKey(req.APIKey.Value, req.APIKey.Set, a.getenv(config.EnvAPIKey), cfg.Agrouter)
+	a.debug.apiKey(key, source)
 	rt, err := router.New(cfg, cat, a.newJev(key), router.EncodingCompact)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("%w", err)
@@ -152,6 +158,7 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 	for _, w := range el.Warnings {
 		fmt.Fprintln(a.stderr, w)
 	}
+	a.debug.eligibility(el)
 	// one option runs without Jev, so the files the prompt mentions are not read for it
 	if len(el.Options) > 1 {
 		if err = captured.ReadMentions(ctx, a.workDir, limit); err != nil {

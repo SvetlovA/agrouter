@@ -1,0 +1,14 @@
+{
+  "description": "a one-word typo fix in a README",
+  "prompt": "fix the typo 'recieve' -> 'receive' in README.md",
+  "files": {
+    "README.md": "# demo\n\nCall recieve() to get the next message.\n"
+  },
+  "acceptable": [
+    "claude-haiku-4-5",
+    "claude-sonnet-5@low",
+    "gpt-6-luna@low",
+    "gpt-6-luna@medium",
+    "gpt-6-sol@low"
+  ]
+}

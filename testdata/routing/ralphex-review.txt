@@ -1,0 +1,9 @@
+Review the changes on the current branch against master (`git diff master...HEAD`). The branch adds OAuth2 login with PKCE, a session store in Redis and CSRF protection for the settings pages (about 2,400 changed lines across auth/, session/, web/ and migrations/).
+
+Look for:
+- correctness bugs and unhandled error paths;
+- security problems: token leakage in logs, session fixation, CSRF gaps, open redirects in the callback, timing-unsafe comparisons;
+- concurrency issues in the session store;
+- missing or weak tests.
+
+Report each finding with file:line, severity, and a concrete failure scenario. Do not report style nits. If there are no real issues, say so.

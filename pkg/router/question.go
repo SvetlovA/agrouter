@@ -24,7 +24,18 @@ const (
 	// EncodingCompact puts the descriptions once in a structured instructions object; each option's
 	// criterion names its cli, model and effort.
 	EncodingCompact Encoding = iota
+	// EncodingFull puts the question alone in instructions and each option's full cli, model and
+	// effort descriptions in its own criterion; larger, kept for the routing evaluation to compare.
+	EncodingFull
 )
+
+// String names the encoding, for debug and evaluation output.
+func (e Encoding) String() string {
+	if e == EncodingFull {
+		return "full"
+	}
+	return "compact"
+}
 
 // Criterion values for an option without an effort.
 const (
@@ -59,7 +70,10 @@ type routeInstructions struct {
 
 // routeQuestion is the joint Choice over opts, which must all come from cfg. effort is the
 // caller's passed-through effort, used for options without one of their own.
-func routeQuestion(cfg *config.Config, text string, opts []catalog.Option, effort string, _ Encoding) jev.Question {
+func routeQuestion(cfg *config.Config, text string, opts []catalog.Option, effort string, enc Encoding) jev.Question {
+	if enc == EncodingFull {
+		return fullRouteQuestion(cfg, text, opts, effort)
+	}
 	models := make(map[string]config.Model, len(cfg.Models))
 	for _, m := range cfg.Models {
 		models[m.Name] = m
@@ -87,11 +101,7 @@ func routeQuestion(cfg *config.Config, text string, opts []catalog.Option, effor
 			if _, ok := levels[o.CLI]; !ok {
 				efforts = append(efforts, o.CLI)
 			}
-			desc := descEffortPassed
-			if e, ok := cfg.Efforts[o.CLI+"."+eff]; ok {
-				desc = e.Description
-			}
-			levels[o.CLI] = append(levels[o.CLI], jev.Criterion{Name: eff, Value: desc})
+			levels[o.CLI] = append(levels[o.CLI], jev.Criterion{Name: eff, Value: effortDescription(cfg, o.CLI, eff)})
 		}
 		criteria = append(criteria, jev.Criterion{Name: o.ID,
 			Value: routeCriterion{CLI: o.CLI, Model: o.Name, Effort: label}})
@@ -100,6 +110,31 @@ func routeQuestion(cfg *config.Config, text string, opts []catalog.Option, effor
 		in.Efforts = append(in.Efforts, jev.Criterion{Name: cli, Value: levels[cli]})
 	}
 	return jev.Question{Type: jev.TypeChoice, Instructions: in, Criteria: criteria}
+}
+
+// fullRouteQuestion is the route question in EncodingFull: each criterion describes its option in
+// full, so no criterion refers to the instructions.
+func fullRouteQuestion(cfg *config.Config, text string, opts []catalog.Option, effort string) jev.Question {
+	models := make(map[string]config.Model, len(cfg.Models))
+	for _, m := range cfg.Models {
+		models[m.Name] = m
+	}
+	criteria := make(jev.Criteria, 0, len(opts))
+	for _, o := range opts {
+		cli, _ := cfg.CLIByName(o.CLI)
+		desc := fmt.Sprintf("CLI %s: %s\nModel %s: %s\n", o.CLI, cli.Description, o.Name, modelDescription(models, o))
+		eff := o.Effort
+		if eff == "" {
+			eff = effort
+		}
+		if eff == "" {
+			desc += "Effort: " + effortNone
+		} else {
+			desc += fmt.Sprintf("Effort %s: %s", eff, effortDescription(cfg, o.CLI, eff))
+		}
+		criteria = append(criteria, jev.Criterion{Name: o.ID, Value: desc})
+	}
+	return jev.Question{Type: jev.TypeChoice, Instructions: text, Criteria: criteria}
 }
 
 // relevanceQuestion is the Noul asked beside the route question in a chunk request.
@@ -115,6 +150,13 @@ func modelDescription(models map[string]config.Model, o catalog.Option) string {
 		return m.Description
 	}
 	return descModelPassed
+}
+
+func effortDescription(cfg *config.Config, cli, effort string) string {
+	if e, ok := cfg.Efforts[cli+"."+effort]; ok {
+		return e.Description
+	}
+	return descEffortPassed
 }
 
 func has(obj object, name string) bool {

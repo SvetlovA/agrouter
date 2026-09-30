@@ -23,8 +23,9 @@ fmt:
 generate:
 	go generate ./...
 
-# placeholder: runs the build-tagged routing evaluation against the real Jev API (needs TYPESAFE_API_KEY), never in CI
+# routes testdata/routing against the real Jev API with both encodings (needs TYPESAFE_API_KEY), never in CI
 eval-routing:
-	@echo "eval-routing: not implemented yet"
+	@test -n "$$TYPESAFE_API_KEY" || { echo "eval-routing: TYPESAFE_API_KEY is not set"; exit 1; }
+	go test -tags=eval -count=1 -v -run TestEvalRouting -timeout 60m ./pkg/router/...
 
 .PHONY: all build test lint fmt generate eval-routing
