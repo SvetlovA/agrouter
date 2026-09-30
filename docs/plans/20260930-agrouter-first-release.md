@@ -241,14 +241,14 @@
 - Create: `pkg/args/redact.go`
 - Create: `pkg/args/build_test.go`
 
-- [ ] implement template substitution (`{model}`, `{effort}`, `{value}` inside tokens; `{prompt}` as a whole token, dropped when there is no positional prompt) with no shell quoting
-- [ ] implement argv building in the design order (command, `print`, mapped args in caller order, model, effort, `prompt`, raw passthrough only with `--cli`), emitting each mapping key once
-- [ ] collect skipped arguments as caller spellings plus warning lines in the design's format:
+- [x] implement template substitution (`{model}`, `{effort}`, `{value}` inside tokens; `{prompt}` as a whole token, dropped when there is no positional prompt) with no shell quoting
+- [x] implement argv building in the design order (command, `print`, mapped args in caller order, model, effort, `prompt`, raw passthrough only with `--cli`), emitting each mapping key once
+- [x] collect skipped arguments as caller spellings plus warning lines in the design's format:
   - a missing key → "has no mapping";
   - `[]` → "maps to nothing";
   - raw tokens without `--cli`.
-- [ ] implement a redacted rendering for debug (`{prompt}` → `<prompt>`, raw tokens as a count, API key never present)
-- [ ] write tests:
+- [x] implement a redacted rendering for debug (`{prompt}` → `<prompt>`, raw tokens as a count, API key never present)
+- [x] write tests:
   - v1 golden argv for Claude and Codex for every `--output-format` and `--permission-mode` value, with the `print` mapping emitted even without `-p`;
   - Codex without `--permission-mode` gets no `--skip-git-repo-check`; bypass aliases give one mapping;
   - contradictions translated in order (two `--sandbox`);
@@ -256,8 +256,10 @@
   - `{prompt}` with spaces/quotes/newlines as one token and dropped when absent; prompt-at-end via the `prompt` key;
   - a model without efforts getting no effort argument;
   - the skipped warning text; `--cli`/`--jev-api-key` never in argv.
-- [ ] write tests for a made-up CLI defined only in config (value-keyed mapping to a different flag, an `[]` mapping, custom `print`)
-- [ ] run tests - must pass before next task
+- [x] write tests for a made-up CLI defined only in config (value-keyed mapping to a different flag, an `[]` mapping, custom `print`)
+- [x] run tests - must pass before next task
+- ➕ `args.Build(cli, req, Choice)` takes a `Choice` (model, effort, the caller's effort spelling, `Pinned` for a valid `--cli`); raw passthrough is appended only when `Pinned`, so an unknown `--cli` also skips raw tokens. Arguments are deduplicated by mapping key plus `-c` value, so `-c k=1 -c k=2` both reach Codex and an identical repeat is emitted once; a CLI without an `effort` mapping skips a caller's effort with a warning. Raw tokens without `--cli` give one warning: `skipped N raw argument(s) after --: passed through only with --cli`
+- ⚠️ the local golangci-lint 2.12.2 (built with go1.26.2) prints typecheck errors on the Go 1.27.1 stdlib (`math/rand/v2`) for every package, including ones this task did not touch, and still reports 0 issues; CI's pinned v2.13.0 is unaffected
 
 ### Task 8: Prompt capture, stdin and non-text input (`pkg/prompt`)
 
