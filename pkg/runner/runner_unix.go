@@ -4,7 +4,6 @@ package runner
 
 import (
 	"context"
-	"errors"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -12,17 +11,17 @@ import (
 	"syscall"
 )
 
-// newCmd returns the command for path, in a new session and so its own process group, which is what
-// signals are forwarded to and what is killed.
+// newCmd returns the command for path. The child stays in agrouter's process group, so a signal or
+// kill sent to that group (a terminal's Ctrl+C, a caller such as ralphex killing the group it started)
+// reaches the child and its descendants too, even when it also kills agrouter outright.
 func newCmd(ctx context.Context, path string, args []string) (*exec.Cmd, error) {
-	cmd := exec.CommandContext(ctx, path, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	return cmd, nil
+	return exec.CommandContext(ctx, path, args...), nil
 }
 
-// tree is the child's process group. SIGINT, SIGTERM, SIGHUP and SIGQUIT to agrouter are forwarded to
-// it while the child runs; in its own session the child would not get a Ctrl+C or a terminal hangup
-// otherwise, and an uncaught SIGHUP would kill agrouter and leave the child running.
+// tree is the child. While it runs, agrouter catches SIGINT, SIGTERM, SIGHUP and SIGQUIT so it outlives
+// the child and returns its exit code. SIGTERM and SIGHUP, often sent to agrouter's pid alone, are
+// forwarded to the child; SIGINT and SIGQUIT come from the terminal to the whole group, so the child
+// already has them and forwarding would deliver them twice.
 type tree struct {
 	cmd  *exec.Cmd
 	sigs chan os.Signal
@@ -30,21 +29,21 @@ type tree struct {
 	once sync.Once
 }
 
-// newTree starts catching the forwarded signals, so one arriving while the child starts is not lost.
+// newTree starts catching the signals, so one arriving while the child starts is not lost.
 func newTree(cmd *exec.Cmd) *tree {
 	t := &tree{cmd: cmd, sigs: make(chan os.Signal, 4), done: make(chan struct{})}
 	signal.Notify(t.sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 	return t
 }
 
-// started forwards the caught signals to the group until release.
+// started forwards SIGTERM and SIGHUP to the child until release.
 func (t *tree) started() {
 	go func() {
 		for {
 			select {
 			case s := <-t.sigs:
-				if sig, ok := s.(syscall.Signal); ok {
-					_ = t.signal(sig)
+				if s == syscall.SIGTERM || s == syscall.SIGHUP {
+					_ = t.signal(s)
 				}
 			case <-t.done:
 				return
@@ -53,30 +52,22 @@ func (t *tree) started() {
 	}()
 }
 
-// cancel asks the group to stop on cancellation; exec.Cmd kills the direct child after waitDelay and
-// release kills whatever is left.
+// cancel asks the child to stop on cancellation; exec.Cmd kills it after waitDelay.
 func (t *tree) cancel() error { return t.signal(syscall.SIGTERM) }
 
-// release stops forwarding and kills what remains of the group (descendants that outlived the child).
+// release stops catching the signals.
 func (t *tree) release() {
 	t.once.Do(func() {
 		signal.Stop(t.sigs)
 		close(t.done)
-		if t.cmd.Process != nil {
-			_ = t.signal(syscall.SIGKILL)
-		}
 	})
 }
 
-func (t *tree) signal(sig syscall.Signal) error {
-	if t.cmd.Process == nil || t.cmd.Process.Pid <= 0 {
+func (t *tree) signal(sig os.Signal) error {
+	if t.cmd.Process == nil {
 		return os.ErrProcessDone
 	}
-	err := syscall.Kill(-t.cmd.Process.Pid, sig)
-	if errors.Is(err, syscall.ESRCH) {
-		return os.ErrProcessDone
-	}
-	return err //nolint:wrapcheck // returned to exec.Cmd.Cancel
+	return t.cmd.Process.Signal(sig) //nolint:wrapcheck // returned to exec.Cmd.Cancel
 }
 
 // exitCode is the child's exit status, or 128+signal when a signal killed it.

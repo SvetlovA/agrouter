@@ -17,7 +17,7 @@ pkg/args/              # request model, argv building from templates, skipped ar
 pkg/prompt/            # prompt capture, stdin, binary detection, mentioned files, budget, chunking
 pkg/jev/               # hand-written TypeSafe HTTP client: types, validation, retry, deadline
 pkg/router/            # eligibility, Jev questions, chunk fan-out and pooling, cannot-decide policy
-pkg/runner/            # child process, stdin replay, Unix process groups / Windows Job Objects, .cmd quoting
+pkg/runner/            # child process, stdin replay, Unix signals / Windows Job Objects, .cmd quoting
 ```
 
 Dependencies point one way: `config` <- `catalog` <- `router`; `prompt` depends on nothing internal; `cmd/agrouter` wires everything.

@@ -1,6 +1,6 @@
 // Package runner runs the chosen CLI as a child process: no shell, the caller's stdin replayed then
-// relayed, the parent's stdout and stderr, the child's exit code, and the whole process tree killed on
-// cancellation (a process group on Unix, a Job Object on Windows).
+// relayed, the parent's stdout and stderr, the child's exit code, and the child stopped on cancellation
+// (in agrouter's process group on Unix, so a group kill reaches its tree; a Job Object on Windows).
 package runner
 
 import (
@@ -51,7 +51,7 @@ type Runner struct{}
 
 // Run runs c to completion and returns the child's exit code (128+signal for a child killed by a
 // signal on Unix). A command that cannot be started returns ExitStartFailure and a *StartError; no
-// other error is returned. Canceling ctx kills the child's process tree.
+// other error is returned. Canceling ctx stops the child (and its whole tree on Windows).
 func (Runner) Run(ctx context.Context, c Command) (int, error) {
 	if len(c.Argv) == 0 || c.Argv[0] == "" {
 		return ExitStartFailure, &StartError{Err: errors.New("empty command")}
