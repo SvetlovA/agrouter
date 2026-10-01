@@ -27,7 +27,7 @@ func gone(pid int, timeout time.Duration) bool {
 }
 
 func TestRun_ForwardsSignals(t *testing.T) {
-	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM} {
+	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT} {
 		t.Run(sig.String(), func(t *testing.T) {
 			c, dir := helperCommand(t, "trap")
 			done := make(chan int, 1)

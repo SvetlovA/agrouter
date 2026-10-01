@@ -20,8 +20,9 @@ func newCmd(ctx context.Context, path string, args []string) (*exec.Cmd, error) 
 	return cmd, nil
 }
 
-// tree is the child's process group. SIGINT and SIGTERM to agrouter are forwarded to it while the
-// child runs; outside the terminal's foreground group, the child would not get a Ctrl+C otherwise.
+// tree is the child's process group. SIGINT, SIGTERM, SIGHUP and SIGQUIT to agrouter are forwarded to
+// it while the child runs; in its own session the child would not get a Ctrl+C or a terminal hangup
+// otherwise, and an uncaught SIGHUP would kill agrouter and leave the child running.
 type tree struct {
 	cmd  *exec.Cmd
 	sigs chan os.Signal
@@ -29,10 +30,10 @@ type tree struct {
 	once sync.Once
 }
 
-// newTree starts catching SIGINT and SIGTERM, so one arriving while the child starts is not lost.
+// newTree starts catching the forwarded signals, so one arriving while the child starts is not lost.
 func newTree(cmd *exec.Cmd) *tree {
 	t := &tree{cmd: cmd, sigs: make(chan os.Signal, 4), done: make(chan struct{})}
-	signal.Notify(t.sigs, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(t.sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 	return t
 }
 

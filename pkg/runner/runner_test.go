@@ -46,8 +46,8 @@ func TestMain(m *testing.M) {
 //   - sleep: writes its pid to $RUNNER_HELPER_OUT/pid, then sleeps;
 //   - spawn-wait, spawn-exit: starts a sleeping grandchild (pid in $RUNNER_HELPER_OUT/grandchild), then
 //     sleeps or exits 0;
-//   - trap: catches SIGINT/SIGTERM, writes $RUNNER_HELPER_OUT/ready, and on a signal writes its name to
-//     $RUNNER_HELPER_OUT/signal and exits 42.
+//   - trap: catches SIGINT/SIGTERM/SIGHUP/SIGQUIT, writes $RUNNER_HELPER_OUT/ready, and on a signal
+//     writes its name to $RUNNER_HELPER_OUT/signal and exits 42.
 func helper() int {
 	out := os.Getenv(helperOut)
 	code, _ := strconv.Atoi(os.Getenv(helperExit))
@@ -85,7 +85,7 @@ func helper() int {
 		return 0
 	case "trap":
 		sigs := make(chan os.Signal, 1)
-		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 		_ = os.WriteFile(filepath.Join(out, "ready"), nil, 0o600)
 		select {
 		case s := <-sigs:
