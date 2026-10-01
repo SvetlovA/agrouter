@@ -56,7 +56,6 @@ func TestEmbeddedCatalog(t *testing.T) {
 
 	assert.Equal(t, catalog.Option{ID: "claude-opus-5-5@high", CLI: "claude", Section: "claude-opus-5-5",
 		Name: "claude-opus-5-5", Effort: "high"}, c.Options[7])
-	assert.Len(t, c.Models(), 7)
 }
 
 func TestModelWithoutEfforts(t *testing.T) {
@@ -164,9 +163,6 @@ func TestLookupModel(t *testing.T) {
 			} else {
 				assert.Equal(t, config.Model{}, m)
 			}
-			name, inCatalog := c.ResolveModel(tt.value)
-			assert.Equal(t, tt.wantName, name)
-			assert.Equal(t, tt.inCatalog, inCatalog)
 		})
 	}
 }
@@ -176,9 +172,6 @@ func TestLookupSkipsDisabledModel(t *testing.T) {
 	require.NoError(t, err)
 	_, ok := c.LookupModel("opus")
 	assert.False(t, ok, "a disabled model's alias is not in the catalog")
-	name, inCatalog := c.ResolveModel("opus")
-	assert.Equal(t, "opus", name)
-	assert.False(t, inCatalog)
 }
 
 func TestFilters(t *testing.T) {
@@ -195,9 +188,4 @@ func TestFilters(t *testing.T) {
 	assert.Empty(t, catalog.ByModel(c.Options, "nope"))
 	assert.Empty(t, catalog.ByEffort(c.Options, "turbo"))
 	assert.Empty(t, catalog.CLIs(nil))
-
-	assert.True(t, c.HasEffort("ultra"))
-	assert.True(t, c.HasEffort("low"))
-	assert.False(t, c.HasEffort("turbo"))
-	assert.False(t, c.HasEffort(""), "the bare haiku option has no effort to match")
 }

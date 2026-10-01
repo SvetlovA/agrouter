@@ -56,11 +56,6 @@ func Build(cfg *config.Config) (*Catalog, error) {
 	return c, nil
 }
 
-// Models returns the enabled models in catalog order.
-func (c *Catalog) Models() []config.Model {
-	return slices.Clone(c.models)
-}
-
 // LookupModel finds the enabled model whose name or one of whose aliases equals value.
 // ok is false when value is not in the catalog; the caller then passes value through unchanged.
 func (c *Catalog) LookupModel(value string) (config.Model, bool) {
@@ -70,21 +65,6 @@ func (c *Catalog) LookupModel(value string) (config.Model, bool) {
 		}
 	}
 	return config.Model{}, false
-}
-
-// ResolveModel returns the model name for value: the catalog name when value is a name or alias,
-// otherwise value itself with inCatalog false, to be passed through for the CLI to validate.
-func (c *Catalog) ResolveModel(value string) (name string, inCatalog bool) {
-	if m, ok := c.LookupModel(value); ok {
-		return m.Name, true
-	}
-	return value, false
-}
-
-// HasEffort reports whether any option has the given effort. The empty effort of a model without
-// efforts is not an effort, so HasEffort("") is false.
-func (c *Catalog) HasEffort(effort string) bool {
-	return effort != "" && slices.ContainsFunc(c.Options, func(o Option) bool { return o.Effort == effort })
 }
 
 // ByCLI keeps the options of the named CLI.

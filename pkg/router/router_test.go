@@ -116,6 +116,9 @@ func TestRouteGoldenRequest(t *testing.T) {
 		{name: "cli_claude", req: &args.Request{CLI: "claude"}, choice: "claude-haiku-4-5"},
 		{name: "effort_passthrough", req: &args.Request{CLI: "claude", Effort: "turbo", EffortSource: args.SourceFlag},
 			choice: "claude-haiku-4-5"},
+		{name: "model_passthrough", req: &args.Request{Model: "gpt-9", ModelSource: args.SourceFlag}, choice: "codex"},
+		{name: "full_model_passthrough", req: &args.Request{Model: "gpt-9", ModelSource: args.SourceFlag},
+			choice: "codex", enc: EncodingFull},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

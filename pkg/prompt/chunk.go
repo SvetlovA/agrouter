@@ -84,7 +84,12 @@ type ChunkState struct {
 
 // Fits reports whether the whole state fits in one request.
 func (r *Result) Fits(b Budget) bool {
-	return Tokens(mustLen(r.State())) <= b.State
+	return r.StateTokens() <= b.State
+}
+
+// StateTokens is the estimated size in tokens of the whole state.
+func (r *Result) StateTokens() int {
+	return Tokens(mustLen(r.State()))
 }
 
 // Split returns nil when the state fits in one request, and otherwise the anchor and the chunks
@@ -104,7 +109,7 @@ func (r *Result) Split(b Budget, maxChunks int) (*Split, error) {
 		anchor.Prompt, promptWhole = nil, false
 	}
 	room := chunkRoom(b, mustLen(anchor), maxChunks)
-	if room < len(`�`) {
+	if room < len(`\u0000`) { // the widest escaped rune, so cut advances
 		return nil, fmt.Errorf("%w: no room for chunk text", ErrQuestionsOverBudget)
 	}
 
@@ -216,7 +221,7 @@ func summarize(atts []Attachment) []Attachment {
 			idx[k] = i
 			out = append(out, Attachment{Source: at.Source, Type: at.Type})
 		}
-		out[i].Count += max(at.Count, 1)
+		out[i].Count++
 		out[i].Bytes += at.Bytes
 	}
 	return out

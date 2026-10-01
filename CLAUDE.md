@@ -24,7 +24,7 @@ Dependencies point one way: `config` <- `catalog` <- `router`; `prompt` depends 
 
 ## Rules
 
-- **No CLI names in code.** Nothing outside `pkg/config/defaults` may name `claude`/`codex`; `cmd/agrouter/guard_test.go` enforces it (struct tags and `helpText` exempt). Per-CLI behavior belongs in `[cli.*]`/`[cli.*.args]` config.
+- **No CLI names in code.** No production Go code outside `pkg/config/defaults` may name `claude`/`codex`; `cmd/agrouter/guard_test.go` enforces it (struct tags and `helpText` exempt; tests, testdata and mocks may name them). Per-CLI behavior belongs in `[cli.*]`/`[cli.*.args]` config.
 - **stdout carries only the decision JSON** (and `--help`/`--version`). Warnings, one-line `agrouter:` errors and `AGROUTER_DEBUG=1` output go to stderr, with the prompt and API key redacted.
 - Unmapped arguments are skipped with a warning, never errors; values outside the catalog are passed through. Exit `2` only for the cases in the design's "Still errors" list; `127` when the child can't start.
 
@@ -50,7 +50,7 @@ make test       # locally without -race (no cgo on the dev machine); CI runs mak
 make lint       # golangci-lint v2.13.0 (CI pin); override with GOLANGCI_LINT=<path>
 make build      # .bin/agrouter
 make generate   # moq mocks
-make fmt
+make fmt        # needs goimports: go install golang.org/x/tools/cmd/goimports@latest
 ```
 
 Older golangci-lint builds (e.g. 2.12.2) cannot typecheck the Go 1.27 stdlib and silently skip packages; use v2.13.0 built with the local Go (`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.0`). Check lint for `GOOS=linux` and `GOOS=darwin` too, and with `--build-tags=eval`.

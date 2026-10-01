@@ -34,11 +34,14 @@ type Eligibility struct {
 }
 
 // EffortFor returns the effort to emit for o: its own, or the caller's passed-through value.
-func (e *Eligibility) EffortFor(o catalog.Option) string {
+func (e *Eligibility) EffortFor(o catalog.Option) string { return optionEffort(o, e.effort) }
+
+// optionEffort returns o's own effort, or passed when o has none.
+func optionEffort(o catalog.Option, passed string) string {
 	if o.Effort != "" {
 		return o.Effort
 	}
-	return e.effort
+	return passed
 }
 
 // CLIs returns the distinct CLIs still eligible, in catalog order.
@@ -76,16 +79,17 @@ func (e *Eligibility) filterModel(cat *catalog.Catalog, value string) {
 	if value == "" {
 		return
 	}
+	name := value
 	if m, ok := cat.LookupModel(value); ok {
 		if kept := catalog.ByModel(e.Options, m.Section); len(kept) > 0 {
 			e.drop(kept, "--model "+value)
 			e.Options = kept
 			return
 		}
+		name = m.Name
 	}
 	// outside the catalog, or a catalog model of a CLI already dropped: one option per remaining CLI
 	// with the model fixed, for that CLI to validate
-	name, _ := cat.ResolveModel(value)
 	var opts []catalog.Option
 	for _, cli := range catalog.CLIs(e.Options) {
 		opts = append(opts, catalog.Option{ID: cli, CLI: cli, Name: name})

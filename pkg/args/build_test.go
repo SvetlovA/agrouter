@@ -40,7 +40,7 @@ func cfgArg(kv string) Arg {
 			break
 		}
 	}
-	return Arg{Spelling: "-c " + kv, Key: ConfigKeyPrefix + key, Value: kv}
+	return Arg{Spelling: "-c " + kv, Key: config.ConfigKeyPrefix + key, Value: kv}
 }
 
 func spellings(skipped []Skip) []string {
@@ -208,8 +208,8 @@ func TestBuildPrompt(t *testing.T) {
 
 	// prompt at the end through the prompt key
 	codex.Args = cloneArgs(codex.Args)
-	codex.Args[KeyPrint] = []string{"exec"}
-	codex.Args[KeyPrompt] = []string{"{prompt}"}
+	codex.Args[config.KeyPrint] = []string{"exec"}
+	codex.Args[config.KeyPrompt] = []string{"{prompt}"}
 	res = Build(codex, &Request{Prompt: Optional{Value: prompt, Set: true}, Args: []Arg{flag("output-format", "stream-json")},
 		Raw: []string{"--search"}}, Choice{Model: "gpt-6-sol", Effort: "high", Pinned: true})
 	assert.Equal(t, []string{"codex", "exec", "--json", "--model", "gpt-6-sol", "-c", `model_reasoning_effort="high"`,
@@ -228,7 +228,8 @@ func TestBuildModelAndEffort(t *testing.T) {
 	noEffort := config.CLI{Name: "mini", Command: "mini", Args: map[string][]string{
 		"print": {"run", "{prompt}"}, "model": {"-m", "{model}"},
 	}}
-	res = Build(noEffort, &Request{}, Choice{Model: "m1", Effort: "high", EffortSpell: "-c model_reasoning_effort=high"})
+	req := &Request{Effort: "high", EffortSource: SourceConfig, EffortSpell: "-c model_reasoning_effort=high"}
+	res = Build(noEffort, req, Choice{Model: "m1", Effort: "high"})
 	assert.Equal(t, []string{"mini", "run", "-m", "m1"}, res.Argv)
 	require.Len(t, res.Skipped, 1)
 	assert.Equal(t, "agrouter: warning: skipped -c model_reasoning_effort=high: mini has no mapping for it",

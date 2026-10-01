@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/jessevdk/go-flags"
 
 	"github.com/SvetlovA/agrouter/pkg/args"
+	"github.com/SvetlovA/agrouter/pkg/config"
 )
 
 // execToken selects exec mode, but only as the first token.
@@ -31,16 +33,18 @@ const slashEscape = "\x00"
 
 // helpText is the long description in --help, including the API key cautions from the design.
 const helpText = `agrouter asks TypeSafe's Jev which (cli, model, effort) should run a prompt.
-Without "exec" it prints that decision as one JSON line; with "exec" as the first
-token it runs the chosen CLI with the arguments translated through its config.
+Without "exec" it prints that decision as one JSON line; with "exec" as the
+first token it runs the chosen CLI with the arguments translated through its
+config.
 
 The prompt is the positional argument and/or stdin. Tokens after "--" are
 passed to the chosen CLI unchanged, only with --cli.
 
-The Jev API key comes from --jev-api-key, then TYPESAFE_API_KEY, then api_key in
-the config. A key on the command line is visible to other local users in process
-listings; prefer the environment variable or the global config with user-only
-permissions, and never put it in a local .agrouter/config that may be committed.`
+The Jev API key comes from --jev-api-key, then TYPESAFE_API_KEY, then api_key
+in the config. A key on the command line is visible to other local users in
+process listings; prefer the environment variable or the global config with
+user-only permissions, and never put it in a local .agrouter/config that may
+be committed.`
 
 // command is the outcome of parsing: a request to route, or --help / --version.
 type command struct {
@@ -74,7 +78,7 @@ func parseArgs(argv []string, getenv func(string) string) (command, error) {
 	if err != nil {
 		var flagsErr *flags.Error
 		if errors.As(err, &flagsErr) && flagsErr.Type == flags.ErrHelp {
-			return command{help: flagsErr.Message}, nil
+			return command{help: posixHelp(flagsErr.Message)}, nil
 		}
 		return command{}, fmt.Errorf("%s", unescape(err.Error()))
 	}
@@ -137,7 +141,8 @@ func newFlagSet(req *args.Request, cliSet *bool) *flagSet {
 		},
 		Model: func(v string) { req.Model, req.ModelSource = unescape(v), args.SourceFlag },
 		Effort: func(v string) {
-			req.Effort, req.EffortSource = unescape(v), args.SourceFlag
+			v = unescape(v)
+			req.Effort, req.EffortSource, req.EffortSpell = v, args.SourceFlag, "--effort "+v
 		},
 		PermissionMode:  valueKeyed("permission-mode"),
 		SkipPermissions: plain("dangerously-skip-permissions", bypassKey),
@@ -148,7 +153,7 @@ func newFlagSet(req *args.Request, cliSet *bool) *flagSet {
 		Config: func(v string) {
 			v = unescape(v)
 			key, _, _ := strings.Cut(v, "=")
-			req.Args = append(req.Args, args.Arg{Spelling: "-c " + v, Key: args.ConfigKeyPrefix + key, Value: v})
+			req.Args = append(req.Args, args.Arg{Spelling: "-c " + v, Key: config.ConfigKeyPrefix + key, Value: v})
 		},
 	}
 }
@@ -160,10 +165,10 @@ func applyConfigConstraints(req *args.Request) {
 	for _, a := range req.Args {
 		_, value, _ := strings.Cut(a.Value, "=")
 		switch {
-		case a.Key == args.ConfigKeyPrefix+configModelKey && req.ModelSource != args.SourceFlag:
+		case a.Key == config.ConfigKeyPrefix+configModelKey && req.ModelSource != args.SourceFlag:
 			req.Model, req.ModelSource = unquoteTOML(value), args.SourceConfig
-		case a.Key == args.ConfigKeyPrefix+configEffortKey && req.EffortSource != args.SourceFlag:
-			req.Effort, req.EffortSource = unquoteTOML(value), args.SourceConfig
+		case a.Key == config.ConfigKeyPrefix+configEffortKey && req.EffortSource != args.SourceFlag:
+			req.Effort, req.EffortSource, req.EffortSpell = unquoteTOML(value), args.SourceConfig, a.Spelling
 		default:
 			kept = append(kept, a)
 		}
@@ -198,6 +203,46 @@ func escapeSlashes(argv []string) []string {
 		out[i] = a
 	}
 	return out
+}
+
+// windowsOption matches one option name as go-flags renders it in Windows help: "/p", "/print",
+// "/cli:NAME", with the spaces that pad it to the description column.
+var windowsOption = regexp.MustCompile(`/([^\s,:]+)(:\S+)?( *)`)
+
+// posixHelp rewrites go-flags' Windows help, which lists "/cli:NAME" and "/p, /print", to the
+// spellings agrouter accepts, "--cli=NAME" and "-p, --print", keeping the description column. The
+// "/?" line is dropped: escapeSlashes makes "/?" a prompt. Help on other platforms is unchanged.
+func posixHelp(help string) string {
+	lines := strings.Split(help, "\n")
+	out := lines[:0]
+	for _, line := range lines {
+		trimmed := strings.TrimLeft(line, " ")
+		if !strings.HasPrefix(trimmed, "/") {
+			out = append(out, line)
+			continue
+		}
+		if strings.HasPrefix(trimmed, "/? ") {
+			continue
+		}
+		indent := line[:len(line)-len(trimmed)]
+		name, desc := trimmed, ""
+		if i := strings.Index(trimmed, "  "); i >= 0 {
+			name, desc = trimmed[:i], trimmed[i:]
+		}
+		renamed := windowsOption.ReplaceAllStringFunc(name, func(m string) string {
+			sub := windowsOption.FindStringSubmatch(m)
+			dash := "--"
+			if len(sub[1]) == 1 {
+				dash = "-"
+			}
+			return dash + sub[1] + strings.Replace(sub[2], ":", "=", 1) + sub[3]
+		})
+		// take the added width out of the padding so descriptions stay aligned
+		pad := len(desc) - len(strings.TrimLeft(desc, " "))
+		desc = desc[min(max(len(renamed)-len(name), 0), max(pad-1, 0)):]
+		out = append(out, indent+renamed+desc)
+	}
+	return strings.Join(out, "\n")
 }
 
 // unescape reverses escapeSlashes for one value, or inside an error message.

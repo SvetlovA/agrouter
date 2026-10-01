@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,7 +38,7 @@ var (
 	ErrMalformed = errors.New("malformed response")
 )
 
-// StatusError is a non-200 response. Body is truncated and has the key redacted.
+// StatusError is a non-200 response. Body is truncated and has the key and the state's text redacted.
 type StatusError struct {
 	Status int
 	Body   string
@@ -110,7 +111,7 @@ func (c *Client) Ask(ctx context.Context, req Request) (map[string]Answer, error
 			answers, decodeErr := decode(data, req.Questions)
 			return answers, c.redact(decodeErr)
 		}
-		serr := &StatusError{Status: status, Body: c.errorBody(data)}
+		serr := &StatusError{Status: status, Body: c.errorBody(data, req.State)}
 		if !errors.Is(serr, ErrOverloaded) {
 			return nil, serr
 		}
@@ -172,9 +173,14 @@ func (c *Client) wait(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-// errorBody is the start of an error response, key redacted, on one line.
-func (c *Client) errorBody(data []byte) string {
-	s := strings.Join(strings.Fields(c.redactString(string(data))), " ")
+// errorBody is the start of an error response on one line, with the key and every string of state
+// redacted: a validation error may echo the request, and the prompt must not reach stderr.
+func (c *Client) errorBody(data []byte, state any) string {
+	s := c.redactString(string(data))
+	for _, v := range stateStrings(state) {
+		s = strings.ReplaceAll(s, v, redacted)
+	}
+	s = strings.Join(strings.Fields(s), " ")
 	if len(s) > maxErrorBody {
 		s = s[:maxErrorBody] + "..."
 	}
@@ -186,6 +192,44 @@ func (c *Client) redactString(s string) string {
 		return s
 	}
 	return strings.ReplaceAll(s, c.key, redacted)
+}
+
+// stateStrings returns every string value in state, as is and JSON-escaped, longest first so a
+// string is redacted before any shorter one inside it.
+func stateStrings(state any) []string {
+	data, err := json.Marshal(state)
+	if err != nil {
+		return nil
+	}
+	var tree any
+	if json.Unmarshal(data, &tree) != nil {
+		return nil
+	}
+	var out []string
+	var walk func(v any)
+	walk = func(v any) {
+		switch v := v.(type) {
+		case string:
+			if v == "" {
+				return
+			}
+			out = append(out, v)
+			if quoted, err := json.Marshal(v); err == nil && string(quoted[1:len(quoted)-1]) != v {
+				out = append(out, string(quoted[1:len(quoted)-1]))
+			}
+		case []any:
+			for _, e := range v {
+				walk(e)
+			}
+		case map[string]any:
+			for _, e := range v {
+				walk(e)
+			}
+		}
+	}
+	walk(tree)
+	slices.SortFunc(out, func(a, b string) int { return len(b) - len(a) })
+	return out
 }
 
 // redact hides the key in err's message and keeps err in the chain for errors.Is.

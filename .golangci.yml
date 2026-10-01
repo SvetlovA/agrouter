@@ -84,6 +84,10 @@ linters:
       line-length: 140
     misspell:
       locale: US
+    wrapcheck:
+      # errors from this module's packages already carry their context
+      ignore-package-globs:
+        - github.com/SvetlovA/agrouter/pkg/*
     revive:
       rules:
         - name: early-return

@@ -8,7 +8,7 @@ agrouter picks the best `(cli, model, effort)` for a prompt from a configured ca
 ```bash
 # decision: which CLI, model and effort, and the argv to run them with
 agrouter -p "fix the flaky test in pkg/foo" --dangerously-skip-permissions --output-format stream-json
-# {"cli":"codex","model":"gpt-6-sol","effort":"medium","argv":["codex","exec","fix the flaky test in pkg/foo","--dangerously-bypass-approvals-and-sandbox","--skip-git-repo-check","--json","--model","gpt-6-sol","-c","model_reasoning_effort=\"medium\""]}
+# {"cli":"codex","model":"gpt-6-sol","effort":"medium","argv":["codex","exec","fix the flaky test in pkg/foo","--dangerously-bypass-approvals-and-sandbox","--skip-git-repo-check","--json","--model","gpt-6-sol","-c","model_reasoning_effort=\"medium\""],"skipped":[]}
 
 # exec: run it
 agrouter exec --dangerously-skip-permissions --output-format stream-json --verbose --print < prompt.txt
@@ -77,7 +77,7 @@ agrouter's argument names and style follow Claude Code. They fall into three gro
 | `--jev-api-key=KEY` | `TYPESAFE_API_KEY` | TypeSafe API key for Jev. See [API key](#api-key). |
 | `-p`, `--print` | | Boolean, as in Claude, accepted so that `agrouter -p "x"` and ralphex's appended `--print` work. agrouter is always non-interactive, so the chosen CLI's `print` mapping is emitted **whether or not `-p` is given** (see [Argument mapping](#argument-mapping)): Claude's `--output-format` works only with `--print`, and Codex without `exec` starts its TUI. |
 | `--help` | | agrouter help. To see a CLI's own help, call that CLI directly. |
-| `--version` | | Print agrouter's version (the module version from `go install ...@<tag>`, or `unknown`) and exit `0`. |
+| `--version` | | Print agrouter's version (the tag for `go install ...@<tag>`, a pseudo-version for a build from a checkout, or `unknown` without build info) and exit `0`. |
 
 **Model and effort**, a constraint on the choice and then mapped (see [Model and effort](#model-and-effort)):
 
@@ -111,7 +111,7 @@ agrouter's argument names and style follow Claude Code. They fall into three gro
 **Codex-spelled arguments** exist so that ralphex's Codex executor can call agrouter unchanged (see [ralphex integration](#ralphex-integration)):
 
 - **`--sandbox`** is value-keyed like `--output-format`. Claude has no sandbox mapping, so routing prefers Codex. Given together with a `--permission-mode` whose Codex mapping also sets the sandbox, both are emitted and Codex rejects the repeated `--sandbox` with its own error; agrouter does not pick one, because dropping either could weaken what the caller asked for. With `bypassPermissions` there is no clash; Codex accepts `--sandbox` beside `--dangerously-bypass-approvals-and-sandbox`, which is what ralphex sends in Docker.
-- **`-c key=value`** is Codex's config override, and agrouter spells it the same way; agrouter has no `--continue`, so Claude's `-c` does not clash. The token is split at the first `=`. Two keys are **constraints**, not passthrough: `-c model=<id>` is `--model <id>`, and `-c model_reasoning_effort=<level>` is `--effort <level>`; a TOML-quoted value (`"gpt-6-sol"`) is unquoted first. Given together with `--model` or `--effort`, the flag is the constraint and the `-c` form is an ordinary key, forwarded unchanged through `config.model` or `config.model_reasoning_effort` for Codex to resolve. Every other key must have a `config.<key>` mapping, keyed by the part before `=` like a value-keyed flag, and is emitted once per occurrence, in the caller's order, with the whole `key=value`, byte-exact, as `{value}`. The v1 Codex mapping lists exactly the keys ralphex sends (`codex.go:137-147,195-205`): `stream_idle_timeout_ms`, `project_doc`, `project_doc_fallback_filenames`, `features.multi_agent` and `agents.reviewer.description`. Any other key is unmapped and skipped, so `-c approval_policy=...` or `-c sandbox_mode=...` never overrides a `--permission-mode`. Claude has no `config.*` mapping, so a `-c` makes routing prefer Codex.
+- **`-c key=value`** is Codex's config override, and agrouter spells it the same way; agrouter has no `--continue`, so Claude's `-c` does not clash. The token is split at the first `=`. Two keys are **constraints**, not passthrough: `-c model=<id>` is `--model <id>`, and `-c model_reasoning_effort=<level>` is `--effort <level>`; a TOML-quoted value (`"gpt-6-sol"`) is unquoted first. Given together with `--model` or `--effort`, the flag is the constraint and the `-c` form is an ordinary key, forwarded unchanged through `config.model` or `config.model_reasoning_effort` for Codex to resolve. Every other key must have a `config.<key>` mapping, keyed by the part before `=` like a value-keyed flag, and is emitted once per distinct `key=value`, in the caller's order (an identical repeat is emitted once), with the whole `key=value`, byte-exact, as `{value}`. The v1 Codex mapping lists exactly the keys ralphex sends (`codex.go:137-147,195-205`): `stream_idle_timeout_ms`, `project_doc`, `project_doc_fallback_filenames`, `features.multi_agent` and `agents.reviewer.description`. Any other key is unmapped and skipped, so `-c approval_policy=...` or `-c sandbox_mode=...` never overrides a `--permission-mode`. Claude has no `config.*` mapping, so a `-c` makes routing prefer Codex.
 
 Every Claude output format is mapped. Codex has no single-result JSON on stdout (`-o` writes the last message to a file), so its mapping has no `output-format.json` key and `--output-format json` prefers Claude, and on Codex it is skipped. Which values are accepted is decided by the mappings, not code (see [Eligibility](#eligibility)). The vocabulary grows by adding a flag to agrouter and a key to each CLI's mapping; see [Open questions](#open-questions).
 
@@ -162,7 +162,7 @@ agrouter translates; **the real CLI validates.** agrouter never rejects a value 
 `agrouter [options] [prompt]` routes and prints **one JSON line on stdout**, then exits `0`:
 
 ```json
-{"cli":"claude","model":"claude-opus-5-5","effort":"high","argv":["claude","-p","--dangerously-skip-permissions","--output-format","stream-json","--model","claude-opus-5-5","--effort","high"]}
+{"cli":"claude","model":"claude-opus-5-5","effort":"high","argv":["claude","-p","--dangerously-skip-permissions","--output-format","stream-json","--model","claude-opus-5-5","--effort","high"],"skipped":[]}
 ```
 
 - `argv` is exactly what exec mode would run: the CLI's `command`, then its `print` mapping, the mapped arguments, model and effort, the `prompt` mapping if configured, and raw passthrough (see [Execution](#execution)).
@@ -316,7 +316,7 @@ source      = https://platform.claude.com/docs/en/build-with-claude/effort
 Rules:
 
 - **Every `[cli.*.args]` value is a template, as a JSON string array,** because agrouter writes them: `{model}`, `{effort}` and `{value}` are substituted inside each token, and the result goes straight to `os/exec` with no shell. This avoids all quoting problems and works the same on Windows. A template may hold any number of tokens, including none.
-- **Mapping keys** are agrouter flag names without the leading `--`. A flag with a value is keyed per value, `<flag>.<value>` (`output-format.stream-json`), so each value maps to whatever that CLI needs, even a different flag (`--json`). `model` and `effort` are the exception: one template each, with a placeholder. `-c` is keyed by its config key, `config.<key>`, and its templates take the whole `key=value` as `{value}`, emitted once per occurrence.
+- **Mapping keys** are agrouter flag names without the leading `--`. A flag with a value is keyed per value, `<flag>.<value>` (`output-format.stream-json`), so each value maps to whatever that CLI needs, even a different flag (`--json`). `model` and `effort` are the exception: one template each, with a placeholder. `-c` is keyed by its config key, `config.<key>`, and its templates take the whole `key=value` as `{value}`, emitted once per distinct `key=value`.
 - **`print` is required and always emitted, first,** so a subcommand such as Codex `exec` precedes everything else. Its spelling is the config's choice: `["-p", "{prompt}"]`, `["--print", "{prompt}"]`, `["exec", "{prompt}"]`.
 - **`{prompt}` goes in `print`, or in the optional `prompt` key,** which is emitted at the end of the mapped arguments. So `print = ["exec", "{prompt}"]` puts the prompt right after `exec`, and `print = ["exec"]` with `prompt = ["{prompt}"]` puts it after every other mapped argument. It is a whole token, in exactly one of the two: it becomes the positional prompt, or **zero tokens** when there is none (never an empty string, which Codex would take as an empty prompt). A CLI without `print`, `{prompt}` in both or in neither, anywhere else, or inside a longer token, is a config error.
 - **agrouter knows only what the config says about each CLI:** its command and how each agrouter argument is spelled, `print` included. It never parses a CLI's own flags.
@@ -459,7 +459,7 @@ A prompt often names the files the task is about (`fix src/auth/login.go`, `see 
 
 - **Where it looks.** Only in the text `prompt`. Text of a mentioned file is **not** scanned again: one level, no recursion.
 - **Finding candidates.** Quoted and backtick spans and Markdown link destinations (`[x](path)`) are taken first, so paths with spaces are found; the rest of the text is then split on whitespace. Candidates are then processed in order of their position in the original text, so a quoted mention and a plain one keep their textual order. Each candidate is tried as written first, then with surrounding brackets and trailing punctuation removed, then without a numeric `:line` or `:line:column` suffix (`src/a.go:42`). A Windows drive colon (`C:\x`) is never treated as a suffix.
-- **Scope: the working directory only.** A candidate is resolved against the caller's working directory and canonicalised (symlinks and Windows junctions followed, case-insensitive on Windows). It is read only if the result is a regular file **inside** the canonical working directory, checked by directory boundary, not by string prefix: `../cwd2/x` and a junction pointing out of the tree do not count. So `~/.ssh/id_rsa` or `/etc/passwd` in a prompt are never read.
+- **Scope: the working directory only.** A candidate is resolved against the caller's working directory and canonicalised (symlinks and Windows junctions followed, case-insensitive on Windows). It is read only if the result is a regular file **inside** the canonical working directory, checked by directory boundary, not by string prefix: `../cwd2/x` and a junction pointing out of the tree do not count. So `~/.ssh/id_rsa` or `/etc/passwd` in a prompt are never read. A spelling that is outside the tree as written (an absolute path elsewhere, a Windows UNC share) is not even opened, so no network share is contacted; on Unix files are opened non-blocking, so a FIFO or device in the tree cannot hang routing, and is then ignored as not a regular file.
 - **What happens to it.** Text goes into `files`; binary becomes an `attachments` entry with `source: mentioned` (see [Non-text input](#non-text-input)). The path is never sent; the prompt text that contains it is sent as written. Missing files, directories and unreadable files are ignored.
 - **Order and duplicates.** Files are read in the order they are mentioned; each canonical path is read once.
 - **URLs are not fetched.** `http://` and `https://` links stay text. Fetching them would add network calls, latency and a way to make agrouter request arbitrary addresses, for a routing hint.
@@ -475,6 +475,8 @@ Jev accepts text only, so images, PDFs and other binary data are never sent to i
   2. **Otherwise a heuristic:** NUL bytes, or invalid UTF-8 that is not just a character cut at the 8 KiB boundary, mean binary of type `unknown`.
 
   A PDF whose opening bytes look like ASCII is still caught by its `%PDF-` signature. The heuristic can misjudge unusual text encodings; that affects routing only.
+
+  The size comes from `stat` when stdin is a regular file (`< big.png`). From a pipe (`cat big.png | agrouter ...`) there is no size to ask for, so agrouter reads binary stdin to EOF to count it, holding it in memory for the child's replay, within the one `timeout`. A pipe that has not ended by then means Jev cannot decide, and in exec mode the child still gets every byte. Redirect a large binary input from a file rather than a pipe.
 - **Always mentioned.** Binary stdin and each binary mentioned file get their own `attachments` entry, even when the type is `unknown`. Whenever a Jev request is made, every one goes with it, either as its own entry or inside a counted group, and none is silently dropped for budget: a single request carries them in `state.attachments`, and a split state carries them in every chunk's anchor (see [Splitting large state](#splitting-large-state)).
 - **What metadata can and cannot do.** It gives modality hints only ("this task includes an image or a PDF"). The descriptions can steer such tasks towards vision-capable or stronger options; Anthropic, for example, positions Opus 5.5 for vision-heavy work. A media type and a size do not determine the right model, and whether this helps is measured with the routing evaluation set, not assumed.
 - **Binary-only tasks** are still routed, since the state is non-empty, but on metadata alone. The choice then depends mostly on the descriptions and the `question` text.
@@ -517,7 +519,7 @@ To keep the question small, the catalog goes **once** into a structured `instruc
 ```
 
 - **Payload contents:** only the state (the prompt text, the contents of text files it mentions inside the working directory, and attachment metadata: type and size only) and the catalog descriptions go to Jev. No argument, command, source URL or the API key ever does. The path of a file agrouter reads is never sent (see [Prompt](#prompt)).
-- **Passed-through values.** A `--model` outside the catalog is listed in `models` as passed through as given; a passed-through `--effort` is every option's `effort`, listed under `efforts` as passed through. A model without efforts has `"effort": "none (not supported)"`.
+- **Passed-through values.** A `--model` outside the catalog is listed in `models` as passed through as given; a passed-through `--effort` is every option's `effort`, listed under `efforts` as passed through. A model without efforts has `"effort": "none (not supported)"`; a model outside the catalog without a passed-through effort has `"effort": "the CLI's default"`.
 - **Needs validation:** this compact encoding is schema-valid, but its classification accuracy is not yet proven equivalent to a full description inside each criterion. The routing evaluation set (see [Testing](#testing)) decides. If the references prove unreliable, switch to full descriptions per criterion; 33 options × ~120 tokens still fits. The full encoding is implemented for that comparison: `instructions` is the question text alone and each criterion is a string with its option's CLI, model and effort descriptions. Its question must not point at an instructions object, so the evaluation drops the default question's closing "Look up each option's…" sentence for it.
 
 ### Budget
@@ -627,7 +629,7 @@ Other errors that stop agrouter before any child starts (exit `2`):
 
 - argument errors: an unknown flag, a second positional argument;
 - no prompt: neither a positional prompt nor stdin (binary-only stdin counts as a prompt, routed on its attachment entry);
-- configuration errors: no enabled options, more than 255 options, a question over budget, `max_chunks` or `chunk_parallel` below 1, `relevance_floor` outside (0, 1], a malformed template, a CLI without a `print` or `model` mapping (or without `effort` when its models have efforts), `{prompt}` misplaced, an unknown placeholder or `{value}` outside `config.*`, a model without a `name` or with an unknown `cli`, a duplicate model name or alias; every violation is reported at once, naming its section and key;
+- configuration errors: no enabled options, more than 255 options, a question over budget, `timeout` not positive, `max_chunks` or `chunk_parallel` below 1, `relevance_floor` outside (0, 1], a malformed template, a CLI without a `print` or `model` mapping (or without `effort` when its models have efforts), `{prompt}` misplaced, an unknown placeholder or `{value}` outside `config.*`, a model without a `name` or with an unknown `cli`, a duplicate model name or alias; every violation is reported at once, naming its section and key. Reading the files stops at the first of: a key outside any section, an unknown section or key (rejected, never ignored), `[cli.<name>.args]` without `[cli.<name>]`, a malformed `[effort.<cli>.<level>]` name, or a value that does not parse (`timeout` as a duration, `max_chunks` and `chunk_parallel` as integers, `relevance_floor` as a number, `enabled` as a boolean). An unknown key's value is not printed, so a misspelled `api_key` does not leak;
 - in exec mode, a child that cannot be started (exit `127`, see [Execution](#execution)).
 
 ## Model and effort
@@ -710,7 +712,7 @@ ralphex runs `agrouter exec [-c model="M"] [-c model_reasoning_effort=E] -c stre
 Follows ralphex conventions (`ralphex/CLAUDE.md` "Code Style").
 
 ```
-cmd/agrouter/          # main: go-flags parsing (decision mode and the exec command), wiring, exit codes
+cmd/agrouter/          # main: go-flags parsing (`exec` checked as the first token), app pipeline, debug output, exit codes
 pkg/config/            # INI loading, layering, validation; embedded defaults
 pkg/config/defaults/   # embedded config with the v1 catalog and argument mappings
 pkg/catalog/           # options (model × effort) derived from config; option ids; model name and alias lookup
@@ -718,7 +720,7 @@ pkg/args/              # argument mapping: templates, argv building, redaction
 pkg/prompt/            # Jev state: positional + stdin join, stdin buffering, mentioned files, attachments, budget, anchor and chunking
 pkg/jev/               # TypeSafe HTTP client: request/response types, validation, retry, timeout
 pkg/router/            # eligibility, Jev question construction, per-chunk fan-out and pooling, answer validation, no-decision policy
-pkg/runner/            # child process, stdin replay, signals / Job Object, exit code
+pkg/runner/            # child process, stdin replay, Unix process groups / Windows Job Objects, `.cmd` quoting, exit code
 ```
 
 - **Libraries:** Go 1.26, `jessevdk/go-flags`, `gopkg.in/ini.v1`, `stretchr/testify`; vendored dependencies.
@@ -736,7 +738,7 @@ pkg/runner/            # child process, stdin replay, signals / Job Object, exit
   - decision mode by default, exec mode only with `exec` as the first token;
   - flags in any order around the positional prompt, split and `=` forms;
   - `-p`/`--print` accepted; the `print` mapping emitted whether or not it is given;
-  - ralphex's Codex argv parsed unchanged: `exec`, `-c key=value` split at the first `=` (a value containing `=` kept whole), `-c model="M"` and `-c model_reasoning_effort=E` becoming constraints with TOML quotes removed, other `-c` kept in order, `--sandbox`, `--dangerously-bypass-approvals-and-sandbox` as the bypass alias; each of the `config.<key>` entries forwarded byte-exact, an unknown key skipped with a warning, repeated `-c` kept in the caller's order; the full ralphex `--codex` argv (`features.multi_agent`, `agents.reviewer.description`, bypass alias, `--sandbox danger-full-access`, `stream_idle_timeout_ms`, and `project_doc_fallback_filenames` with `--pass-claude-md`) and the external-review argv (`--sandbox read-only`) giving the expected Codex argv;
+  - ralphex's Codex argv parsed unchanged: `exec`, `-c key=value` split at the first `=` (a value containing `=` kept whole), `-c model="M"` and `-c model_reasoning_effort=E` becoming constraints with TOML quotes removed, other `-c` kept in order, `--sandbox`, `--dangerously-bypass-approvals-and-sandbox` as the bypass alias; each of the `config.<key>` entries forwarded byte-exact, an unknown key skipped with a warning, distinct repeated `-c` kept in the caller's order and an identical repeat emitted once; the full ralphex `--codex` argv (`features.multi_agent`, `agents.reviewer.description`, bypass alias, `--sandbox danger-full-access`, `stream_idle_timeout_ms`, and `project_doc_fallback_filenames` with `--pass-claude-md`) and the external-review argv (`--sandbox read-only`) giving the expected Codex argv;
   - skipped with one warning each, never exit `2`: a `-c` key the chosen CLI does not map (`-c approval_policy=never` with `--cli=codex`), `--` without `--cli`, an unknown `--cli`;
   - passed through unvalidated: a `--model` outside the catalog (with `--cli`, and without it as one option per CLI), an `--effort` the model does not list, contradictions translated in order (`--sandbox` beside `--permission-mode acceptEdits` giving two `--sandbox`), `-c model=` beside `--model` forwarded as a `config.model` key;
   - an unknown flag, a second positional, and no prompt at all are exit `2`;
@@ -751,7 +753,7 @@ pkg/runner/            # child process, stdin replay, signals / Job Object, exit
   - `{prompt}` in both `print` and `prompt`, in neither, elsewhere, or inside a longer token;
   - more than 255 options;
   - a question over budget, including `chunk_question` plus `relevance` with a maximal anchor;
-  - `max_chunks` and `chunk_parallel` below 1, and `relevance_floor` outside (0, 1];
+  - `timeout` not positive, `max_chunks` and `chunk_parallel` below 1, and `relevance_floor` outside (0, 1];
   - a guard test that no embedded value carries a trailing inline comment;
   - API key precedence (flag > env > local > global > embedded placeholder), and an explicit empty flag clearing the key.
 - **CLI-agnostic:**
@@ -767,7 +769,7 @@ pkg/runner/            # child process, stdin replay, signals / Job Object, exit
 - **`pkg/prompt`:**
   - the positional/stdin table: each of the four cases, the `\n\n` join in Jev's `prompt` only, byte-exact replay of stdin;
   - non-text detection: PNG, JPEG and PDF signatures (including an ASCII-looking PDF), NUL bytes, a UTF-8 character cut at the 8 KiB boundary (still text), binary stdin with a positional prompt (prompt only in state, attachment for stdin), and a binary-only task routed on metadata;
-  - mentioned files: quoted, backtick and Markdown-link paths with spaces, `path:line` and `path:line:col` suffixes, a Windows drive path, trailing punctuation; `../` traversal, an absolute path outside, a sibling `cwd2` directory, and a symlink or junction escaping the tree all not read; a binary mention giving an attachment; dedupe of the same file; mixed quoted and plain mentions kept in text order; no recursion into a mentioned file's text; URLs not fetched; mentioned text counted in the shared capture limit and timeout;
+  - mentioned files: quoted, backtick and Markdown-link paths with spaces, `path:line` and `path:line:col` suffixes, a Windows drive path, trailing punctuation; `../` traversal, an absolute path outside, a sibling `cwd2` directory, and a symlink or junction escaping the tree all not read; a FIFO in or out of the tree not blocking; a binary mention giving an attachment; dedupe of the same file; mixed quoted and plain mentions kept in text order; no recursion into a mentioned file's text; URLs not fetched; mentioned text counted in the shared capture limit and timeout;
   - the empty-state rule: a one-word prompt is routed; binary-only stdin is routed on its attachment entry; neither positional prompt nor stdin is exit `2`;
   - chunking: a state under budget is not split; a long stdin with a short positional instruction keeps the instruction in every anchor; `attachments` present in every chunk's anchor, even when the prompt alone overflows the 4k anchor; a long attachment list summarised by `source` and `type` with counts and total bytes; a summary still over 1k gives "cannot decide" with stdin replayed unchanged; the chunks plus the anchor-only fields reproduce every captured byte (lossless coverage; the only duplicates are the head-and-tail copies in the anchor); capture over the `max_chunks` limit gives "cannot decide" with stdin still replayed in full; cuts on line and multibyte UTF-8 boundaries; route question, relevance question and envelope counted against 32k and 64k.
 - **`pkg/router`:**

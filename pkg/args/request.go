@@ -21,17 +21,6 @@ const (
 	SourceConfig               // -c model=... / -c model_reasoning_effort=...
 )
 
-// Mapping keys with special meaning in [cli.*.args].
-const (
-	KeyPrint  = "print"
-	KeyPrompt = "prompt"
-	KeyModel  = "model"
-	KeyEffort = "effort"
-)
-
-// ConfigKeyPrefix prefixes the mapping key of a -c key=value argument: "config.<key>".
-const ConfigKeyPrefix = "config."
-
 // Arg is one mapped argument, in the caller's order.
 type Arg struct {
 	Spelling string // how the caller gave it, for warnings and "skipped": "--output-format json"
@@ -54,6 +43,7 @@ type Request struct {
 	ModelSource  Source
 	Effort       string // effort constraint, as given
 	EffortSource Source
+	EffortSpell  string   // how the caller gave the effort constraint, for a warning when the CLI cannot map it
 	Args         []Arg    // mapped arguments in the caller's order
 	Prompt       Optional // the positional prompt
 	Raw          []string // tokens after the first "--", passed through only with --cli

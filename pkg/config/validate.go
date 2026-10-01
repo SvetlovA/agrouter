@@ -8,17 +8,23 @@ import (
 	"strings"
 )
 
-// Special mapping keys and template placeholders.
+// Mapping keys with special meaning in [cli.*.args].
 const (
-	keyPrint  = "print"
-	keyPrompt = "prompt"
-	keyModel  = "model"
-	keyEffort = "effort"
+	KeyPrint  = "print"
+	KeyPrompt = "prompt"
+	KeyModel  = "model"
+	KeyEffort = "effort"
+)
 
-	configKeyPrefix = "config."
+// ConfigKeyPrefix prefixes the mapping key of a -c key=value argument: "config.<key>".
+const ConfigKeyPrefix = "config."
 
-	phPrompt = "{prompt}"
-	phValue  = "{value}"
+// Placeholders substituted inside template tokens. {prompt} is a whole token only.
+const (
+	PlaceholderPrompt = "{prompt}"
+	PlaceholderValue  = "{value}"
+	PlaceholderModel  = "{model}"
+	PlaceholderEffort = "{effort}"
 )
 
 // placeholderRe finds anything shaped like a placeholder, so a typo such as {mdl} is caught.
@@ -36,6 +42,9 @@ func (c *Config) Validate() error {
 
 func (a Agrouter) validate() []error {
 	var errs []error
+	if a.Timeout <= 0 {
+		errs = append(errs, fmt.Errorf("[agrouter] timeout = %s: must be positive", a.Timeout))
+	}
 	if a.MaxChunks < 1 {
 		errs = append(errs, fmt.Errorf("[agrouter] max_chunks = %d: must be at least 1", a.MaxChunks))
 	}
@@ -54,15 +63,15 @@ func (a Agrouter) validate() []error {
 func (cli CLI) validate(models []Model) []error {
 	section := "cli." + cli.Name + ".args"
 	var errs []error
-	for _, key := range []string{keyPrint, keyModel} {
+	for _, key := range []string{KeyPrint, KeyModel} {
 		if _, ok := cli.Args[key]; !ok {
 			errs = append(errs, fmt.Errorf("[%s] %s: required mapping is missing", section, key))
 		}
 	}
-	if _, ok := cli.Args[keyEffort]; !ok {
+	if _, ok := cli.Args[KeyEffort]; !ok {
 		if i := slices.IndexFunc(models, func(m Model) bool { return m.CLI == cli.Name && len(m.Efforts) > 0 }); i >= 0 {
 			errs = append(errs, fmt.Errorf("[%s] %s: required mapping is missing, [model.%s] has efforts",
-				section, keyEffort, models[i].Section))
+				section, KeyEffort, models[i].Section))
 		}
 	}
 
@@ -80,14 +89,14 @@ func (cli CLI) validate(models []Model) []error {
 					errs = append(errs, fmt.Errorf("[%s] %s: %w", section, key, err))
 				}
 			}
-			if tok == phPrompt && (key == keyPrint || key == keyPrompt) {
+			if tok == PlaceholderPrompt && (key == KeyPrint || key == KeyPrompt) {
 				prompts++
 			}
 		}
 	}
 	if prompts != 1 {
 		errs = append(errs, fmt.Errorf("[%s] %s/%s: %s must appear exactly once across print and prompt, found %d",
-			section, keyPrint, keyPrompt, phPrompt, prompts))
+			section, KeyPrint, KeyPrompt, PlaceholderPrompt, prompts))
 	}
 	return errs
 }
@@ -95,19 +104,19 @@ func (cli CLI) validate(models []Model) []error {
 // checkPlaceholder reports whether placeholder ph is allowed in token tok of mapping key.
 func checkPlaceholder(key, tok, ph string) error {
 	switch ph {
-	case "{model}", "{effort}":
+	case PlaceholderModel, PlaceholderEffort:
 		return nil
-	case phValue:
-		if !strings.HasPrefix(key, configKeyPrefix) {
-			return fmt.Errorf("%s is only allowed in config.* mappings", phValue)
+	case PlaceholderValue:
+		if !strings.HasPrefix(key, ConfigKeyPrefix) {
+			return fmt.Errorf("%s is only allowed in config.* mappings", PlaceholderValue)
 		}
 		return nil
-	case phPrompt:
-		if key != keyPrint && key != keyPrompt {
-			return fmt.Errorf("%s is only allowed in print or prompt", phPrompt)
+	case PlaceholderPrompt:
+		if key != KeyPrint && key != KeyPrompt {
+			return fmt.Errorf("%s is only allowed in print or prompt", PlaceholderPrompt)
 		}
-		if tok != phPrompt {
-			return fmt.Errorf("%s must be a whole token, found in %q", phPrompt, tok)
+		if tok != PlaceholderPrompt {
+			return fmt.Errorf("%s must be a whole token, found in %q", PlaceholderPrompt, tok)
 		}
 		return nil
 	default:

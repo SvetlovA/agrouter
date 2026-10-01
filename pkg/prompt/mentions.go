@@ -21,11 +21,15 @@ func (r *Result) ReadMentions(ctx context.Context, cwd string, limit int64) erro
 	if r.Undecidable != nil {
 		return nil //nolint:nilerr // Undecidable is a routing outcome, not a failure of this call
 	}
-	root, err := canonicalDir(cwd)
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		return fmt.Errorf("working directory: %w", err)
+	}
+	root, err := canonicalDir(abs)
 	if err != nil {
 		return err
 	}
-	m := &mentions{ctx: ctx, root: root, remaining: limit - r.TextBytes,
+	m := &mentions{ctx: ctx, root: root, cwd: abs, remaining: limit - r.TextBytes,
 		tried: map[string]bool{}, seen: map[string]bool{}}
 	undecidable := m.read(r.Prompt)
 	r.TextBytes += m.textBytes
@@ -38,12 +42,8 @@ func (r *Result) ReadMentions(ctx context.Context, cwd string, limit int64) erro
 	return nil
 }
 
-// canonicalDir returns the canonical path of the working directory.
-func canonicalDir(cwd string) (string, error) {
-	abs, err := filepath.Abs(cwd)
-	if err != nil {
-		return "", fmt.Errorf("working directory: %w", err)
-	}
+// canonicalDir returns the canonical path of the absolute working directory abs.
+func canonicalDir(abs string) (string, error) {
 	f, root, err := openCanonical(abs)
 	if err != nil {
 		return "", fmt.Errorf("working directory: %w", err)
@@ -56,6 +56,7 @@ func canonicalDir(cwd string) (string, error) {
 type mentions struct {
 	ctx       context.Context
 	root      string          // canonical working directory
+	cwd       string          // working directory as given, made absolute
 	remaining int64           // text bytes left under the capture limit
 	tried     map[string]bool // candidate spellings already tried
 	seen      map[string]bool // canonical paths already read (case-folded on Windows)
@@ -91,9 +92,14 @@ func (m *mentions) try(name string) (bool, error) {
 		return false, nil
 	}
 	m.tried[name] = true
-	path := name
+	path := filepath.Clean(name)
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(m.root, path)
+	}
+	// a spelling outside the tree is never opened: opening a UNC path connects to its host and a
+	// FIFO or device can block; the canonical check below still catches links that escape
+	if !inside(m.root, path) && !inside(m.cwd, path) {
+		return false, nil
 	}
 	f, canon, err := openCanonical(path)
 	if err != nil {

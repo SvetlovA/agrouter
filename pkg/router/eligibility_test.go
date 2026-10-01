@@ -34,7 +34,7 @@ func flag(name, value string) args.Arg {
 
 func cfgArg(kv string) args.Arg {
 	key, _, _ := strings.Cut(kv, "=")
-	return args.Arg{Spelling: "-c " + kv, Key: args.ConfigKeyPrefix + key, Value: kv}
+	return args.Arg{Spelling: "-c " + kv, Key: config.ConfigKeyPrefix + key, Value: kv}
 }
 
 func ids(opts []catalog.Option) []string {

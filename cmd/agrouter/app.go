@@ -125,13 +125,13 @@ func (a *app) setup(req *args.Request) (*config.Config, *catalog.Catalog, *route
 	}
 	cat, err := catalog.Build(cfg)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%w", err)
+		return nil, nil, nil, err
 	}
 	key, source := config.ResolveAPIKey(req.APIKey.Value, req.APIKey.Set, a.getenv(config.EnvAPIKey), cfg.Agrouter)
 	a.debug.apiKey(key, source)
 	rt, err := router.New(cfg, cat, a.newJev(key), router.EncodingCompact)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%w", err)
+		return nil, nil, nil, err
 	}
 	return cfg, cat, rt, nil
 }
@@ -151,7 +151,7 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 	limit := prompt.CaptureLimit(rt.Budget(), cfg.Agrouter.MaxChunks)
 	captured, err := prompt.Capture(ctx, req.Prompt.Value, a.stdin, limit)
 	if err != nil {
-		return routed{}, fmt.Errorf("%w", err)
+		return routed{}, err
 	}
 
 	el := router.Eligible(cfg, cat, req)
@@ -168,7 +168,7 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 
 	d, err := rt.Route(ctx, el, req, captured)
 	if err != nil {
-		return routed{}, fmt.Errorf("%w", err)
+		return routed{}, err
 	}
 	return routed{Decision: d, captured: captured}, nil
 }

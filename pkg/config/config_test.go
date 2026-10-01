@@ -267,6 +267,14 @@ func TestLoad_Errors(t *testing.T) {
 	}
 }
 
+func TestLoad_UnknownKeyHidesValue(t *testing.T) {
+	_, err := load(t, "", "[agrouter]\napikey = sk-secret\n")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "[agrouter] apikey (local ")
+	assert.Contains(t, err.Error(), "unknown key")
+	assert.NotContains(t, err.Error(), "sk-secret")
+}
+
 func TestLoad_UnreadableFile(t *testing.T) {
 	dir := t.TempDir()
 	// a directory where the file should be: exists, but cannot be read as a file on every OS

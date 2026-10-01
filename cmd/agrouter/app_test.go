@@ -128,6 +128,7 @@ func newEnv(t *testing.T) *env {
 	t.Setenv(config.EnvConfigDir, e.configDir)
 	t.Setenv(config.EnvAPIKey, testKey)
 	t.Setenv(cliEnv, "")
+	t.Setenv(envDebug, "")
 	t.Setenv(helperEnv, "1")
 	t.Setenv(helperOut, e.out)
 	t.Setenv(helperExit, "0")
@@ -330,6 +331,16 @@ func TestApp_Decision(t *testing.T) {
 		assert.Equal(t, []string{`{"prompt":"fix the typo in README"}`}, e.jev.requests())
 	})
 
+	t.Run("mentioned file sent to Jev", func(t *testing.T) {
+		e := newEnv(t)
+		require.NoError(t, os.WriteFile(filepath.Join(e.workDir, "notes.md"), []byte("use opus\n"), 0o600))
+		e.jev.pick = "claude-sonnet-5@low"
+		r := e.run([]string{"summarize notes.md"}, nil)
+
+		require.Equal(t, 0, r.code, r.stderr)
+		assert.Equal(t, []string{`{"prompt":"summarize notes.md","files":["use opus\n"]}`}, e.jev.requests())
+	})
+
 	t.Run("model without efforts: effort null", func(t *testing.T) {
 		e := newEnv(t)
 		e.jev.pick = "claude-haiku-4-5"
@@ -479,6 +490,20 @@ func TestApp_Exec(t *testing.T) {
 		assert.Empty(t, r.stdout)
 		assert.Equal(t, 1, strings.Count(r.stderr, "\n"), r.stderr)
 		assert.True(t, strings.HasPrefix(r.stderr, "agrouter: cannot start "), r.stderr)
+	})
+
+	t.Run("stdin over the capture limit reaches the child whole", func(t *testing.T) {
+		e := newEnv(t)
+		exe := helperCommand(t)
+		e.globalConfig("[agrouter]\nmax_chunks = 1\n[cli.claude]\ncommand = " + exe + "\n[cli.codex]\ncommand = " + exe + "\n")
+		input := strings.Repeat("line of a long ralphex prompt\n", 20_000) // 600 KB, past one chunk
+		r := e.run([]string{"exec", "--cli=claude"}, strings.NewReader(input))
+
+		require.Equal(t, 0, r.code, r.stderr)
+		argv, stdin, _ := e.child()
+		assert.Equal(t, []string{"-p"}, argv, "cannot decide: the known CLI runs with its defaults")
+		assert.Equal(t, input, string(stdin))
+		assert.Empty(t, e.jev.requests())
 	})
 
 	t.Run("skip warnings in exec mode", func(t *testing.T) {

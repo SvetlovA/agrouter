@@ -11,6 +11,8 @@ The full specification is [`docs/design.md`](docs/design.md).
 
 ## Install
 
+Requires Go 1.26 or later. Exec mode also needs the chosen CLI (`claude`, `codex`) on `PATH`; otherwise agrouter exits `127`.
+
 ```sh
 go install github.com/SvetlovA/agrouter/cmd/agrouter@latest
 agrouter --version
@@ -38,11 +40,16 @@ The prompt is the one positional argument and/or stdin. Arguments follow Claude 
 | `--cli=NAME` (`AGROUTER_CLI`) | route only within one CLI (`claude`, `codex`, ...) |
 | `--model=M`, `--effort=E` | fix the model or effort; Jev chooses the rest. Values outside the catalog are passed through for the CLI to validate |
 | `-p`, `--print` | accepted; non-interactive mode is always on |
-| `--permission-mode=MODE`, `--dangerously-skip-permissions` | Claude's permission modes, mapped to the closest Codex setting |
+| `--permission-mode=MODE`, `--dangerously-skip-permissions` | Claude's permission modes, mapped to the closest Codex setting; Codex's `--dangerously-bypass-approvals-and-sandbox` is an alias |
 | `--output-format=text\|json\|stream-json`, `--verbose` | output options |
-| `--sandbox=MODE`, `-c key=value` | Codex's spellings, so ralphex's Codex executor can call agrouter unchanged |
+| `--sandbox=MODE`, `-c key=value` (`--config`) | Codex's spellings, so ralphex's Codex executor can call agrouter unchanged |
 | `--jev-api-key=KEY` | Jev API key; an empty value clears it |
 | `-- raw args...` | appended to the child's argv unchanged, only with `--cli` |
+| `--help`, `--version` | print help or the version and exit |
+
+Whenever stdin is not a terminal, agrouter reads it to EOF within `[agrouter] timeout` before routing. A script that passes only a positional prompt should close stdin or redirect it from `/dev/null`; an inherited pipe that stays open uses up the timeout, and Jev cannot decide.
+
+To route, agrouter also reads the text files the prompt names inside the working directory (quoted, backticked, Markdown-linked or plain paths) and sends their contents, never their paths, to TypeSafe. That includes files such as `.env` when the prompt mentions them. Paths outside the working directory are ignored and URLs are not fetched; binary files are described by type and size only. Nothing is read when only one option is left.
 
 Decision mode:
 
@@ -58,6 +65,8 @@ Exec mode, with the prompt on stdin and the output format fixed by pinning the C
 ```sh
 agrouter exec --cli=claude --dangerously-skip-permissions --output-format stream-json --verbose < prompt.txt
 ```
+
+On Windows with npm's `claude.cmd`/`codex.cmd` shims, pass a multi-line prompt on stdin: cmd.exe cannot carry a line break inside an argument, so such a positional prompt fails to start (exit `127`).
 
 The child's stdout, stderr and exit code are agrouter's. An argument the chosen CLI does not map is skipped with one `agrouter: warning:` line on stderr, never an error. Set `AGROUTER_DEBUG=1` to see eligibility, Jev's probabilities and the final command on stderr (prompt text and key redacted).
 

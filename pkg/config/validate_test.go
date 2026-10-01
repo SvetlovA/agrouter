@@ -102,6 +102,11 @@ func TestValidate_Violations(t *testing.T) {
 			want:  []string{"[model.beta-two] name: required"},
 		},
 		{
+			name:  "timeout not positive",
+			local: "[agrouter]\ntimeout = 0s\n",
+			want:  []string{"[agrouter] timeout = 0s: must be positive"},
+		},
+		{
 			name:  "max_chunks below 1",
 			local: "[agrouter]\nmax_chunks = 0\n",
 			want:  []string{"[agrouter] max_chunks = 0: must be at least 1"},

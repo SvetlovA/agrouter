@@ -2,7 +2,6 @@ package router
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -63,7 +62,7 @@ func (r *Router) single(ctx context.Context, el *Eligibility, captured *prompt.R
 	if !errors.Is(err, jev.ErrUnprocessable) {
 		return outcome{}, err
 	}
-	if prompt.Tokens(jsonLen(state)) < prompt.MinStateTokens {
+	if captured.StateTokens() < prompt.MinStateTokens {
 		return outcome{}, fmt.Errorf("%w: %w", errUnsplittable, err)
 	}
 	// State 0 forces the split even though the state fit the full budget
@@ -153,7 +152,9 @@ func (r *Router) round(ctx context.Context, cancel context.CancelFunc, el *Eligi
 		})
 	}
 	wg.Wait()
-	if firstErr == nil && ctx.Err() != nil {
+	// the deadline only matters when it left a chunk unasked; answers that all came in stand
+	unasked := slices.ContainsFunc(seq, func(s *slot) bool { return !s.done && s.err == nil })
+	if firstErr == nil && ctx.Err() != nil && unasked {
 		return fmt.Errorf("chunk requests: %w", ctx.Err())
 	}
 	return firstErr
@@ -254,13 +255,4 @@ func ranked(opts []catalog.Option, scores []float64) []Score {
 		return 0
 	})
 	return out[:min(len(out), topOptions)]
-}
-
-// jsonLen is the length of v encoded as JSON; v is one of prompt's plain state types.
-func jsonLen(v any) int {
-	data, err := json.Marshal(v)
-	if err != nil {
-		panic(fmt.Sprintf("router: encode %T: %v", v, err)) // plain data, cannot fail
-	}
-	return len(data)
 }

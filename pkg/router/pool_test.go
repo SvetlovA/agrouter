@@ -491,3 +491,26 @@ func TestRouteChunkedStopsOnDeadline(t *testing.T) {
 	defer mu.Unlock()
 	assert.LessOrEqual(t, started, cfg.Agrouter.ChunkParallel, "no request starts after the deadline")
 }
+
+func TestRouteChunkedAnsweredAtDeadlineStands(t *testing.T) {
+	cfg, cat := embedded(t)
+	req := &args.Request{CLI: "claude"}
+	el := Eligible(cfg, cat, req)
+	client := &mocks.JevClientMock{AskFunc: func(ctx context.Context, _ jev.Request) (map[string]jev.Answer, error) {
+		<-ctx.Done() // every chunk answers just as the deadline passes
+		return chunkAnswers(favoring(el.Options, "claude-sonnet-5@low", 0.9), 0.5), nil
+	}}
+	r := newRouter(t, cfg, cat, client)
+	c := captured(filler(150_000))
+	split, err := c.Split(r.Budget(), cfg.Agrouter.MaxChunks)
+	require.NoError(t, err)
+	require.NotNil(t, split)
+	require.LessOrEqual(t, len(split.Chunks), cfg.Agrouter.ChunkParallel, "every chunk starts before the deadline")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	d, err := r.Route(ctx, el, req, c)
+	require.NoError(t, err)
+	require.NoError(t, d.Undecided)
+	assert.Equal(t, "claude-sonnet-5@low", d.OptionID)
+}

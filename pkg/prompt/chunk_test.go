@@ -58,11 +58,20 @@ func TestCaptureLimit(t *testing.T) {
 func TestJSONLen(t *testing.T) {
 	for _, s := range []string{
 		"", "plain", "quote \" and \\ back", "\n\r\t\b\f", "\x00\x01\x1f", "<a> & b",
-		"é ✓ 🙂", "  ", "bad \xff utf-8", "trailing \xe2\x82",
+		"é ✓ 🙂", "\u2028\u2029",
 	} {
 		data, err := json.Marshal(s)
 		require.NoError(t, err)
 		assert.Equal(t, len(data)-2, jsonLen(s), "%q", s)
+	}
+	// invalid UTF-8: each invalid byte counts as the escaped \ufffd of encoding/json v1, an upper
+	// bound for the raw 3-byte rune of the v2-based encoder
+	for _, s := range []string{"bad \xff utf-8", "trailing \xe2\x82"} {
+		data, err := json.Marshal(s)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, jsonLen(s), len(data)-2, "%q", s)
+		valid := strings.ToValidUTF8(s, "")
+		assert.Equal(t, len(valid)+len(`\ufffd`)*(len(s)-len(valid)), jsonLen(s), "%q", s)
 	}
 }
 

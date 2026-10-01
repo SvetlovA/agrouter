@@ -265,6 +265,21 @@ func TestAskRedactsEchoedKey(t *testing.T) {
 	assert.NotContains(t, err.Error(), testKey)
 }
 
+func TestAskRedactsEchoedState(t *testing.T) {
+	req := testRequest()
+	req.State = map[string]any{"prompt": "fix the \"secret\" bug\nnow", "files": []string{"token=abc"}}
+	echo := func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = io.WriteString(w, `{"detail":[{"loc":["body","state"],"input":`+string(body)+`}]}`)
+	}
+	_, err := newTestClient(t, echo).Ask(t.Context(), req)
+	require.ErrorIs(t, err, ErrUnprocessable)
+	assert.NotContains(t, err.Error(), "secret")
+	assert.NotContains(t, err.Error(), "token=abc")
+	assert.Contains(t, err.Error(), `"loc":["body","state"]`)
+}
+
 func TestAskTruncatesErrorBody(t *testing.T) {
 	c := newTestClient(t, reply(http.StatusInternalServerError, strings.Repeat("x", 5000)))
 	_, err := c.Ask(t.Context(), testRequest())

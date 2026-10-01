@@ -7,21 +7,12 @@ import (
 	"github.com/SvetlovA/agrouter/pkg/config"
 )
 
-// Placeholders substituted inside template tokens. {prompt} is a whole token only.
-const (
-	phModel  = "{model}"
-	phEffort = "{effort}"
-	phValue  = "{value}"
-	phPrompt = "{prompt}"
-)
-
 // Choice is what the argv is built for: the model and effort to emit through the CLI's templates.
 // An empty Model or Effort emits no model or effort argument, so the CLI's default applies.
 type Choice struct {
-	Model       string // the model's name, or a value outside the catalog passed through
-	Effort      string
-	EffortSpell string // how the caller gave the effort, for a warning when the CLI cannot map it
-	Pinned      bool   // the CLI was fixed by a valid --cli: raw passthrough is appended only then
+	Model  string // the model's name, or a value outside the catalog passed through
+	Effort string
+	Pinned bool // the CLI was fixed by a valid --cli: raw passthrough is appended only then
 }
 
 // Skip is one argument left out of the argv.
@@ -47,7 +38,7 @@ type Result struct {
 func Build(cli config.CLI, req *Request, choice Choice) Result {
 	b := builder{cli: cli, prompt: req.Prompt, res: Result{promptAt: -1}}
 	b.res.Argv = append(b.res.Argv, cli.Command)
-	b.emit(KeyPrint, "")
+	b.emit(config.KeyPrint, "")
 
 	seen := map[string]bool{}
 	for _, a := range req.Args {
@@ -61,17 +52,17 @@ func Build(cli config.CLI, req *Request, choice Choice) Result {
 
 	if choice.Model != "" {
 		b.model = choice.Model
-		b.mapped(KeyModel, "", "--model "+choice.Model)
+		b.mapped(config.KeyModel, "", "--model "+choice.Model)
 	}
 	if choice.Effort != "" {
 		b.effort = choice.Effort
-		spelling := choice.EffortSpell
-		if spelling == "" {
-			spelling = "--effort " + choice.Effort
+		spelling := "--effort " + choice.Effort
+		if req.EffortSpell != "" && choice.Effort == req.Effort {
+			spelling = req.EffortSpell // the caller's constraint, as the caller gave it
 		}
-		b.mapped(KeyEffort, "", spelling)
+		b.mapped(config.KeyEffort, "", spelling)
 	}
-	b.emit(KeyPrompt, "")
+	b.emit(config.KeyPrompt, "")
 
 	b.res.rawAt = len(b.res.Argv)
 	if len(req.Raw) > 0 {
@@ -119,9 +110,9 @@ func (b *builder) skip(spelling, reason string) {
 // emit appends key's template with placeholders substituted. A missing key emits nothing. The
 // {prompt} token becomes the positional prompt, or zero tokens when there is none.
 func (b *builder) emit(key, value string) {
-	r := strings.NewReplacer(phModel, b.model, phEffort, b.effort, phValue, value)
+	r := strings.NewReplacer(config.PlaceholderModel, b.model, config.PlaceholderEffort, b.effort, config.PlaceholderValue, value)
 	for _, tok := range b.cli.Args[key] {
-		if tok == phPrompt {
+		if tok == config.PlaceholderPrompt {
 			if b.prompt.Value == "" {
 				continue
 			}

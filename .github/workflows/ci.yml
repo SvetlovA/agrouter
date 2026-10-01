@@ -72,3 +72,7 @@ jobs:
         env:
           GOOS: windows
         run: golangci-lint run --max-issues-per-linter=0 --max-same-issues=0
+
+      # //go:build eval tests only run by hand (make eval-routing), so lint keeps them compiling
+      - name: golangci-lint (eval)
+        run: golangci-lint run --build-tags=eval --max-issues-per-linter=0 --max-same-issues=0

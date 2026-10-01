@@ -241,7 +241,7 @@ func (s *section) decodeAgrouter(a *Agrouter) error {
 		case "relevance":
 			a.Relevance = e.value
 		default:
-			return s.errorf(k, "unknown key")
+			return s.unknownKey(k)
 		}
 		if err != nil {
 			return s.errorf(k, "%w", err)
@@ -260,7 +260,7 @@ func (m *merged) decodeCLI(s *section) (CLI, error) {
 			cli.Description = s.values[k].value
 		case "enabled":
 		default:
-			return CLI{}, s.errorf(k, "unknown key")
+			return CLI{}, s.unknownKey(k)
 		}
 	}
 	args, ok := m.sections[s.name+".args"]
@@ -296,7 +296,7 @@ func (s *section) decodeModel() (Model, bool, error) {
 			mdl.Source = v
 		case "enabled":
 		default:
-			return Model{}, false, s.errorf(k, "unknown key")
+			return Model{}, false, s.unknownKey(k)
 		}
 	}
 	on, err := s.enabled()
@@ -317,7 +317,7 @@ func (s *section) decodeEffort() (Effort, bool, error) {
 			eff.Source = s.values[k].value
 		case "enabled":
 		default:
-			return Effort{}, false, s.errorf(k, "unknown key")
+			return Effort{}, false, s.unknownKey(k)
 		}
 	}
 	on, err := s.enabled()
@@ -335,6 +335,13 @@ func (s *section) enabled() (bool, error) {
 		return false, s.errorf("enabled", "%w", err)
 	}
 	return on, nil
+}
+
+// unknownKey reports a key the section does not have. The value is left out: a misspelled api_key
+// would otherwise print the API key.
+func (s *section) unknownKey(key string) error {
+	e := s.values[key]
+	return fmt.Errorf("[%s] %s (%s): unknown key", s.name, key, origin(e.layer, e.path))
 }
 
 // errorf formats an error naming the section, the key, its value and the layer that set it.

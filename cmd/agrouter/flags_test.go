@@ -115,6 +115,7 @@ func TestParseArgs_OwnFlags(t *testing.T) {
 		assert.Equal(t, args.SourceFlag, req.ModelSource)
 		assert.Equal(t, "high", req.Effort)
 		assert.Equal(t, args.SourceFlag, req.EffortSource)
+		assert.Equal(t, "--effort high", req.EffortSpell)
 		assert.Empty(t, req.Args)
 	})
 	t.Run("--help", func(t *testing.T) {
@@ -123,6 +124,9 @@ func TestParseArgs_OwnFlags(t *testing.T) {
 		assert.Nil(t, cmd.req)
 		assert.Contains(t, cmd.help, "TYPESAFE_API_KEY")
 		assert.Contains(t, cmd.help, "process")
+		assert.Contains(t, cmd.help, "--cli=NAME")
+		assert.Contains(t, cmd.help, "-c, --config=KEY=VALUE")
+		assert.NotContains(t, cmd.help, "/cli")
 	})
 	t.Run("--version", func(t *testing.T) {
 		cmd, err := parseArgs([]string{"--version"}, noEnv)
@@ -152,6 +156,7 @@ func TestParseArgs_Config(t *testing.T) {
 		assert.Equal(t, args.SourceConfig, req.ModelSource)
 		assert.Equal(t, "high", req.Effort)
 		assert.Equal(t, args.SourceConfig, req.EffortSource)
+		assert.Equal(t, "-c model_reasoning_effort=high", req.EffortSpell)
 		assert.Empty(t, req.Args)
 	})
 	t.Run("literal TOML quotes and last one wins", func(t *testing.T) {
@@ -305,5 +310,24 @@ func TestUnquoteTOML(t *testing.T) {
 	}
 	for in, want := range tests {
 		assert.Equal(t, want, unquoteTOML(in), in)
+	}
+}
+
+func TestPosixHelp(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+	}{
+		{"value option", "      /cli:NAME      restrict", "      --cli=NAME     restrict"},
+		{"short and long", "  /p, /print         accepted", "  -p, --print        accepted"},
+		{"long flag", "      /verbose       verbose", "      --verbose      verbose"},
+		{"windows-only help line dropped", "x\n  /?                 Show\ny", "x\ny"},
+		{"description continuation kept", "                     CLI (env)", "                     CLI (env)"},
+		{"prose untouched", "a local .agrouter/config", "a local .agrouter/config"},
+		{"posix help untouched", "      --cli=NAME     restrict", "      --cli=NAME     restrict"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, posixHelp(tt.in))
+		})
 	}
 }

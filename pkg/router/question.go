@@ -40,6 +40,7 @@ func (e Encoding) String() string {
 // Criterion values for an option without an effort.
 const (
 	effortNone       = "none (not supported)"
+	effortDefault    = "the CLI's default"
 	descModelPassed  = "not in the catalog: passed through as given"
 	descEffortPassed = "not in the catalog for this CLI: passed through as given"
 )
@@ -50,9 +51,6 @@ const (
 	relevanceFalse = "`chunk.text` is only material the task works on, or repeats `anchor`"
 )
 
-// object is a JSON object that keeps its keys in slice order, so requests are reproducible.
-type object = jev.Criteria
-
 // routeCriterion is one option's criterion in the compact encoding.
 type routeCriterion struct {
 	CLI    string `json:"cli"`
@@ -62,26 +60,26 @@ type routeCriterion struct {
 
 // routeInstructions is the compact encoding's instructions: the question and the catalog, once.
 type routeInstructions struct {
-	Question string `json:"question"`
-	CLIs     object `json:"clis"`
-	Models   object `json:"models"`
-	Efforts  object `json:"efforts"`
+	Question string       `json:"question"`
+	CLIs     jev.Criteria `json:"clis"`
+	Models   jev.Criteria `json:"models"`
+	Efforts  jev.Criteria `json:"efforts"`
 }
 
 // routeQuestion is the joint Choice over opts, which must all come from cfg. effort is the
 // caller's passed-through effort, used for options without one of their own.
 func routeQuestion(cfg *config.Config, text string, opts []catalog.Option, effort string, enc Encoding) jev.Question {
-	if enc == EncodingFull {
-		return fullRouteQuestion(cfg, text, opts, effort)
-	}
 	models := make(map[string]config.Model, len(cfg.Models))
 	for _, m := range cfg.Models {
 		models[m.Name] = m
 	}
+	if enc == EncodingFull {
+		return fullRouteQuestion(cfg, models, text, opts, effort)
+	}
 	in := routeInstructions{Question: text}
 	criteria := make(jev.Criteria, 0, len(opts))
-	var efforts []string          // CLIs with efforts, in order
-	levels := map[string]object{} // cli -> its efforts among opts
+	var efforts []string                // CLIs with efforts, in order
+	levels := map[string]jev.Criteria{} // cli -> its efforts among opts
 	for _, o := range opts {
 		if !has(in.CLIs, o.CLI) {
 			cli, _ := cfg.CLIByName(o.CLI)
@@ -90,13 +88,10 @@ func routeQuestion(cfg *config.Config, text string, opts []catalog.Option, effor
 		if !has(in.Models, o.Name) {
 			in.Models = append(in.Models, jev.Criterion{Name: o.Name, Value: modelDescription(models, o)})
 		}
-		eff := o.Effort
-		if eff == "" {
-			eff = effort
-		}
+		eff := optionEffort(o, effort)
 		label := eff
 		if eff == "" {
-			label = effortNone
+			label = noEffortLabel(models, o)
 		} else if !has(levels[o.CLI], eff) {
 			if _, ok := levels[o.CLI]; !ok {
 				efforts = append(efforts, o.CLI)
@@ -114,21 +109,14 @@ func routeQuestion(cfg *config.Config, text string, opts []catalog.Option, effor
 
 // fullRouteQuestion is the route question in EncodingFull: each criterion describes its option in
 // full, so no criterion refers to the instructions.
-func fullRouteQuestion(cfg *config.Config, text string, opts []catalog.Option, effort string) jev.Question {
-	models := make(map[string]config.Model, len(cfg.Models))
-	for _, m := range cfg.Models {
-		models[m.Name] = m
-	}
+func fullRouteQuestion(cfg *config.Config, models map[string]config.Model, text string, opts []catalog.Option,
+	effort string) jev.Question {
 	criteria := make(jev.Criteria, 0, len(opts))
 	for _, o := range opts {
 		cli, _ := cfg.CLIByName(o.CLI)
 		desc := fmt.Sprintf("CLI %s: %s\nModel %s: %s\n", o.CLI, cli.Description, o.Name, modelDescription(models, o))
-		eff := o.Effort
-		if eff == "" {
-			eff = effort
-		}
-		if eff == "" {
-			desc += "Effort: " + effortNone
+		if eff := optionEffort(o, effort); eff == "" {
+			desc += "Effort: " + noEffortLabel(models, o)
 		} else {
 			desc += fmt.Sprintf("Effort %s: %s", eff, effortDescription(cfg, o.CLI, eff))
 		}
@@ -152,6 +140,15 @@ func modelDescription(models map[string]config.Model, o catalog.Option) string {
 	return descModelPassed
 }
 
+// noEffortLabel is the effort of an option without one: a catalog model has no efforts, while a
+// model outside the catalog runs at its CLI's default.
+func noEffortLabel(models map[string]config.Model, o catalog.Option) string {
+	if _, ok := models[o.Name]; ok {
+		return effortNone
+	}
+	return effortDefault
+}
+
 func effortDescription(cfg *config.Config, cli, effort string) string {
 	if e, ok := cfg.Efforts[cli+"."+effort]; ok {
 		return e.Description
@@ -159,7 +156,7 @@ func effortDescription(cfg *config.Config, cli, effort string) string {
 	return descEffortPassed
 }
 
-func has(obj object, name string) bool {
+func has(obj jev.Criteria, name string) bool {
 	for _, c := range obj {
 		if c.Name == name {
 			return true

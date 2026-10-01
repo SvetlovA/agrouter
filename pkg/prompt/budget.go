@@ -86,14 +86,15 @@ func jsonLen(s string) int {
 }
 
 // escapedLen is the encoded length of one rune taking size bytes of input, following encoding/json
-// with HTML escaping on.
+// with HTML escaping on. An invalid byte counts as the escaped `\ufffd` that encoding/json v1 writes;
+// the v2-based encoder writes the 3-byte rune, so the estimate is an upper bound for both.
 func escapedLen(r rune, size int) int {
 	switch {
 	case r == utf8.RuneError && size == 1:
-		return len(`�`)
+		return len(`\ufffd`)
 	case r == '"' || r == '\\' || r == '\n' || r == '\r' || r == '\t' || r == '\b' || r == '\f':
 		return 2
-	case r < 0x20 || r == '<' || r == '>' || r == '&' || r == ' ' || r == ' ':
+	case r < 0x20 || r == '<' || r == '>' || r == '&' || r == '\u2028' || r == '\u2029':
 		return len(`\u0000`)
 	default:
 		return size
