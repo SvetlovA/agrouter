@@ -128,7 +128,7 @@ func TestEligibleMappedArgumentPreference(t *testing.T) {
 				assert.NotEmpty(t, d.Reason)
 			}
 			assert.Equal(t, tc.dropped, dropped)
-			assert.Empty(t, e.Warnings)
+			assert.Empty(t, e.Skipped)
 		})
 	}
 }
@@ -160,8 +160,8 @@ func TestEligibleCLI(t *testing.T) {
 		e = Eligible(cfg, cat, &args.Request{CLI: name})
 		assert.False(t, e.Pinned, name)
 		assert.Equal(t, ids(cat.Options), ids(e.Options), name)
-		assert.Equal(t, []string{"agrouter: warning: skipped --cli " + name +
-			": not an enabled CLI; routing across every CLI"}, e.Warnings)
+		assert.Equal(t, []args.Skip{{Spelling: "--cli " + name, Warning: "agrouter: warning: skipped --cli " + name +
+			": not an enabled CLI; routing across every CLI"}}, e.Skipped)
 	}
 }
 
@@ -178,7 +178,8 @@ func TestEligibleDisabledCLI(t *testing.T) {
 	e := Eligible(cfg, cat, &args.Request{CLI: "codex", Args: []args.Arg{flag("sandbox", "read-only")}})
 	assert.False(t, e.Pinned)
 	assert.Equal(t, []string{"claude"}, e.CLIs(), "the only CLI left, even though it skips --sandbox")
-	assert.Len(t, e.Warnings, 1)
+	assert.Equal(t, []args.Skip{{Spelling: "--cli codex",
+		Warning: "agrouter: warning: skipped --cli codex: not an enabled CLI; routing across every CLI"}}, e.Skipped)
 }
 
 func TestEligibleModel(t *testing.T) {

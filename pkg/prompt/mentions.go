@@ -19,43 +19,34 @@ import (
 // an error only when cwd cannot be resolved.
 func (r *Result) ReadMentions(ctx context.Context, cwd string, limit int64) error {
 	if r.Undecidable != nil {
-		return nil //nolint:nilerr // Undecidable is a routing outcome, not a failure of this call
+		return nil // Undecidable is a routing outcome, not a failure of this call
 	}
 	abs, err := filepath.Abs(cwd)
 	if err != nil {
 		return fmt.Errorf("working directory: %w", err)
 	}
-	root, err := canonicalDir(abs)
+	wd, err := openWorkdir(abs)
 	if err != nil {
 		return err
 	}
-	m := &mentions{ctx: ctx, root: root, cwd: abs, remaining: limit - r.TextBytes,
+	defer wd.Close()
+	m := &mentions{ctx: ctx, wd: wd, cwd: abs, remaining: limit - r.TextBytes,
 		tried: map[string]bool{}, seen: map[string]bool{}}
 	undecidable := m.read(r.Prompt)
 	r.TextBytes += m.textBytes
 	if undecidable != nil {
 		r.Prompt, r.Files, r.Attachments, r.Undecidable = "", nil, nil, undecidable
-		return nil //nolint:nilerr // undecidable is recorded in r, not returned
+		return nil // undecidable is recorded in r, not returned
 	}
 	r.Files = append(r.Files, m.files...)
 	r.Attachments = append(r.Attachments, m.attachments...)
 	return nil
 }
 
-// canonicalDir returns the canonical path of the absolute working directory abs.
-func canonicalDir(abs string) (string, error) {
-	f, root, err := openCanonical(abs)
-	if err != nil {
-		return "", fmt.Errorf("working directory: %w", err)
-	}
-	_ = f.Close()
-	return root, nil
-}
-
 // mentions reads the files one prompt mentions.
 type mentions struct {
 	ctx       context.Context
-	root      string          // canonical working directory
+	wd        *workdir        // working directory files are opened through
 	cwd       string          // working directory as given, made absolute
 	remaining int64           // text bytes left under the capture limit
 	tried     map[string]bool // candidate spellings already tried
@@ -94,20 +85,20 @@ func (m *mentions) try(name string) (bool, error) {
 	m.tried[name] = true
 	path := filepath.Clean(name)
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(m.root, path)
+		path = filepath.Join(m.wd.root, path)
 	}
 	// a spelling outside the tree is never opened: opening a UNC path connects to its host and a
 	// FIFO or device can block; the canonical check below still catches links that escape
-	if !inside(m.root, path) && !inside(m.cwd, path) {
+	if !inside(m.wd.root, path) && !inside(m.cwd, path) {
 		return false, nil
 	}
-	f, canon, err := openCanonical(path)
+	f, canon, err := m.wd.open(path)
 	if err != nil {
 		return false, nil
 	}
 	defer f.Close()
 	fi, err := f.Stat()
-	if err != nil || !fi.Mode().IsRegular() || !inside(m.root, canon) {
+	if err != nil || !fi.Mode().IsRegular() || !inside(m.wd.root, canon) {
 		return false, nil
 	}
 	key := samePathKey(canon)

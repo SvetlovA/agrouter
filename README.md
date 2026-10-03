@@ -58,7 +58,7 @@ agrouter -p "fix the flaky test in pkg/foo" --dangerously-skip-permissions --out
 # {"cli":"codex","model":"gpt-6-sol","effort":"medium","argv":["codex","exec","fix the flaky test in pkg/foo","--dangerously-bypass-approvals-and-sandbox","--skip-git-repo-check","--json","--model","gpt-6-sol","-c","model_reasoning_effort=\"medium\""],"skipped":[]}
 ```
 
-`argv` holds the positional prompt but never stdin: a caller that piped a prompt must send it to the child itself. `effort` is `null` for a model without efforts; `skipped` lists the arguments the chosen CLI has no mapping for.
+`argv` holds the positional prompt but never stdin: a caller that piped a prompt must send it to the child itself. `effort` is `null` for a model without efforts; `skipped` lists, as the caller spelled them, the arguments that got a skip warning: an unknown or disabled `--cli`, arguments the chosen CLI does not map or maps to nothing, and raw tokens after `--` without `--cli`.
 
 Exec mode, with the prompt on stdin and the output format fixed by pinning the CLI:
 

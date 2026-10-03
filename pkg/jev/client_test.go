@@ -280,6 +280,62 @@ func TestAskRedactsEchoedState(t *testing.T) {
 	assert.Contains(t, err.Error(), `"loc":["body","state"]`)
 }
 
+func TestAskRedactsStateExcerpts(t *testing.T) {
+	req := testRequest()
+	req.State = map[string]any{"prompt": "rotate the staging credentials in vault/prod.hcl before Friday",
+		"files": []string{"password = hunter2-correct-horse"}}
+	// a validation error quoting only a prefix and a truncated middle of the inputs
+	body := `{"detail":"input too long: 'rotate the staging cred...' and 'word = hunter2-corr'"}`
+	_, err := newTestClient(t, reply(http.StatusUnprocessableEntity, body)).Ask(t.Context(), req)
+	require.ErrorIs(t, err, ErrUnprocessable)
+	assert.NotContains(t, err.Error(), "staging")
+	assert.NotContains(t, err.Error(), "hunter2")
+	assert.Contains(t, err.Error(), `{"detail":"input too long: '<redacted>...' and '<redacted>'"}`)
+}
+
+func TestAskRedactsStateEchoedWithoutHTMLEscaping(t *testing.T) {
+	req := testRequest()
+	req.State = map[string]any{"prompt": "if a < b && c > d {\n\treturn\n}"}
+	// a server that escapes the newlines and tab but writes <, > and & as is
+	body := `{"detail":[{"input":"if a < b && c > d {\n\treturn\n}"}]}`
+	_, err := newTestClient(t, reply(http.StatusUnprocessableEntity, body)).Ask(t.Context(), req)
+	require.ErrorIs(t, err, ErrUnprocessable)
+	assert.Contains(t, err.Error(), `{"detail":[{"input":"<redacted>"}]}`)
+}
+
+func TestAskRedactsMultilineExcerpt(t *testing.T) {
+	req := testRequest()
+	req.State = map[string]any{"prompt": "line one of the plan\nline two of the plan"}
+	body := `{"detail":"too long: 'line one of the plan\nline two...'"}`
+	_, err := newTestClient(t, reply(http.StatusUnprocessableEntity, body)).Ask(t.Context(), req)
+	require.ErrorIs(t, err, ErrUnprocessable)
+	assert.NotContains(t, err.Error(), "line one")
+	assert.NotContains(t, err.Error(), "line two")
+}
+
+func TestRedactExcerpts(t *testing.T) {
+	tests := []struct {
+		name   string
+		s      string
+		values []string
+		want   string
+	}{
+		{name: "short body", s: "short", values: []string{"short"}, want: "short"},
+		{name: "no overlap", s: "nothing in common here", values: []string{"completely different text"},
+			want: "nothing in common here"},
+		{name: "shorter than minEcho kept", s: "error: the cat sat", values: []string{"the cat sat on"},
+			want: "error: the cat sat"},
+		{name: "two runs", s: "a=0123456789abcdef b=0123456789abcdef!", values: []string{"0123456789abcdef"},
+			want: "a=<redacted> b=<redacted>!"},
+		{name: "whole characters", s: "x:ééééééé;", values: []string{"aéééééé"}, want: "x:<redacted>;"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, redactExcerpts(tc.s, tc.values))
+		})
+	}
+}
+
 func TestAskTruncatesErrorBody(t *testing.T) {
 	c := newTestClient(t, reply(http.StatusInternalServerError, strings.Repeat("x", 5000)))
 	_, err := c.Ask(t.Context(), testRequest())

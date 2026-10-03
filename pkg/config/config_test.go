@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -273,6 +274,34 @@ func TestLoad_UnknownKeyHidesValue(t *testing.T) {
 	assert.Contains(t, err.Error(), "[agrouter] apikey (local ")
 	assert.Contains(t, err.Error(), "unknown key")
 	assert.NotContains(t, err.Error(), "sk-secret")
+}
+
+func TestLoad_ParseErrorHidesLine(t *testing.T) {
+	tests := []struct {
+		name  string
+		local string
+		want  string
+	}{
+		{name: "wrong delimiter", local: "[agrouter]\n\napi_key: sk-secret\n", want: "line 3: key-value delimiter not found"},
+		{name: "empty key name", local: "[agrouter]\n= sk-secret\n", want: "line 2: empty key name"},
+		{name: "unclosed section", local: "[agrouter sk-secret\n", want: "line 1: unclosed section"},
+		{name: "unclosed key quote", local: "[agrouter]\n`sk-secret = x\n", want: "line 2: missing closing key quote"},
+		{name: "unclosed value quote", local: "[agrouter]\napi_key = \"\"\"sk-secret\n", want: "malformed INI"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := load(t, "", tc.local)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "parse local ")
+			assert.Contains(t, err.Error(), tc.want)
+			assert.NotContains(t, err.Error(), "sk-secret")
+		})
+	}
+}
+
+func TestParseError_Unrecognized(t *testing.T) {
+	require.EqualError(t, parseError([]byte("x\n"), errors.New("BOM: x")), "malformed INI")
+	require.EqualError(t, parseError([]byte("a\n"), errors.New("unclosed section: b")), "unclosed section")
 }
 
 func TestLoad_UnreadableFile(t *testing.T) {

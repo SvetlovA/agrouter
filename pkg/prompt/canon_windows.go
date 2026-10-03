@@ -31,6 +31,30 @@ func openCanonical(path string) (*os.File, string, error) {
 	return f, stripExtendedPrefix(windows.UTF16ToString(buf[:n])), nil
 }
 
+// workdir is the working directory mentioned files are read from, by its canonical path.
+type workdir struct {
+	root string
+}
+
+// openWorkdir resolves the canonical path of the absolute working directory abs. No handle is kept:
+// each file's canonical path comes from its own open handle, so the path checked is the file read.
+func openWorkdir(abs string) (*workdir, error) {
+	f, root, err := openCanonical(abs)
+	if err != nil {
+		return nil, fmt.Errorf("working directory: %w", err)
+	}
+	_ = f.Close()
+	return &workdir{root: root}, nil
+}
+
+func (w *workdir) Close() error { return nil }
+
+// open opens the file path names and returns it with its canonical path, which the caller checks
+// against the working directory.
+func (w *workdir) open(path string) (*os.File, string, error) {
+	return openCanonical(path)
+}
+
 // stripExtendedPrefix turns `\\?\C:\x` into `C:\x` and `\\?\UNC\srv\share` into `\\srv\share`.
 func stripExtendedPrefix(p string) string {
 	if rest, ok := strings.CutPrefix(p, `\\?\UNC\`); ok {

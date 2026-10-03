@@ -58,11 +58,14 @@ func (a Agrouter) validate() []error {
 	return errs
 }
 
-// validate checks the CLI's [cli.<name>.args] mappings against the rules for required keys,
-// {prompt} placement and allowed placeholders.
+// validate checks the CLI's command and its [cli.<name>.args] mappings against the rules for
+// required keys, {prompt} placement and allowed placeholders.
 func (cli CLI) validate(models []Model) []error {
 	section := "cli." + cli.Name + ".args"
 	var errs []error
+	if strings.TrimSpace(cli.Command) == "" {
+		errs = append(errs, fmt.Errorf("[cli.%s] command: must not be empty", cli.Name))
+	}
 	for _, key := range []string{KeyPrint, KeyModel} {
 		if _, ok := cli.Args[key]; !ok {
 			errs = append(errs, fmt.Errorf("[%s] %s: required mapping is missing", section, key))

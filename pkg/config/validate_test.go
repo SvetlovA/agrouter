@@ -21,6 +21,11 @@ func TestValidate_Violations(t *testing.T) {
 		want  []string // substrings of the error
 	}{
 		{
+			name:  "empty command",
+			local: "[cli.beta]\ncommand =\n",
+			want:  []string{"[cli.beta] command: must not be empty"},
+		},
+		{
 			name:  "missing print",
 			local: "[cli.gamma]\ncommand = gamma\n[cli.gamma.args]\nmodel = [\"-m\", \"{model}\"]\nprompt = [\"{prompt}\"]\n",
 			want:  []string{"[cli.gamma.args] print: required mapping is missing"},

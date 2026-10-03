@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/SvetlovA/agrouter/pkg/args"
@@ -107,7 +108,7 @@ func (a *app) run(argv []string) int {
 	a.debug.command(res)
 
 	if req.Mode == args.ModeDecision {
-		return a.printDecision(d.Decision, res)
+		return a.printDecision(d, res)
 	}
 	return a.exec(res, d.captured)
 }
@@ -136,10 +137,12 @@ func (a *app) setup(req *args.Request) (*config.Config, *catalog.Catalog, *route
 	return cfg, cat, rt, nil
 }
 
-// routed is the decision together with the captured prompt, whose stdin the child replays.
+// routed is the decision together with the captured prompt, whose stdin the child replays, and the
+// routing arguments eligibility skipped.
 type routed struct {
 	router.Decision
 	captured *prompt.Result
+	skipped  []args.Skip
 }
 
 // route captures the prompt and decides, all within the routing deadline. Eligibility warnings go to
@@ -155,8 +158,8 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 	}
 
 	el := router.Eligible(cfg, cat, req)
-	for _, w := range el.Warnings {
-		fmt.Fprintln(a.stderr, w)
+	for _, s := range el.Skipped {
+		fmt.Fprintln(a.stderr, s.Warning)
 	}
 	a.debug.eligibility(el)
 	// one option runs without Jev, so the files the prompt mentions are not read for it
@@ -170,11 +173,12 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 	if err != nil {
 		return routed{}, err
 	}
-	return routed{Decision: d, captured: captured}, nil
+	return routed{Decision: d, captured: captured, skipped: el.Skipped}, nil
 }
 
-// printDecision writes the decision-mode JSON line to stdout.
-func (a *app) printDecision(d router.Decision, res args.Result) int {
+// printDecision writes the decision-mode JSON line to stdout; skipped lists what eligibility skipped,
+// then what the argv left out.
+func (a *app) printDecision(d routed, res args.Result) int {
 	out := decisionJSON{CLI: d.CLI, Argv: res.Argv, Skipped: []string{}}
 	if d.Model != "" {
 		out.Model = &d.Model
@@ -182,7 +186,7 @@ func (a *app) printDecision(d router.Decision, res args.Result) int {
 	if d.Effort != "" {
 		out.Effort = &d.Effort
 	}
-	for _, s := range res.Skipped {
+	for _, s := range slices.Concat(d.skipped, res.Skipped) {
 		out.Skipped = append(out.Skipped, s.Spelling)
 	}
 	enc := json.NewEncoder(a.stdout)

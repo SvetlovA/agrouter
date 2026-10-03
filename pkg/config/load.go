@@ -114,7 +114,7 @@ func (m *merged) add(layer, path string, data []byte) error {
 	}
 	f, err := ini.LoadSources(ini.LoadOptions{IgnoreInlineComment: true, KeyValueDelimiters: "="}, data)
 	if err != nil {
-		return fmt.Errorf("parse %s: %w", origin(layer, path), err)
+		return fmt.Errorf("parse %s: %w", origin(layer, path), parseError(data, err))
 	}
 	for _, s := range f.Sections() {
 		keys := s.Keys()
@@ -244,7 +244,7 @@ func (s *section) decodeAgrouter(a *Agrouter) error {
 			return s.unknownKey(k)
 		}
 		if err != nil {
-			return s.errorf(k, "%w", err)
+			return s.keyError(k, err)
 		}
 	}
 	return nil
@@ -270,7 +270,7 @@ func (m *merged) decodeCLI(s *section) (CLI, error) {
 	for _, k := range args.keys {
 		tmpl, err := parseTemplate(args.values[k].value)
 		if err != nil {
-			return CLI{}, args.errorf(k, "%w", err)
+			return CLI{}, args.keyError(k, err)
 		}
 		cli.Args[k] = tmpl
 	}
@@ -332,7 +332,7 @@ func (s *section) enabled() (bool, error) {
 	}
 	on, err := strconv.ParseBool(e.value)
 	if err != nil {
-		return false, s.errorf("enabled", "%w", err)
+		return false, s.keyError("enabled", err)
 	}
 	return on, nil
 }
@@ -344,10 +344,10 @@ func (s *section) unknownKey(key string) error {
 	return fmt.Errorf("[%s] %s (%s): unknown key", s.name, key, origin(e.layer, e.path))
 }
 
-// errorf formats an error naming the section, the key, its value and the layer that set it.
-func (s *section) errorf(key, format string, args ...any) error {
+// keyError wraps err with the section, the key, its value and the layer that set it.
+func (s *section) keyError(key string, err error) error {
 	e := s.values[key]
-	return fmt.Errorf("[%s] %s = %q (%s): %w", s.name, key, e.value, origin(e.layer, e.path), fmt.Errorf(format, args...))
+	return fmt.Errorf("[%s] %s = %q (%s): %w", s.name, key, e.value, origin(e.layer, e.path), err)
 }
 
 // parseTemplate decodes a [cli.*.args] value: a JSON array of strings, possibly empty.
@@ -371,6 +371,29 @@ func splitList(v string) []string {
 		}
 	}
 	return out
+}
+
+// iniErrorKinds are the ini.v1 parse errors that end with the offending line, ": <line>".
+var iniErrorKinds = []string{
+	"key-value delimiter not found", "empty key name", "missing closing key quote", "unclosed section",
+}
+
+// parseError replaces an ini.v1 parse error, which quotes the offending line, with its kind and line
+// number: the line may be "api_key: sk-..." with the wrong delimiter, and must not reach stderr.
+func parseError(data []byte, err error) error {
+	msg := strings.TrimSpace(err.Error())
+	for _, kind := range iniErrorKinds {
+		if !strings.HasPrefix(msg, kind+":") {
+			continue
+		}
+		for i, line := range strings.Split(string(data), "\n") {
+			if t := strings.TrimSpace(line); t != "" && msg == kind+": "+t {
+				return fmt.Errorf("line %d: %s", i+1, kind)
+			}
+		}
+		return errors.New(kind)
+	}
+	return errors.New("malformed INI")
 }
 
 func origin(layer, path string) string {

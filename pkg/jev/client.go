@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // DefaultURL is the Jev endpoint.
@@ -23,6 +24,11 @@ const (
 	maxResponseBytes = 4 << 20
 	maxErrorBody     = 512
 	redacted         = "<redacted>"
+	// scannedErrorBody bounds the part of an error body checked for excerpts of the state; the rest
+	// is cut, since at most maxErrorBody of it is shown.
+	scannedErrorBody = 8 * maxErrorBody
+	// minEcho is the shortest run of bytes shared with a state string that is redacted as an excerpt.
+	minEcho = 12
 )
 
 var (
@@ -173,18 +179,79 @@ func (c *Client) wait(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-// errorBody is the start of an error response on one line, with the key and every string of state
-// redacted: a validation error may echo the request, and the prompt must not reach stderr.
+// errorBody is the start of an error response on one line, with the key, every string of state and
+// every excerpt of one redacted: a validation error may echo the request whole or in part, and the
+// prompt must not reach stderr.
 func (c *Client) errorBody(data []byte, state any) string {
 	s := c.redactString(string(data))
-	for _, v := range stateStrings(state) {
+	values := stateStrings(state)
+	for _, v := range values {
 		s = strings.ReplaceAll(s, v, redacted)
 	}
+	if len(s) > scannedErrorBody {
+		s = s[:scannedErrorBody]
+	}
+	s = redactExcerpts(s, values)
 	s = strings.Join(strings.Fields(s), " ")
 	if len(s) > maxErrorBody {
 		s = s[:maxErrorBody] + "..."
 	}
 	return s
+}
+
+// redactExcerpts replaces every run of s that shares at least minEcho consecutive bytes with one of
+// values, such as a prefix of the prompt or a truncated excerpt of a file. Runs are widened to whole
+// UTF-8 characters.
+func redactExcerpts(s string, values []string) string {
+	if len(s) < minEcho {
+		return s
+	}
+	windows := make(map[string][]int, len(s)-minEcho+1)
+	for i := 0; i+minEcho <= len(s); i++ {
+		windows[s[i:i+minEcho]] = append(windows[s[i:i+minEcho]], i)
+	}
+	hit := make([]bool, len(s))
+	found := false
+	for _, v := range values {
+		for j := 0; j+minEcho <= len(v); j++ {
+			starts, ok := windows[v[j:j+minEcho]]
+			if !ok {
+				continue
+			}
+			for _, i := range starts {
+				for k := i; k < i+minEcho; k++ {
+					hit[k] = true
+				}
+			}
+			found = true
+			delete(windows, v[j:j+minEcho])
+		}
+	}
+	if !found {
+		return s
+	}
+	// widen each run to whole characters: backwards to its first character's start byte, forwards
+	// over the continuation bytes of its last
+	for i := len(s) - 1; i > 0; i-- {
+		if hit[i] && !utf8.RuneStart(s[i]) {
+			hit[i-1] = true
+		}
+	}
+	for i := 1; i < len(s); i++ {
+		if hit[i-1] && !utf8.RuneStart(s[i]) {
+			hit[i] = true
+		}
+	}
+	var b strings.Builder
+	for i := range len(s) {
+		switch {
+		case !hit[i]:
+			b.WriteByte(s[i])
+		case i == 0 || !hit[i-1]:
+			b.WriteString(redacted)
+		}
+	}
+	return b.String()
 }
 
 func (c *Client) redactString(s string) string {
@@ -214,8 +281,11 @@ func stateStrings(state any) []string {
 				return
 			}
 			out = append(out, v)
-			if quoted, err := json.Marshal(v); err == nil && string(quoted[1:len(quoted)-1]) != v {
-				out = append(out, string(quoted[1:len(quoted)-1]))
+			escaped := jsonEscaped(v)
+			for i, e := range escaped {
+				if e != v && (i == 0 || e != escaped[0]) {
+					out = append(out, e)
+				}
 			}
 		case []any:
 			for _, e := range v {
@@ -229,6 +299,21 @@ func stateStrings(state any) []string {
 	}
 	walk(tree)
 	slices.SortFunc(out, func(a, b string) int { return len(b) - len(a) })
+	return out
+}
+
+// jsonEscaped returns v as a JSON string body with and without HTML escaping: Go escapes <, > and &,
+// while other servers echo them as is.
+func jsonEscaped(v string) []string {
+	out := make([]string, 0, 2)
+	for _, html := range []bool{true, false} {
+		var b strings.Builder
+		enc := json.NewEncoder(&b)
+		enc.SetEscapeHTML(html)
+		_ = enc.Encode(v) // a string always encodes
+		q := strings.TrimSuffix(b.String(), "\n")
+		out = append(out, q[1:len(q)-1])
+	}
 	return out
 }
 

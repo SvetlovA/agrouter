@@ -29,8 +29,9 @@ type Eligibility struct {
 	// effort and the caller's value is emitted as given.
 	EffortPassthrough bool
 	Dropped           []Drop
-	Warnings          []string // stderr lines, without a trailing newline
-	effort            string
+	// Skipped lists the routing arguments left out (an unusable --cli), for stderr and the decision JSON.
+	Skipped []args.Skip
+	effort  string
 }
 
 // EffortFor returns the effort to emit for o: its own, or the caller's passed-through value.
@@ -67,8 +68,10 @@ func (e *Eligibility) filterCLI(name string) {
 	}
 	kept := catalog.ByCLI(e.Options, name)
 	if len(kept) == 0 {
-		e.Warnings = append(e.Warnings,
-			fmt.Sprintf("agrouter: warning: skipped --cli %s: not an enabled CLI; routing across every CLI", name))
+		e.Skipped = append(e.Skipped, args.Skip{
+			Spelling: "--cli " + name,
+			Warning:  fmt.Sprintf("agrouter: warning: skipped --cli %s: not an enabled CLI; routing across every CLI", name),
+		})
 		return
 	}
 	e.drop(kept, "--cli "+name)

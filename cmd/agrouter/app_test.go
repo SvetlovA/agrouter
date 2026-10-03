@@ -464,6 +464,23 @@ func TestApp_Errors(t *testing.T) {
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Equal(t, "agrouter: warning: skipped --cli nope: not an enabled CLI; routing across every CLI\n", r.stderr)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal([]byte(r.stdout), &out))
+		assert.Equal(t, strs("--cli nope"), out["skipped"])
+	})
+
+	t.Run("eligibility skips come before argv skips", func(t *testing.T) {
+		e := newEnv(t)
+		e.jev.pick = "claude-sonnet-5@low"
+		// claude skips --sandbox and codex skips --output-format json, so both stay eligible
+		r := e.run([]string{"--cli=nope", "--sandbox", "read-only", "--output-format", "json", "fix it"}, nil)
+
+		require.Equal(t, 0, r.code, r.stderr)
+		assert.Equal(t, "agrouter: warning: skipped --cli nope: not an enabled CLI; routing across every CLI\n"+
+			"agrouter: warning: skipped --sandbox read-only: claude has no mapping for it\n", r.stderr)
+		var out map[string]any
+		require.NoError(t, json.Unmarshal([]byte(r.stdout), &out))
+		assert.Equal(t, strs("--cli nope", "--sandbox read-only"), out["skipped"])
 	})
 }
 
