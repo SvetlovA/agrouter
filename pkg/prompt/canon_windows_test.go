@@ -31,6 +31,13 @@ func TestRemotePath(t *testing.T) {
 		{p: `\\?\UNC\srv\share`, want: true},
 		{p: `\??\unc\srv\share`, want: true},
 		{p: `\\.\pipe\x`, want: true},
+		{p: `\\?\pipe\x`, want: true},
+		{p: `\??\pipe\x`, want: true},
+		{p: `\\?\COM1`, want: true},
+		{p: `\??\GLOBALROOT\Device\Null`, want: true},
+		{p: `\\?\`, want: true},
+		{p: `\\?\c:\x`, want: false},
+		{p: `\??\volume{0a1b}\x`, want: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.p, func(t *testing.T) {
@@ -105,15 +112,17 @@ func TestWorkdirOpen_Symlinks(t *testing.T) {
 	require.NoError(t, os.Symlink(`\\127.0.0.1\share\x.txt`, filepath.Join(cwd, "unc.txt")))
 	require.NoError(t, os.Symlink(`\\127.0.0.1\share`, filepath.Join(cwd, "uncdir")))
 	require.NoError(t, os.Symlink(filepath.Join(cwd, "uncdir"), filepath.Join(cwd, "via")))
+	require.NoError(t, os.Symlink(`\\?\pipe\agrouter-test`, filepath.Join(cwd, "pipe.txt")))
+	require.NoError(t, os.Symlink(`\\?\COM1`, filepath.Join(cwd, "com.txt")))
 	require.NoError(t, os.Symlink(filepath.Join(cwd, "loop2"), filepath.Join(cwd, "loop1")))
 	require.NoError(t, os.Symlink(filepath.Join(cwd, "loop1"), filepath.Join(cwd, "loop2")))
 
 	for path, want := range map[string]string{
-		"rel.txt":        "inside",
-		`abs\in.txt`:     "inside",
-		"rooted.txt":     "inside",
-		`dir\up2.txt`:    "outside",
-		`abs\up2.txt`:    "outside",
+		"rel.txt":     "inside",
+		`abs\in.txt`:  "inside",
+		"rooted.txt":  "inside",
+		`dir\up2.txt`: "outside",
+		`abs\up2.txt`: "outside",
 	} {
 		got, _, err := openText(t, cwd, filepath.Join(cwd, path))
 		require.NoError(t, err, path)
@@ -123,17 +132,19 @@ func TestWorkdirOpen_Symlinks(t *testing.T) {
 	require.Error(t, err, `..\cwd2 from dir is cwd\cwd2, which does not exist`)
 
 	for path, msg := range map[string]string{
-		"unc.txt":            "UNC or device path",
-		`uncdir\x.txt`:       "UNC or device path",
-		`via\x.txt`:          "UNC or device path",
-		"loop1":              "too many links",
+		"unc.txt":      "UNC or device path",
+		`uncdir\x.txt`: "UNC or device path",
+		`via\x.txt`:    "UNC or device path",
+		"pipe.txt":     "UNC or device path",
+		"com.txt":      "UNC or device path",
+		"loop1":        "too many links",
 	} {
 		_, _, err := openText(t, cwd, filepath.Join(cwd, path))
 		require.Error(t, err, path)
 		assert.Contains(t, err.Error(), msg, path)
 	}
 
-	res := mention(t, t.Context(), cwd, "unc.txt via/x.txt rel.txt", testLimit)
+	res := mention(t, t.Context(), cwd, "unc.txt via/x.txt pipe.txt rel.txt", testLimit)
 	require.NoError(t, res.Undecidable)
 	assert.Equal(t, []string{"inside"}, res.Files)
 }
@@ -144,7 +155,7 @@ func reparseBuffer(tag uint32, sub string, flags uint32) []byte {
 	b := binary.LittleEndian.AppendUint32(nil, tag)
 	b = binary.LittleEndian.AppendUint16(b, 0)
 	b = binary.LittleEndian.AppendUint16(b, 0)
-	b = binary.LittleEndian.AppendUint16(b, 0)                     // substitute offset
+	b = binary.LittleEndian.AppendUint16(b, 0) // substitute offset
 	b = binary.LittleEndian.AppendUint16(b, uint16(2*len(name)))
 	b = binary.LittleEndian.AppendUint16(b, uint16(2*len(name))) // print name follows
 	b = binary.LittleEndian.AppendUint16(b, 0)

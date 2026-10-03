@@ -166,8 +166,8 @@ func follow(dirs []windows.Handle, target, start string) ([]windows.Handle, []st
 	vol, names := splitVolume(target)
 	switch {
 	case vol != `\`:
-		if !strings.EqualFold(filepath.VolumeName(target), start) && remoteDrive(target) {
-			return dirs, nil, errors.New("a link leads to a network drive")
+		if !strings.EqualFold(filepath.VolumeName(target), start) && !localDrive(target) {
+			return dirs, nil, errors.New("a link leads to a network drive or a volume that is not a local disk")
 		}
 		root, err := openRoot(vol)
 		if err != nil {
@@ -301,10 +301,18 @@ func parseReparse(b []byte) (uint32, string, error) {
 	return 0, "", fmt.Errorf("unsupported link target %s", target)
 }
 
-// remoteDrive reports whether the volume of the absolute path p is a network drive.
-func remoteDrive(p string) bool {
+// localDrive reports whether the volume of the absolute path p is a local disk. A network drive,
+// and a volume whose type is unknown or that has no root, are not.
+func localDrive(p string) bool {
 	root, err := windows.UTF16PtrFromString(filepath.VolumeName(p) + `\`)
-	return err != nil || windows.GetDriveType(root) == windows.DRIVE_REMOTE
+	if err != nil {
+		return false
+	}
+	switch windows.GetDriveType(root) {
+	case windows.DRIVE_FIXED, windows.DRIVE_REMOVABLE, windows.DRIVE_CDROM, windows.DRIVE_RAMDISK:
+		return true
+	}
+	return false
 }
 
 func closeAll(hs []windows.Handle) {
@@ -320,14 +328,24 @@ func splitVolume(p string) (string, []string) {
 }
 
 // remotePath reports whether the link target p is a UNC (`\\srv\share`, `\\?\UNC\srv\share`) or
-// device (`\\.\pipe\x`) path. A volume GUID path (`\\?\Volume{...}\`) is local.
+// device (`\\.\pipe\x`, `\\?\pipe\x`, `\??\COM1`) path. Behind an extended prefix only a drive
+// letter (`\\?\C:\`) or a volume GUID (`\\?\Volume{...}\`) is local; any other name is a device.
 func remotePath(p string) bool {
 	for _, prefix := range []string{`\\?\`, `\??\`} {
 		if rest, ok := strings.CutPrefix(p, prefix); ok {
-			return strings.HasPrefix(strings.ToUpper(rest), `UNC\`)
+			return !driveLetter(rest) && !strings.HasPrefix(strings.ToUpper(rest), `VOLUME{`)
 		}
 	}
 	return strings.HasPrefix(p, `\\`)
+}
+
+// driveLetter reports whether p starts with a drive letter and a colon (`C:`).
+func driveLetter(p string) bool {
+	if len(p) < 2 || p[1] != ':' {
+		return false
+	}
+	c := p[0] | 0x20
+	return 'a' <= c && c <= 'z'
 }
 
 // stripExtendedPrefix turns `\\?\C:\x` into `C:\x` and `\\?\UNC\srv\share` into `\\srv\share`.
