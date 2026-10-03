@@ -1,0 +1,16 @@
+Read the plan file at docs/plans/20260915-rate-limiter.md. Find the FIRST Task section (### Task N:) that has uncompleted checkboxes ([ ]).
+
+CRITICAL CONSTRAINT: Complete ONE Task section per iteration.
+
+The current task is:
+
+### Task 3: Token bucket per API key (`pkg/ratelimit`)
+- [ ] implement a token bucket keyed by API key with a configurable rate and burst, safe for concurrent use
+- [ ] evict idle buckets after 10 minutes so memory stays bounded
+- [ ] wire it into the HTTP middleware: 429 with Retry-After when the bucket is empty
+- [ ] write table-driven tests, including concurrent callers and eviction with a fake clock
+- [ ] run tests - must pass before next task
+
+STEP 1 - IMPLEMENT: implement all items and write tests.
+STEP 2 - VALIDATE: run `go test ./...` and `golangci-lint run`; fix failures until everything passes.
+STEP 3 - COMPLETE: mark the checkboxes [x] and commit with message: feat: <brief task description>

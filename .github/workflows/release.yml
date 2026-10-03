@@ -1,0 +1,72 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # the module path has no /v2 suffix, so only v0.x and v1.x tags are installable;
+      # pre-release suffixes are lowercase so the module proxy needs no case-escaping
+      - name: verify release tag and branch
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[01]\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9a-z-]+(\.[0-9a-z-]+)*)?$ ]]; then
+            echo "invalid release tag: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          git fetch origin master
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/master || {
+            echo "release tag must point to a commit on master" >&2
+            exit 1
+          }
+
+      - name: set up go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+
+      - name: test
+        run: go test ./...
+
+      - name: create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes "${flags[@]}"
+
+      # makes `go install github.com/SvetlovA/agrouter/cmd/agrouter@<tag>` resolvable right away;
+      # the proxy can only fetch the module when the repository is public
+      - name: warm module proxy
+        env:
+          GOPROXY: https://proxy.golang.org
+          GOFLAGS: -mod=mod
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if go list -m "github.com/SvetlovA/agrouter@$GITHUB_REF_NAME"; then
+              exit 0
+            fi
+            echo "module proxy not ready (attempt $attempt), retrying" >&2
+            sleep $((attempt * 10))
+          done
+          echo "module proxy did not resolve $GITHUB_REF_NAME" >&2
+          exit 1

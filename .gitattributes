@@ -1,0 +1,10 @@
+* text=auto eol=lf
+
+# binary fixtures
+*.png -text
+*.jpg -text
+*.gif -text
+*.pdf -text
+*.bin -text
+*.zip -text
+*.gz -text

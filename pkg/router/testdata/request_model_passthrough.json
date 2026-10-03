@@ -1,0 +1,44 @@
+{
+  "model": "jev-latest",
+  "state": {
+    "prompt": "fix the flaky test in pkg/foo/foo_test.go",
+    "files": [
+      "package foo\n"
+    ],
+    "attachments": [
+      {
+        "source": "mentioned",
+        "type": "image/png",
+        "bytes": 48213
+      }
+    ]
+  },
+  "questions": {
+    "route": {
+      "type": "choice",
+      "instructions": {
+        "question": "Which coding-agent CLI, model and reasoning effort should run the task described in `state` (its `prompt`, the `files` the prompt mentions, and `attachments`, where `attachments` lists images, PDFs and other non-text inputs the task includes, by type and size only)? Judge each option as a whole: the model and effort together must be strong enough to complete the task well, at the lowest cost and time that achieves that. Look up each option's `model` in `models` and its `cli` and `effort` in `efforts`.",
+        "clis": {
+          "claude": "Claude Code (Anthropic). Agentic coding CLI with file editing, shell, subagents (Task tool) and MCP.",
+          "codex": "Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent."
+        },
+        "models": {
+          "gpt-9": "not in the catalog: passed through as given"
+        },
+        "efforts": {}
+      },
+      "criteria": {
+        "claude": {
+          "cli": "claude",
+          "model": "gpt-9",
+          "effort": "the CLI's default"
+        },
+        "codex": {
+          "cli": "codex",
+          "model": "gpt-9",
+          "effort": "the CLI's default"
+        }
+      }
+    }
+  }
+}
