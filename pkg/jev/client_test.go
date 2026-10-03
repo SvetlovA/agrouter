@@ -243,6 +243,27 @@ func TestAskSlowResponseHitsDeadline(t *testing.T) {
 	assert.Less(t, time.Since(start), 2*time.Second)
 }
 
+func TestAskRetryCutByDeadlineReportsOverload(t *testing.T) {
+	release := make(chan struct{})
+	var calls atomic.Int32
+	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(529)
+			return
+		}
+		select {
+		case <-release:
+		case <-time.After(5 * time.Second):
+		}
+	})
+	t.Cleanup(func() { close(release) }) // runs before the server closes
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	_, err := c.Ask(ctx, testRequest())
+	require.ErrorIs(t, err, ErrOverloaded, "the deadline ended the retry, not the overload")
+	assert.Equal(t, int32(2), calls.Load())
+}
+
 func TestAskNetworkError(t *testing.T) {
 	c := New(testKey)
 	c.URL = "http://127.0.0.1:1/" + testKey
@@ -438,9 +459,17 @@ func TestDelay(t *testing.T) {
 	assert.Equal(t, time.Second, c.delay(40, none))
 
 	withRetry := http.Header{"Retry-After": []string{"0"}}
-	assert.Equal(t, time.Duration(0), c.delay(3, withRetry))
+	assert.Equal(t, 100*time.Millisecond, c.delay(3, withRetry), "Retry-After: 0 still waits MinBackoff")
 	withRetry.Set("Retry-After", "30")
 	assert.Equal(t, time.Second, c.delay(0, withRetry))
+	withRetry.Set("Retry-After", "10000000000")
+	assert.Equal(t, time.Second, c.delay(0, withRetry), "a huge Retry-After is clamped, not overflowed")
+	withRetry.Set("Retry-After", "99999999999999999999999")
+	assert.Equal(t, time.Second, c.delay(0, withRetry), "a Retry-After past uint64 is clamped too")
+	withRetry.Set("Retry-After", "184467440737095516160x")
+	assert.Equal(t, 100*time.Millisecond, c.delay(0, withRetry), "an overflowing prefix with trailing junk is malformed")
+	withRetry.Set("Retry-After", "-5")
+	assert.Equal(t, 100*time.Millisecond, c.delay(0, withRetry), "a signed value is not delay-seconds")
 	withRetry.Set("Retry-After", "Wed, 21 Oct 2015 07:28:00 GMT")
 	assert.Equal(t, 100*time.Millisecond, c.delay(0, withRetry))
 }

@@ -108,9 +108,14 @@ func (c *Client) Ask(ctx context.Context, req Request) (map[string]Answer, error
 	if err != nil {
 		return nil, fmt.Errorf("jev: encode request: %w", err)
 	}
+	var last *StatusError
 	for attempt := 0; ; attempt++ {
 		status, data, header, postErr := c.post(ctx, body)
 		if postErr != nil {
+			// a retry cut off by the deadline is still the overload that forced it
+			if last != nil && ctx.Err() != nil {
+				return nil, last
+			}
 			return nil, c.redact(fmt.Errorf("jev: %w", postErr))
 		}
 		if status == http.StatusOK {
@@ -124,6 +129,7 @@ func (c *Client) Ask(ctx context.Context, req Request) (map[string]Answer, error
 		if !c.wait(ctx, c.delay(attempt, header)) {
 			return nil, serr
 		}
+		last = serr
 	}
 }
 
@@ -148,10 +154,21 @@ func (c *Client) post(ctx context.Context, body []byte) (int, []byte, http.Heade
 }
 
 // delay is the wait before retry attempt+1: Retry-After in seconds if given, else exponential
-// from MinBackoff; never above MaxBackoff.
+// from MinBackoff; never below MinBackoff, so Retry-After: 0 cannot spin, nor above MaxBackoff.
+// The seconds are clamped before conversion, so a huge Retry-After cannot overflow time.Duration;
+// a digit string past uint64 is still valid delay-seconds and waits MaxBackoff. ParseUint reports
+// ErrRange before reading past the overflow, so the all-digits check keeps "<huge>x" malformed.
 func (c *Client) delay(attempt int, header http.Header) time.Duration {
-	if secs, err := strconv.Atoi(header.Get("Retry-After")); err == nil && secs >= 0 {
-		return min(time.Duration(secs)*time.Second, c.MaxBackoff)
+	value := header.Get("Retry-After")
+	secs, err := strconv.ParseUint(value, 10, 64)
+	if errors.Is(err, strconv.ErrRange) && allDigits(value) {
+		return c.MaxBackoff
+	}
+	if err == nil {
+		if secs > uint64(c.MaxBackoff/time.Second) {
+			return c.MaxBackoff
+		}
+		return min(max(time.Duration(secs)*time.Second, c.MinBackoff), c.MaxBackoff)
 	}
 	d := c.MinBackoff
 	for range attempt {
@@ -161,6 +178,19 @@ func (c *Client) delay(attempt int, header http.Header) time.Duration {
 		}
 	}
 	return min(d, c.MaxBackoff)
+}
+
+// allDigits reports whether s is a non-empty run of ASCII digits, the delay-seconds grammar.
+func allDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // wait sleeps for d and reports whether a retry can still run: false when the deadline would pass
