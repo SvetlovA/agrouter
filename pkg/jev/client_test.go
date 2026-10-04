@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -401,10 +402,59 @@ func TestAskMalformed(t *testing.T) {
 }
 
 func TestAskProbabilitySlack(t *testing.T) {
-	c := newTestClient(t, reply(http.StatusOK,
-		`{"answers":{"route":{"choice":"a","probabilities":{"a":0.5,"b@high":0.505},"confidence":0}}}`))
-	_, err := c.Ask(t.Context(), testRequest())
-	require.NoError(t, err)
+	tests := []struct {
+		name      string
+		other     float64
+		malformed bool
+	}{
+		{name: "within slack", other: 0.505},
+		{name: "lower boundary", other: 0.49},
+		{name: "upper boundary", other: 0.51},
+		{name: "lower boundary roundoff", other: math.Nextafter(0.49, 0)},
+		{name: "upper boundary roundoff", other: math.Nextafter(0.51, 1)},
+		{name: "below lower boundary", other: 0.4899999999, malformed: true},
+		{name: "above upper boundary", other: 0.5100000001, malformed: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"answers":{"route":{"choice":"a","probabilities":{"a":0.5,"b@high":%g},"confidence":0}}}`, tc.other)
+			c := newTestClient(t, reply(http.StatusOK, body))
+			answers, err := c.Ask(t.Context(), testRequest())
+			if tc.malformed {
+				require.ErrorIs(t, err, ErrMalformed)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, map[string]float64{"a": 0.5, "b@high": tc.other}, answers["route"].Probabilities)
+		})
+	}
+}
+
+func TestAskProbabilitySlackManyOptions(t *testing.T) {
+	for _, count := range []int{33, 255} {
+		for _, total := range []float64{0.99, 1.01} {
+			t.Run(fmt.Sprintf("%d options totaling %g", count, total), func(t *testing.T) {
+				req := testRequest()
+				q := routeQuestion()
+				q.Criteria = nil
+				probabilities := make(map[string]float64, count)
+				for i := range count {
+					name := fmt.Sprintf("option-%d", i)
+					q.Criteria = append(q.Criteria, Criterion{Name: name, Value: "test option"})
+					probabilities[name] = total / float64(count)
+				}
+				req.Questions["route"] = q
+				body, err := json.Marshal(map[string]any{"answers": map[string]any{"route": map[string]any{
+					"choice": "option-0", "probabilities": probabilities, "confidence": 0,
+				}}})
+				require.NoError(t, err)
+				c := newTestClient(t, reply(http.StatusOK, string(body)))
+				answers, err := c.Ask(t.Context(), req)
+				require.NoError(t, err)
+				assert.Equal(t, probabilities, answers["route"].Probabilities)
+			})
+		}
+	}
 }
 
 func TestAskMalformedNoul(t *testing.T) {

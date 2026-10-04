@@ -387,6 +387,9 @@ func decode(data []byte, questions map[string]Question) (map[string]Answer, erro
 // probabilitySlack is how far the probabilities may sum from 1.
 const probabilitySlack = 0.01
 
+// probabilityRoundoff allows float64 error when summing and comparing boundary values.
+const probabilityRoundoff = 1e-12
+
 func validate(q Question, w wireAnswer) (Answer, error) {
 	if w.Type != "" && w.Type != q.Type {
 		return Answer{}, fmt.Errorf("answer type %q for a %s question", w.Type, q.Type)
@@ -428,7 +431,7 @@ func validateChoice(options []string, w wireAnswer) (Answer, error) {
 		}
 		sum += p
 	}
-	if math.Abs(sum-1) > probabilitySlack {
+	if math.Abs(sum-1) > probabilitySlack+probabilityRoundoff {
 		return Answer{}, fmt.Errorf("probabilities sum to %g", sum)
 	}
 	return Answer{Type: TypeChoice, Choice: w.Choice, Probabilities: w.Probabilities, Confidence: *w.Confidence}, nil
