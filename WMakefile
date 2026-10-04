@@ -1,0 +1,42 @@
+# run with make -f WMakefile <target> on Windows
+SHELL := powershell.exe
+.SHELLFLAGS := -NoLogo -NoProfile -NonInteractive -Command
+
+# RACE is empty locally (no cgo on the dev machine); CI passes RACE=-race
+RACE ?=
+
+# golangci-lint v2.13.0, the version pinned in .github/workflows/ci.yml
+# (go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.0)
+GOLANGCI_LINT ?= golangci-lint
+
+# replace filename-unsafe branch characters, including /, with -
+BRANCH := $(shell git rev-parse --abbrev-ref HEAD | ForEach-Object { $$_ -replace '[^A-Za-z0-9._-]', '-' })
+BINARY := .bin/agrouter.$(BRANCH).exe
+
+all: test build
+
+build:
+	go build -o '$(BINARY)' ./cmd/agrouter
+
+test:
+	go clean -testcache
+	go test $(RACE) '-coverprofile=coverage.out' ./...
+	Get-Content coverage.out | Where-Object { $$_ -notmatch '_mock\.go|mocks' } | Set-Content -Encoding ascii coverage_no_mocks.out
+	go tool cover '-func=coverage_no_mocks.out'
+	Remove-Item -LiteralPath coverage.out, coverage_no_mocks.out
+
+lint:
+	& '$(GOLANGCI_LINT)' run --max-issues-per-linter=0 --max-same-issues=0
+
+fmt:
+	$$files = @(Get-ChildItem -Recurse -File -Filter '*.go' | Where-Object { $$_.FullName -notmatch '[\\/](vendor|mocks)[\\/]' }); if ($$files.Count -gt 0) { gofmt -s -w $$files.FullName; if ($$LASTEXITCODE -ne 0) { exit $$LASTEXITCODE }; goimports -w $$files.FullName; exit $$LASTEXITCODE }
+
+generate:
+	go generate ./...
+
+# routes testdata/routing against the real Jev API with both encodings (needs TYPESAFE_API_KEY), never in CI
+eval-routing:
+	@if ([string]::IsNullOrEmpty($$env:TYPESAFE_API_KEY)) { [Console]::Error.WriteLine('eval-routing: TYPESAFE_API_KEY is not set'); exit 1 }
+	go test -tags=eval -count=1 -v -run TestEvalRouting -timeout 60m ./pkg/router/...
+
+.PHONY: all build test lint fmt generate eval-routing

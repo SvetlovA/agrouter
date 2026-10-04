@@ -1,0 +1,48 @@
+{
+  "model": "test-jev",
+  "state": {
+    "prompt": "fix the flaky test in pkg/foo/foo_test.go",
+    "files": [
+      "package foo\n"
+    ],
+    "attachments": [
+      {
+        "source": "mentioned",
+        "type": "image/png",
+        "bytes": 48213
+      }
+    ]
+  },
+  "questions": {
+    "route": {
+      "type": "choice",
+      "instructions": {
+        "question": "Choose an option for state.",
+        "clis": {
+          "alpha": "Alpha agent."
+        },
+        "models": {
+          "strong-model": "Strong model.",
+          "fast-model": "Fast model."
+        },
+        "efforts": {
+          "alpha": {
+            "turbo": "not in the catalog for this CLI: passed through as given"
+          }
+        }
+      },
+      "criteria": {
+        "strong": {
+          "cli": "alpha",
+          "model": "strong-model",
+          "effort": "turbo"
+        },
+        "fast": {
+          "cli": "alpha",
+          "model": "fast-model",
+          "effort": "turbo"
+        }
+      }
+    }
+  }
+}

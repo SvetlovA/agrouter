@@ -1,0 +1,5 @@
+Create an implementation plan in docs/plans/ for the following request, following the project's plan template (Overview, Context, Development Approach, Testing Strategy, Tasks with checkboxes, Post-Completion).
+
+Request: add multi-tenant support to the billing service. Every table gets a tenant id; queries must be tenant-scoped by construction (not by convention); existing single-tenant customers migrate into a default tenant with zero downtime; per-tenant rate limits and usage reports; an admin API to create, suspend and delete tenants, where deleting erases the tenant's data within 30 days for GDPR. The service is 60k lines of Go with Postgres and a Kafka event stream consumed by three other teams.
+
+Explore the codebase first, list the risky parts (migrations, the event schema other teams consume, background jobs that scan all rows), and order the tasks so each one can ship on its own.

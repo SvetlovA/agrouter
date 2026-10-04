@@ -1,0 +1,14 @@
+{
+  "description": "rename a local variable in one small function",
+  "prompt": "rename the variable `tmp` to `total` in `sum.go`",
+  "files": {
+    "sum.go": "package demo\n\nfunc Sum(xs []int) int {\n\ttmp := 0\n\tfor _, x := range xs {\n\t\ttmp += x\n\t}\n\treturn tmp\n}\n"
+  },
+  "acceptable": [
+    "claude-haiku-4-5",
+    "claude-sonnet-5-5@low",
+    "gpt-6-luna@low",
+    "gpt-6-luna@medium",
+    "gpt-6.1-sol@low"
+  ]
+}

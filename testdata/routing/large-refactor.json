@@ -1,0 +1,14 @@
+{
+  "description": "a cross-cutting refactor of a whole service",
+  "prompt": "Refactor the whole order service from a single 9,000-line package into bounded contexts (catalog, cart, payment, fulfilment) with explicit interfaces, move persistence behind repositories, keep every public HTTP endpoint and its JSON byte-identical, migrate the 400 existing tests, and keep the build green at every commit. Plan the sequence of commits first, then carry it out.",
+  "acceptable": [
+    "claude-opus-5-5@high",
+    "claude-opus-5-5@xhigh",
+    "claude-fable-5-1@high",
+    "claude-fable-5-1@medium",
+    "gpt-6-astra@high",
+    "gpt-6-astra@xhigh",
+    "gpt-6.1-sol@xhigh",
+    "gpt-6.1-sol@max"
+  ]
+}

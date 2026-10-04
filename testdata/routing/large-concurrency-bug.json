@@ -1,0 +1,14 @@
+{
+  "description": "a hard intermittent concurrency bug",
+  "prompt": "Our Go job scheduler deadlocks roughly once a week in production under load. Goroutine dumps show workers blocked on the results channel while the dispatcher waits on a mutex held by the metrics flusher. Find the lock-order inversion across scheduler/, metrics/ and store/, prove it with a reproducing test under -race, fix it without losing the at-least-once guarantee, and explain why the fix is correct.",
+  "acceptable": [
+    "claude-opus-5-5@high",
+    "claude-opus-5-5@xhigh",
+    "claude-fable-5-1@high",
+    "claude-fable-5-1@medium",
+    "gpt-6-astra@high",
+    "gpt-6-astra@xhigh",
+    "gpt-6.1-sol@xhigh",
+    "gpt-6.1-sol@max"
+  ]
+}

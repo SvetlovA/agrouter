@@ -1,0 +1,14 @@
+{
+  "description": "a ralphex task-iteration prompt (prompt on stdin, as ralphex sends it)",
+  "stdin_file": "ralphex-task.txt",
+  "acceptable": [
+    "claude-sonnet-5-5@medium",
+    "claude-sonnet-5-5@high",
+    "claude-opus-5-5@low",
+    "claude-opus-5-5@medium",
+    "gpt-6.1-sol@medium",
+    "gpt-6.1-sol@high",
+    "claude-opus-5-5@high",
+    "gpt-6.1-sol@xhigh"
+  ]
+}

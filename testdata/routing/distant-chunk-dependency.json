@@ -1,0 +1,25 @@
+{
+  "description": "a requirement that is only hard because of code far away in a split input: 'keep the behaviour of the function at the end' where that function is an intricate state machine",
+  "prompt": "Simplify the helpers at the top of the file on stdin, but keep the exact behaviour of `reconcile` at the end of it.",
+  "stdin_file": "distant-chunk.txt",
+  "filler": {
+    "text": "// helper: formats a value for logging\nfunc fmtValue(v any) string { return fmt.Sprint(v) }\n\n",
+    "bytes": 600000,
+    "position": "before"
+  },
+  "acceptable": [
+    "claude-opus-5-5@high",
+    "claude-opus-5-5@xhigh",
+    "claude-fable-5-1@high",
+    "claude-fable-5-1@medium",
+    "gpt-6-astra@high",
+    "gpt-6-astra@xhigh",
+    "gpt-6.1-sol@xhigh",
+    "gpt-6.1-sol@max",
+    "claude-sonnet-5-5@high",
+    "claude-opus-5-5@low",
+    "claude-opus-5-5@medium",
+    "gpt-6.1-sol@medium",
+    "gpt-6.1-sol@high"
+  ]
+}

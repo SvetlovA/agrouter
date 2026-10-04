@@ -1,0 +1,44 @@
+{
+  "model": "test-jev",
+  "state": {
+    "prompt": "fix the flaky test in pkg/foo/foo_test.go",
+    "files": [
+      "package foo\n"
+    ],
+    "attachments": [
+      {
+        "source": "mentioned",
+        "type": "image/png",
+        "bytes": 48213
+      }
+    ]
+  },
+  "questions": {
+    "route": {
+      "type": "choice",
+      "instructions": {
+        "question": "Choose an option for state.",
+        "clis": {
+          "alpha": "Alpha agent.",
+          "beta": "Beta agent."
+        },
+        "models": {
+          "unknown-model": "not in the catalog: passed through as given"
+        },
+        "efforts": {}
+      },
+      "criteria": {
+        "alpha": {
+          "cli": "alpha",
+          "model": "unknown-model",
+          "effort": "the CLI's default"
+        },
+        "beta": {
+          "cli": "beta",
+          "model": "unknown-model",
+          "effort": "the CLI's default"
+        }
+      }
+    }
+  }
+}
