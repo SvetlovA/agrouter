@@ -76,6 +76,8 @@ agrouter exec --cli=claude --dangerously-skip-permissions --output-format stream
 
 On Windows with npm's `claude.cmd`/`codex.cmd` shims, pass a multi-line prompt on stdin: cmd.exe cannot carry a line break inside an argument, so such a positional prompt fails to start (exit `127`).
 
+Before starting the child, exec mode logs one JSON line with `cli`, `model` and `effort` to stderr, so tools such as Ralphex can record the selection for each step. Model and effort are `null` when the CLI's defaults apply. This line does not include the prompt or argv.
+
 The child's stdout, stderr and exit code are agrouter's. An argument the chosen CLI does not map is skipped with one `agrouter: warning:` line on stderr, never an error. Set `AGROUTER_DEBUG=1` to see eligibility, Jev's probabilities and the final command on stderr (prompt text and key redacted).
 
 When Jev cannot decide (no key, timeout, API errors) and the CLI is known (`--cli`, implied by `--model`, or the only one left), agrouter runs it with only the caller's fixed `--model`/`--effort`, so the CLI's defaults apply. With more than one CLI left, it exits `2`.

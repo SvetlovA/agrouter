@@ -25,7 +25,7 @@ Dependencies point one way: `config` <- `catalog` <- `router`; `prompt` depends 
 ## Rules
 
 - **CLI, model, and effort names come only from config.** Production Go code outside `pkg/config/defaults` must not hardcode catalog names, model aliases, or effort levels, including in help text. Per-CLI behavior and argument templates belong in `[cli.*]`/`[cli.*.args]`; models and efforts come from `[model.*]`/`[effort.*]`. `cmd/agrouter/guard_test.go` enforces this; tests, testdata, and mocks may use explicit synthetic names.
-- **stdout carries only the decision JSON** (and `--help`/`--version`). Warnings, one-line `agrouter:` errors and `AGROUTER_DEBUG=1` output go to stderr, with the prompt and API key redacted.
+- **stdout carries only the decision JSON** (and `--help`/`--version`) or the child's output in exec mode. Exec logs one JSON line with `cli`, `model` and `effort` to stderr before starting the child, without the prompt or argv. Warnings, one-line `agrouter:` errors and `AGROUTER_DEBUG=1` output also go to stderr, with the prompt and API key redacted.
 - Unmapped arguments are skipped with a warning, never errors; values outside the catalog are passed through. Exit `2` only for the cases in the design's "Still errors" list; `127` when the child can't start.
 
 ## Code style

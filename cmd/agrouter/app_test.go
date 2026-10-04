@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/SvetlovA/agrouter/cmd/agrouter/mocks"
 	"github.com/SvetlovA/agrouter/pkg/config"
 	"github.com/SvetlovA/agrouter/pkg/config/defaults"
 	"github.com/SvetlovA/agrouter/pkg/jev"
@@ -162,6 +164,10 @@ type result struct {
 }
 
 func (e *env) run(argv []string, stdin io.Reader) result {
+	return e.runWithRunner(argv, stdin, runner.Runner{})
+}
+
+func (e *env) runWithRunner(argv []string, stdin io.Reader, child CommandRunner) result {
 	var stdout, stderr bytes.Buffer
 	a := &app{
 		stdin:    stdin,
@@ -175,7 +181,7 @@ func (e *env) run(argv []string, stdin io.Reader) result {
 			c.URL = e.jev.srv.URL
 			return c
 		},
-		runner: runner.Runner{},
+		runner: child,
 	}
 	code := a.run(argv)
 	return result{code: code, stdout: stdout.String(), stderr: stderr.String()}
@@ -223,7 +229,7 @@ func TestApp_RalphexClaudeMode(t *testing.T) {
 			"--verbose", "--model", "opus", "--effort", "high", "--print"}, strings.NewReader(task))
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Empty(t, r.stderr)
+		assert.Equal(t, map[string]any{"cli": "claude", "model": "claude-opus-5-5", "effort": "high"}, decision(t, r.stderr))
 		assert.Empty(t, r.stdout)
 		argv, stdin, _ := e.child()
 		assert.Equal(t, []string{"-p", "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose",
@@ -240,7 +246,7 @@ func TestApp_RalphexClaudeMode(t *testing.T) {
 			"--verbose", "--print"}, strings.NewReader(task))
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Empty(t, r.stderr)
+		assert.Equal(t, map[string]any{"cli": "claude", "model": "claude-sonnet-5-5", "effort": "medium"}, decision(t, r.stderr))
 		argv, stdin, environ := e.child()
 		assert.Equal(t, []string{"-p", "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose",
 			"--model", "claude-sonnet-5-5", "--effort", "medium"}, argv)
@@ -271,7 +277,7 @@ func TestApp_RalphexCodexMode(t *testing.T) {
 		}, strings.NewReader(task))
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Empty(t, r.stderr)
+		assert.Equal(t, map[string]any{"cli": "codex", "model": "gpt-6.1-sol", "effort": "medium"}, decision(t, r.stderr))
 		argv, stdin, _ := e.child()
 		assert.Equal(t, []string{"exec",
 			"-c", "features.multi_agent=true",
@@ -293,7 +299,7 @@ func TestApp_RalphexCodexMode(t *testing.T) {
 			"-c", "stream_idle_timeout_ms=3600000", "--sandbox", "workspace-write"}, strings.NewReader(task))
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Empty(t, r.stderr)
+		assert.Equal(t, map[string]any{"cli": "codex", "model": "gpt-6.1-sol", "effort": "xhigh"}, decision(t, r.stderr))
 		argv, _, _ := e.child()
 		assert.Equal(t, []string{"exec", "-c", "stream_idle_timeout_ms=3600000", "--sandbox", "workspace-write",
 			"--model", "gpt-6.1-sol", "-c", `model_reasoning_effort="xhigh"`}, argv)
@@ -308,7 +314,7 @@ func TestApp_RalphexCodexMode(t *testing.T) {
 			strings.NewReader(task))
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Empty(t, r.stderr)
+		assert.Equal(t, map[string]any{"cli": "codex", "model": "gpt-6-astra", "effort": "high"}, decision(t, r.stderr))
 		argv, stdin, _ := e.child()
 		assert.Equal(t, []string{"exec", "-c", "stream_idle_timeout_ms=3600000", "--sandbox", "read-only",
 			"--model", "gpt-6-astra", "-c", `model_reasoning_effort="high"`}, argv)
@@ -485,6 +491,33 @@ func TestApp_Errors(t *testing.T) {
 	})
 }
 
+func TestApp_ExecSelectionBeforeChild(t *testing.T) {
+	e := newEnv(t)
+	e.globalConfig(madeUpConfig(t, "acme", "test-child", "large", "future-model", "thorough"))
+	want := map[string]any{"cli": "acme", "model": "future-model", "effort": "thorough"}
+	child := &mocks.CommandRunnerMock{RunFunc: func(_ context.Context, c runner.Command) (int, error) {
+		assert.Equal(t, want, decision(t, c.Stderr.(*bytes.Buffer).String()), "selection must be logged before the child starts")
+		assert.Empty(t, c.Stdout.(*bytes.Buffer).String())
+		assert.Contains(t, c.Argv, "private prompt")
+		assert.Contains(t, c.Argv, "private raw token")
+		_, err := fmt.Fprintln(c.Stdout, `{"child":"output"}`)
+		require.NoError(t, err)
+		_, err = fmt.Fprintln(c.Stderr, "child diagnostic")
+		require.NoError(t, err)
+		return 7, nil
+	}}
+	r := e.runWithRunner([]string{"exec", "--cli=acme", "--model=preferred", "--effort=thorough",
+		"--jev-api-key=private-api-key", "private prompt", "--", "private raw token"}, nil, child)
+	assert.Equal(t, 7, r.code)
+	assert.JSONEq(t, `{"child":"output"}`, r.stdout)
+	line, rest, ok := strings.Cut(r.stderr, "\n")
+	require.True(t, ok)
+	assert.Equal(t, want, decision(t, line+"\n"))
+	assert.Equal(t, "child diagnostic\n", rest)
+	assert.Len(t, child.RunCalls(), 1)
+	assert.Empty(t, e.jev.requests())
+}
+
 func TestApp_Exec(t *testing.T) {
 	t.Run("child exit code", func(t *testing.T) {
 		e := newEnv(t)
@@ -493,7 +526,9 @@ func TestApp_Exec(t *testing.T) {
 		r := e.run([]string{"exec", "--cli=claude", "--model=opus", "--effort=low", "fix it"}, nil)
 
 		assert.Equal(t, 7, r.code)
-		assert.Empty(t, r.stderr)
+		assert.Empty(t, r.stdout)
+		assert.Equal(t, map[string]any{"cli": "claude", "model": "claude-opus-5-5", "effort": "low"},
+			decision(t, r.stderr))
 		argv, stdin, _ := e.child()
 		assert.Equal(t, []string{"-p", "fix it", "--model", "claude-opus-5-5", "--effort", "low"}, argv)
 		assert.Empty(t, stdin)
@@ -506,8 +541,11 @@ func TestApp_Exec(t *testing.T) {
 
 		assert.Equal(t, runner.ExitStartFailure, r.code)
 		assert.Empty(t, r.stdout)
-		assert.Equal(t, 1, strings.Count(r.stderr, "\n"), r.stderr)
-		assert.True(t, strings.HasPrefix(r.stderr, "agrouter: cannot start "), r.stderr)
+		line, rest, ok := strings.Cut(r.stderr, "\n")
+		require.True(t, ok)
+		assert.Equal(t, "claude", decision(t, line+"\n")["cli"])
+		assert.Equal(t, 1, strings.Count(rest, "\n"), rest)
+		assert.True(t, strings.HasPrefix(rest, "agrouter: cannot start "), rest)
 	})
 
 	t.Run("stdin over the capture limit reaches the child whole", func(t *testing.T) {
@@ -522,6 +560,7 @@ func TestApp_Exec(t *testing.T) {
 		assert.Equal(t, []string{"-p"}, argv, "cannot decide: the known CLI runs with its defaults")
 		assert.Equal(t, input, string(stdin))
 		assert.Empty(t, e.jev.requests())
+		assert.Equal(t, map[string]any{"cli": "claude", "model": nil, "effort": nil}, decision(t, r.stderr))
 	})
 
 	t.Run("skip warnings in exec mode", func(t *testing.T) {
@@ -530,7 +569,9 @@ func TestApp_Exec(t *testing.T) {
 		r := e.run([]string{"exec", "--cli=codex", "--model=gpt-6-luna", "--effort=low", "--verbose", "fix it"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, "agrouter: warning: skipped --verbose: maps to nothing for codex\n", r.stderr)
+		log, ok := strings.CutPrefix(r.stderr, "agrouter: warning: skipped --verbose: maps to nothing for codex\n")
+		require.True(t, ok, r.stderr)
+		assert.Equal(t, map[string]any{"cli": "codex", "model": "gpt-6-luna", "effort": "low"}, decision(t, log))
 	})
 }
 
@@ -596,7 +637,9 @@ func TestApp_ConfigDrivenNames(t *testing.T) {
 			e.jev.pick = tc.section + "@" + tc.effort
 			r := e.run(argv, strings.NewReader(stdin))
 			require.Equal(t, 0, r.code, r.stderr)
-			assert.Equal(t, "agrouter: warning: skipped --verbose: maps to nothing for "+tc.cli+"\n", r.stderr)
+			log, ok := strings.CutPrefix(r.stderr, "agrouter: warning: skipped --verbose: maps to nothing for "+tc.cli+"\n")
+			require.True(t, ok, r.stderr)
+			assert.Equal(t, map[string]any{"cli": tc.cli, "model": tc.model, "effort": tc.effort}, decision(t, log))
 			got, gotStdin, _ := e.child()
 			assert.Equal(t, []string{"run", "--quiet", "do it now", "--events", "ndjson", "--mode", "read",
 				"--llm", tc.model, "--think=" + tc.effort}, got)

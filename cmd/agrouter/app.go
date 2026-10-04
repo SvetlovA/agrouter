@@ -61,11 +61,16 @@ func stdinReader(r io.Reader) io.Reader {
 	return r
 }
 
-// decisionJSON is the decision-mode line; model and effort are null when nothing was chosen.
+// selectionJSON is the selected CLI, model and effort; unset values are null.
+type selectionJSON struct {
+	CLI    string  `json:"cli"`
+	Model  *string `json:"model"`
+	Effort *string `json:"effort"`
+}
+
+// decisionJSON adds the argv and skipped arguments for decision mode.
 type decisionJSON struct {
-	CLI     string   `json:"cli"`
-	Model   *string  `json:"model"`
-	Effort  *string  `json:"effort"`
+	selectionJSON
 	Argv    []string `json:"argv"`
 	Skipped []string `json:"skipped"`
 }
@@ -110,6 +115,10 @@ func (a *app) run(argv []string) int {
 	if req.Mode == args.ModeDecision {
 		return a.printDecision(d, res)
 	}
+	// selection logging is best effort, like warnings; it never includes the prompt or raw argv
+	enc := json.NewEncoder(a.stderr)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(selection(d.Decision))
 	return a.exec(res, d.captured)
 }
 
@@ -179,13 +188,7 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 // printDecision writes the decision-mode JSON line to stdout; skipped lists what eligibility skipped,
 // then what the argv left out.
 func (a *app) printDecision(d routed, res args.Result) int {
-	out := decisionJSON{CLI: d.CLI, Argv: res.Argv, Skipped: []string{}}
-	if d.Model != "" {
-		out.Model = &d.Model
-	}
-	if d.Effort != "" {
-		out.Effort = &d.Effort
-	}
+	out := decisionJSON{selectionJSON: selection(d.Decision), Argv: res.Argv, Skipped: []string{}}
 	for _, s := range slices.Concat(d.skipped, res.Skipped) {
 		out.Skipped = append(out.Skipped, s.Spelling)
 	}
@@ -195,6 +198,18 @@ func (a *app) printDecision(d routed, res args.Result) int {
 		return a.fail(fmt.Errorf("write decision: %w", err))
 	}
 	return exitOK
+}
+
+// selection shares the selected values between decision output and exec logging.
+func selection(d router.Decision) selectionJSON {
+	out := selectionJSON{CLI: d.CLI}
+	if d.Model != "" {
+		out.Model = &d.Model
+	}
+	if d.Effort != "" {
+		out.Effort = &d.Effort
+	}
+	return out
 }
 
 // exec runs the child with the caller's stdin replayed, and returns its exit code.
