@@ -222,10 +222,11 @@ One compiling change: every caller and test of a removed API is updated in this 
 - ➕ verified: lint clean with v2.13.0 (and local 2.14.0) on windows, linux, darwin and `--build-tags=eval`; coverage cmd/agrouter 97.3%, args 100%, catalog 100%, config 97.7%, jev 96.8%, prompt 92.2%, router 99.2%, runner 89.0%
 
 ### Task 10: [Final] Update documentation
-- [ ] README: prompt sources (`-p`, positional, `--prompt-file`, stdin), `--doc` and the complexity stage, removed keys, the cooperative timeout, the Windows `.cmd` + prompt-file limitation, exit codes (bad `--prompt-file`/`--doc`), the `argv` note (now holds `-p`/positional/file text); remove the `docs/design.md` links
-- [ ] CLAUDE.md and AGENTS.md: remove the "docs/design.md is the specification" rule; update Layout/Rules where the new flags or stage change them
-- [ ] remove the design references in `pkg/router/question.go:48` and `defaults/config` comments
-- [ ] move this plan to `docs/plans/completed/`
+- [x] README: prompt sources (`-p`, positional, `--prompt-file`, stdin), `--doc` and the complexity stage, removed keys, the cooperative timeout, the Windows `.cmd` + prompt-file limitation, exit codes (bad `--prompt-file`/`--doc`), the `argv` note (now holds `-p`/positional/file text); remove the `docs/design.md` links
+- [x] CLAUDE.md and AGENTS.md: remove the "docs/design.md is the specification" rule; update Layout/Rules where the new flags or stage change them
+- [x] remove the design references in `pkg/router/question.go:48` and `defaults/config` comments
+- [x] move this plan to `docs/plans/completed/`
+- ➕ the other stray design references went too (`eligibility.go`, the `flags.go` help comment, `TestBuildDesignExamples` → `TestBuildExamples`); the CLAUDE.md/AGENTS.md exit-2 rule now points to the README's exit code table
 
 ## Post-Completion
 *Items requiring manual intervention or external systems - no checkboxes, informational only*

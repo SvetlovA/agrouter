@@ -144,7 +144,7 @@ func TestBuildPermissionMode(t *testing.T) {
 	}
 }
 
-func TestBuildDesignExamples(t *testing.T) {
+func TestBuildExamples(t *testing.T) {
 	alpha, beta := fixtureCLI(t, "alpha"), fixtureCLI(t, "beta")
 	req := &Request{Args: []Arg{
 		bypass("dangerously-skip-permissions"), flag("output-format", "stream-json"), flag("verbose", ""),

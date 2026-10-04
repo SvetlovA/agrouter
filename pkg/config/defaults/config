@@ -30,8 +30,8 @@ description  = Claude Code (Anthropic). Agentic coding CLI with file editing, sh
 # how each agrouter argument is spelled for this CLI. A missing key = not supported:
 # a call using it never routes to this CLI. [] = supported, adds nothing.
 [cli.claude.args]
-# required, always emitted first: non-interactive mode. {prompt} = the positional prompt, dropped when none;
-# claude -p reads stdin, and appends it after a positional prompt
+# required, always emitted first: non-interactive mode. {prompt} = the -p, positional and --prompt-file text, dropped when none;
+# claude -p reads stdin, and appends it after the prompt argument
 print                        = ["-p", "{prompt}"]
 model                        = ["--model", "{model}"]
 effort                       = ["--effort", "{effort}"]
@@ -52,7 +52,7 @@ command      = codex
 description  = Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.
 
 [cli.codex.args]
-# codex exec reads stdin when no positional prompt is given, and appends it as a <stdin> block when one is.
+# codex exec reads stdin when no prompt argument is given, and appends it as a <stdin> block when one is.
 # to put the prompt at the end instead: print = ["exec"] and prompt = ["{prompt}"]
 print                        = ["exec", "{prompt}"]
 model                        = ["--model", "{model}"]

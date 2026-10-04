@@ -50,7 +50,7 @@ func (e *Eligibility) CLIs() []string {
 	return catalog.CLIs(e.Options)
 }
 
-// Eligible applies the filters in design order: --cli, --model, --effort, then the mapped-argument
+// Eligible applies the filters in order: --cli, --model, --effort, then the mapped-argument
 // preference. No step ever empties the list: an unusable --cli is skipped with a warning, and a
 // --model or --effort nothing satisfies is passed through.
 func Eligible(cfg *config.Config, cat *catalog.Catalog, req *args.Request) *Eligibility {

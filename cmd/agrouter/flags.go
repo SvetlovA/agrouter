@@ -31,7 +31,7 @@ const (
 // prompt such as "/review" or a value such as "/tmp/doc.md" an unknown flag.
 const slashEscape = "\x00"
 
-// helpText is the long description in --help, including the API key cautions from the design.
+// helpText is the long description in --help, including the API key cautions.
 const helpText = `agrouter asks TypeSafe's Jev which (cli, model, effort) should run a prompt.
 Without "exec" it prints that decision as one JSON line; with "exec" as the
 first token it runs the chosen CLI with the arguments translated through its

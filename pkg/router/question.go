@@ -48,7 +48,7 @@ const (
 	descEffortPassed = "not in the catalog for this CLI: passed through as given"
 )
 
-// Relevance criteria of a chunk request (see the design's "Splitting large state").
+// Relevance criteria of a chunk request, asked beside chunk_question.
 const (
 	relevanceTrue  = "`chunk.text` adds to what the task is, what it requires, or what makes it hard"
 	relevanceFalse = "`chunk.text` is only material the task works on, or repeats `anchor`"
