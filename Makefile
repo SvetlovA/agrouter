@@ -5,10 +5,15 @@ RACE ?=
 # (go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.0)
 GOLANGCI_LINT ?= golangci-lint
 
+# replace filename-unsafe branch characters, including /, with -
+BRANCH := $(shell git rev-parse --abbrev-ref HEAD | LC_ALL=C sed 's/[^A-Za-z0-9._-]/-/g')
+EXE := $(shell go env GOEXE)
+BINARY := .bin/agroute.$(BRANCH)$(EXE)
+
 all: test build
 
 build:
-	go build -o .bin/ ./cmd/agrouter
+	go build -o '$(BINARY)' ./cmd/agrouter
 
 test:
 	go clean -testcache

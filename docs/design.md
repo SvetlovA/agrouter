@@ -725,6 +725,8 @@ pkg/runner/            # child process, stdin replay, Unix signals / Windows Job
 
 - **Libraries:** Go 1.26, `jessevdk/go-flags`, `gopkg.in/ini.v1`, `stretchr/testify`; vendored dependencies.
 - **Tooling:** `Makefile` targets `build` (binary in `.bin/`), `test` (coverage; `RACE=-race` in CI), `lint` (golangci-lint v2), `fmt`, `generate` (moq mocks) and `eval-routing` (real Jev, never in CI).
+  - **Build filenames:** both makefiles produce `.bin/agroute.<branch>`, with `.exe` appended for Windows builds. Characters outside ASCII letters, digits, `.`, `_` and `-` in the Git branch name become `-`, and a detached HEAD uses `HEAD`.
+  - **Windows:** `make -f WMakefile <target>` provides the same targets using PowerShell.
 - **Code style:**
   - Comments lowercase except godoc.
   - Errors wrapped with `%w` and context.

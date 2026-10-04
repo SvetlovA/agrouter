@@ -48,7 +48,7 @@ Dependencies point one way: `config` <- `catalog` <- `router`; `prompt` depends 
 ```sh
 make test       # locally without -race (no cgo on the dev machine); CI runs make test RACE=-race
 make lint       # golangci-lint v2.13.0 (CI pin); override with GOLANGCI_LINT=<path>
-make build      # .bin/agrouter
+make build      # .bin/agroute.<branch> (with .exe for Windows builds)
 make generate   # moq mocks
 make fmt        # needs goimports: go install golang.org/x/tools/cmd/goimports@latest
 ```
