@@ -87,7 +87,8 @@ func chunkStates(client *mocks.JevClientMock) []prompt.ChunkState {
 func slots(answers ...map[string]jev.Answer) []*slot {
 	out := make([]*slot, len(answers))
 	for i, a := range answers {
-		out[i] = &slot{done: true, probs: a[questionRoute].Probabilities, result: ChunkResult{Relevance: a[questionRelevance].Noul}}
+		out[i] = &slot{done: true, answer: routeAnswer{probs: a[questionRoute].Probabilities,
+			result: ChunkResult{Relevance: a[questionRelevance].Noul}}}
 	}
 	return out
 }

@@ -34,9 +34,14 @@ func (r *Result) DocsState() DocsState {
 	return DocsState{Docs: docs}
 }
 
+// DocsTokens is the size of the whole-docs state in tokens.
+func (r *Result) DocsTokens() int {
+	return Tokens(mustLen(r.DocsState()))
+}
+
 // DocsFit reports whether every doc fits in one doc request.
 func (r *Result) DocsFit(b Budget) bool {
-	return Tokens(mustLen(r.DocsState())) <= b.Doc
+	return r.DocsTokens() <= b.Doc
 }
 
 // SplitDocs returns nil when every doc fits in one doc request, and otherwise the doc chunks that

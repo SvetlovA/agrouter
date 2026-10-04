@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sync"
 
 	"github.com/SvetlovA/agrouter/pkg/catalog"
 	"github.com/SvetlovA/agrouter/pkg/jev"
@@ -37,19 +36,14 @@ type Pooled struct {
 	Top    []Score
 }
 
-// slot is one chunk of the sequence and, once asked, its answers.
-type slot struct {
-	chunk prompt.Chunk
-	// resplit marks a chunk that already comes from a re-split: another 422 cannot decide
-	resplit bool
-	done    bool
-	probs   map[string]float64
-	result  ChunkResult
-	err     error // a 422 to re-split; other errors end routing at once
+// routeAnswer is one chunk request's validated answers.
+type routeAnswer struct {
+	probs  map[string]float64
+	result ChunkResult
 }
 
-// errUnsplittable wraps a 422 that re-splitting cannot help.
-var errUnsplittable = errors.New("rejected again after a re-split, or already under the minimum chunk size")
+// slot is one chunk of a split state and, once asked, its answers.
+type slot = piece[prompt.Chunk, routeAnswer]
 
 // single sends the whole state in one Choice request. A 422 on it re-splits the whole state at half
 // the chunk budget, once, and pools the chunks.
@@ -77,131 +71,66 @@ func (r *Router) single(ctx context.Context, el *Eligibility, captured *prompt.R
 // chunk re-splits it once at half size; any other failure, a second 422, or a 422 on a chunk under
 // the minimum state size means Jev cannot decide.
 func (r *Router) pooled(ctx context.Context, el *Eligibility, split *prompt.Split, resplit bool) (outcome, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	ag := r.cfg.Agrouter
 	questions := map[string]jev.Question{
 		questionRoute:     routeQuestion(r.cfg, ag.ChunkQuestion, el.Options, el.effort, r.enc),
 		questionRelevance: relevanceQuestion(ag.Relevance),
 	}
-
-	seq := make([]*slot, len(split.Chunks))
-	for i, c := range split.Chunks {
-		seq[i] = &slot{chunk: c, resplit: resplit}
+	f := fanout[prompt.Chunk, routeAnswer]{
+		name: "chunk",
+		ask: func(ctx context.Context, c prompt.Chunk) (routeAnswer, error) {
+			return r.askChunk(ctx, el, split.Anchor, questions, c)
+		},
+		halve: prompt.Halve,
+		text:  func(c prompt.Chunk) string { return c.Text },
+		pos:   func(c prompt.Chunk) (int, int) { return c.Index, c.Of },
+		number: func(c prompt.Chunk, index, of int) prompt.Chunk {
+			c.Index, c.Of = index, of
+			return c
+		},
 	}
-	for {
-		if err := r.round(ctx, cancel, el, split.Anchor, questions, seq); err != nil {
-			return outcome{}, err
-		}
-		next, again, err := resplitRejected(seq)
-		if err != nil {
-			return outcome{}, err
-		}
-		if !again {
-			break
-		}
-		seq = next
+	seq, err := f.run(ctx, split.Chunks, resplit)
+	if err != nil {
+		return outcome{}, err
 	}
 
 	o, top := pool(el.Options, seq)
 	p := &Pooled{Top: top, Chunks: make([]ChunkResult, len(seq))}
 	for i, s := range seq {
-		p.Chunks[i] = s.result
+		p.Chunks[i] = s.answer.result
 	}
 	return outcome{option: o, pooled: p}, nil
 }
 
-// round asks every pending chunk of seq at once: Jev runs remotely, and 429s are retried within the
-// deadline. The first failure other than a 422 cancels the rest and is returned; 422s are left on
-// their slots.
-func (r *Router) round(ctx context.Context, cancel context.CancelFunc, el *Eligibility, anchor prompt.Anchor,
-	questions map[string]jev.Question, seq []*slot) error {
-	var (
-		wg       sync.WaitGroup
-		mu       sync.Mutex
-		firstErr error
-	)
-	for _, s := range seq {
-		if s.done {
-			continue
-		}
-		wg.Go(func() {
-			err := r.askChunk(ctx, el, anchor, questions, s)
-			if err == nil || errors.Is(err, jev.ErrUnprocessable) {
-				s.err = err
-				return
-			}
-			mu.Lock()
-			defer mu.Unlock()
-			if firstErr == nil {
-				firstErr = fmt.Errorf("chunk %d of %d: %w", s.chunk.Index, s.chunk.Of, err)
-				cancel()
-			}
-		})
-	}
-	wg.Wait()
-	// the deadline only matters when it left a chunk unasked; answers that all came in stand
-	unasked := slices.ContainsFunc(seq, func(s *slot) bool { return !s.done && s.err == nil })
-	if firstErr == nil && ctx.Err() != nil && unasked {
-		return fmt.Errorf("chunk requests: %w", ctx.Err())
-	}
-	return firstErr
-}
-
-// askChunk sends one chunk request and records its validated answers on s.
+// askChunk sends one chunk request and returns its validated answers.
 func (r *Router) askChunk(ctx context.Context, el *Eligibility, anchor prompt.Anchor,
-	questions map[string]jev.Question, s *slot) error {
+	questions map[string]jev.Question, c prompt.Chunk) (routeAnswer, error) {
 	answers, err := r.jev.Ask(ctx, jev.Request{
 		Model:     r.cfg.Agrouter.JevModel,
-		State:     prompt.ChunkState{Anchor: anchor, Chunk: s.chunk},
+		State:     prompt.ChunkState{Anchor: anchor, Chunk: c},
 		Questions: questions,
 	})
 	if err != nil {
-		return fmt.Errorf("chunk request: %w", err)
+		return routeAnswer{}, fmt.Errorf("chunk request: %w", err)
 	}
 	route, ok := answers[questionRoute]
 	if !ok {
-		return fmt.Errorf("%w: no %q answer", jev.ErrMalformed, questionRoute)
+		return routeAnswer{}, fmt.Errorf("%w: no %q answer", jev.ErrMalformed, questionRoute)
 	}
 	relevance, ok := answers[questionRelevance]
 	if !ok {
-		return fmt.Errorf("%w: no %q answer", jev.ErrMalformed, questionRelevance)
+		return routeAnswer{}, fmt.Errorf("%w: no %q answer", jev.ErrMalformed, questionRelevance)
 	}
 	scores := make([]float64, len(el.Options))
 	for i, o := range el.Options {
 		p, ok := route.Probabilities[o.ID]
 		if !ok {
-			return fmt.Errorf("%w: no probability for %q", jev.ErrMalformed, o.ID)
+			return routeAnswer{}, fmt.Errorf("%w: no probability for %q", jev.ErrMalformed, o.ID)
 		}
 		scores[i] = p
 	}
-	s.done, s.probs = true, route.Probabilities
-	s.result = ChunkResult{Field: s.chunk.Field, Index: s.chunk.Index, Of: s.chunk.Of,
-		Relevance: relevance.Noul, Top: ranked(el.Options, scores)}
-	return nil
-}
-
-// resplitRejected replaces every chunk rejected with a 422 by its halves and renumbers the
-// sequence. again is false when nothing was rejected. A chunk that cannot be re-split (a second
-// 422, or text under the minimum state size) means Jev cannot decide.
-func resplitRejected(seq []*slot) (next []*slot, again bool, err error) {
-	for _, s := range seq {
-		if s.err == nil {
-			next = append(next, s)
-			continue
-		}
-		if s.resplit || prompt.Tokens(len(s.chunk.Text)) < prompt.MinStateTokens {
-			return nil, false, fmt.Errorf("chunk %d of %d: %w: %w", s.chunk.Index, s.chunk.Of, errUnsplittable, s.err)
-		}
-		again = true
-		for _, c := range prompt.Halve(s.chunk) {
-			next = append(next, &slot{chunk: c, resplit: true})
-		}
-	}
-	for i, s := range next {
-		s.chunk.Index, s.chunk.Of = i+1, len(next)
-	}
-	return next, again, nil
+	return routeAnswer{probs: route.Probabilities, result: ChunkResult{Field: c.Field, Index: c.Index, Of: c.Of,
+		Relevance: relevance.Noul, Top: ranked(el.Options, scores)}}, nil
 }
 
 // pool combines the chunks' probabilities: each chunk weighs its raw relevance, an option's score is
@@ -211,16 +140,16 @@ func resplitRejected(seq []*slot) (next []*slot, again bool, err error) {
 func pool(opts []catalog.Option, seq []*slot) (catalog.Option, []Score) {
 	var total float64
 	for _, s := range seq {
-		total += s.result.Relevance
+		total += s.answer.result.Relevance
 	}
 	scores := make([]float64, len(opts))
 	for _, s := range seq {
-		w := s.result.Relevance
+		w := s.answer.result.Relevance
 		if total == 0 {
 			w = 1
 		}
 		for i, o := range opts {
-			scores[i] += w * s.probs[o.ID]
+			scores[i] += w * s.answer.probs[o.ID]
 		}
 	}
 	if total == 0 {

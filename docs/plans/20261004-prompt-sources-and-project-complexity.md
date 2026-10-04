@@ -177,14 +177,15 @@ One compiling change: every caller and test of a removed API is updated in this 
 - Create: `pkg/router/complexity.go`, `pkg/router/complexity_test.go`
 - Modify: `pkg/router/pool.go` (extract the shared slot/re-split loop)
 
-- [ ] fan out every doc request at once inside the routing deadline; fail-fast cancel on non-422 errors
-- [ ] 422 on a doc chunk → halve that chunk once; second 422 or under `MinStateTokens` → error
-- [ ] 422 on the initial whole-docs request → split at half of `Budget.Doc` into chunks marked as already retried; a 422 on one of those → error
-- [ ] per-chunk score = `Σ i·p(i)`; validate that every criterion has a probability (else `jev.ErrMalformed`)
-- [ ] reduce: evidence-weighted mean, all-zero → plain mean, round to one decimal; return per-chunk results for debug
-- [ ] write tests with the moq mock: expected-value scoring, weighted reduce (a 9 with high evidence beats two 2s with low evidence), all-zero fallback, single-request path, malformed answer, deadline
-- [ ] write re-split tests: whole-docs 422 -> half-budget chunks; completed chunks are not asked again; second 422 after the whole-doc retry fails; doc text is preserved across re-splits; every renumbered doc request fits `Budget.Doc`
-- [ ] run tests - must pass before task 7
+- [x] fan out every doc request at once inside the routing deadline; fail-fast cancel on non-422 errors
+- [x] 422 on a doc chunk → halve that chunk once; second 422 or under `MinStateTokens` → error
+- [x] 422 on the initial whole-docs request → split at half of `Budget.Doc` into chunks marked as already retried; a 422 on one of those → error
+- [x] per-chunk score = `Σ i·p(i)`; validate that every criterion has a probability (else `jev.ErrMalformed`)
+- [x] reduce: evidence-weighted mean, all-zero → plain mean, round to one decimal; return per-chunk results for debug
+- [x] write tests with the moq mock: expected-value scoring, weighted reduce (a 9 with high evidence beats two 2s with low evidence), all-zero fallback, single-request path, malformed answer, deadline
+- [x] write re-split tests: whole-docs 422 -> half-budget chunks; completed chunks are not asked again; second 422 after the whole-doc retry fails; doc text is preserved across re-splits; every renumbered doc request fits `Budget.Doc`
+- [x] run tests - must pass before task 7
+- ➕ the shared lifecycle is a generic `fanout[C, A]` in `pkg/router/fanout.go` (round, fail-fast cancel, `resplitRejected`); `pool.go` keeps route scoring with `slot = piece[prompt.Chunk, routeAnswer]`. `Router.complexity` returns `*ComplexityResult{Chunks []DocScore, Complexity}`; the whole-docs request reports as 1 of 1; `prompt.Result.DocsTokens` added
 
 ### Task 7: Feed project complexity into routing
 
