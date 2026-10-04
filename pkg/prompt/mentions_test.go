@@ -209,6 +209,16 @@ func TestReadMentions_NoLimit(t *testing.T) {
 		"a NUL past the sniffed prefix still makes it binary")
 }
 
+func TestReadMentions_DocsNotScanned(t *testing.T) {
+	cwd := tree(t, map[string]string{"cwd/notes.md": "notes\n", "cwd/a.go": "package a\n"})
+	res, err := Capture(t.Context(), []string{"fix a.go"}, nil)
+	require.NoError(t, err)
+	res.Docs = []string{"see notes.md"}
+	require.NoError(t, res.ReadMentions(t.Context(), cwd))
+	assert.Equal(t, []string{"package a\n"}, res.Files, "only the prompt's mentions are read")
+	assert.Equal(t, []string{"see notes.md"}, res.Docs)
+}
+
 func TestReadMentions_Deadline(t *testing.T) {
 	cwd := tree(t, map[string]string{"cwd/a.txt": "a"})
 	ctx, cancel := context.WithCancel(t.Context())

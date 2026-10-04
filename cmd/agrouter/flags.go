@@ -40,6 +40,8 @@ config.
 The prompt is -p TEXT, the positional argument, the --prompt-file text and
 stdin, in that order, joined by blank lines; at least one must be non-empty.
 The chosen CLI gets the first three as its prompt argument and stdin replayed.
+--doc files (the project's agent instructions and docs) describe the project to
+Jev; they are read on every call but never passed to the chosen CLI.
 Tokens after "--" are passed to the chosen CLI unchanged, only with --cli.
 
 The Jev API key comes from --jev-api-key, then TYPESAFE_API_KEY, then api_key
@@ -73,7 +75,7 @@ func parseArgs(argv []string, getenv func(string) string) (command, error) {
 	opts := newFlagSet(req, &seen)
 	parser := flags.NewParser(opts, flags.HelpFlag)
 	parser.Name = "agrouter"
-	parser.Usage = "[exec] [OPTIONS] [-p TEXT] [--prompt-file PATH] [PROMPT] [-- RAW ARGS...]"
+	parser.Usage = "[exec] [OPTIONS] [-p TEXT] [--prompt-file PATH] [--doc PATH]... [PROMPT] [-- RAW ARGS...]"
 	parser.LongDescription = helpText
 
 	rest, err := parser.ParseArgs(escapeSlashes(flagArgv))
@@ -118,6 +120,7 @@ type flagSet struct {
 
 	Prompt     func(string) `short:"p" long:"prompt" value-name:"TEXT" unquote:"false" description:"the prompt, before the positional prompt, --prompt-file and stdin"`
 	PromptFile func(string) `long:"prompt-file" value-name:"PATH" unquote:"false" description:"read prompt text from a file, after -p and the positional prompt"`
+	Doc        func(string) `long:"doc" value-name:"PATH" unquote:"false" description:"project doc for routing only, repeatable; never passed to the chosen CLI"`
 	Print      bool         `long:"print" description:"accepted for compatibility; the CLI's print mapping is always emitted"`
 
 	Model  func(string) `long:"model" value-name:"MODEL" unquote:"false" description:"use this model; Jev chooses only its effort"`
@@ -162,6 +165,7 @@ func newFlagSet(req *args.Request, seen *flagCounts) *flagSet {
 			req.PromptFile = args.Optional{Value: unescape(v), Set: true}
 			seen.promptFile++
 		},
+		Doc: func(v string) { req.Docs = append(req.Docs, unescape(v)) },
 		JevAPIKey: func(v string) {
 			req.APIKey = args.Optional{Value: unescape(v), Set: true}
 		},

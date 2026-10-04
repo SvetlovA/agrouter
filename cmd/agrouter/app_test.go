@@ -576,6 +576,41 @@ func TestApp_PromptSources(t *testing.T) {
 	})
 }
 
+func TestApp_Docs(t *testing.T) {
+	writeFile := func(t *testing.T, dir, name, content string) {
+		t.Helper()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600))
+	}
+
+	t.Run("decision: docs are not in Jev's routing state, argv, or read for mentions", func(t *testing.T) {
+		e := newEnv(t)
+		writeFile(t, e.workDir, "project.md", "DOC TEXT, see notes.md\n")
+		writeFile(t, e.workDir, "notes.md", "NOTES\n")
+		e.jev.pick = "claude-sonnet-5-5@low"
+		r := e.run([]string{"--cli=claude", "--doc", "project.md", "fix it"}, nil)
+
+		require.Equal(t, 0, r.code, r.stderr)
+		assert.Equal(t, []string{jevPrompt(t, "fix it")}, e.jev.requests())
+		assert.NotContains(t, r.stdout, "DOC TEXT")
+		assert.NotContains(t, r.stdout, "NOTES")
+	})
+
+	t.Run("exec: the child gets neither the docs nor their paths", func(t *testing.T) {
+		e := newEnv(t)
+		e.fakeCommands()
+		writeFile(t, e.workDir, "a.md", "DOC A\n")
+		writeFile(t, e.workDir, "b.md", "DOC B\n")
+		r := e.run([]string{"exec", "--cli=claude", "--model=opus", "--effort=low", "--doc", "a.md", "--doc=b.md", "-p", "flag"},
+			strings.NewReader("piped"))
+
+		require.Equal(t, 0, r.code, r.stderr)
+		argv, stdin, _ := e.child()
+		assert.Equal(t, []string{"-p", "flag", "--model", "claude-opus-5-5", "--effort", "low"}, argv)
+		assert.Equal(t, "piped", string(stdin))
+		assert.NotContains(t, r.stderr, "DOC")
+	})
+}
+
 func TestApp_PromptSourceErrors(t *testing.T) {
 	oneLine := func(t *testing.T, r result, prefix string) {
 		t.Helper()
@@ -604,6 +639,14 @@ func TestApp_PromptSourceErrors(t *testing.T) {
 			"agrouter: --prompt-file: sub: not a regular file"},
 		{"binary prompt file", append(slices.Clone(pinned), "--prompt-file", "blob.bin", "fix it"), nil,
 			"agrouter: --prompt-file: blob.bin: binary file"},
+		{"missing doc", append(slices.Clone(pinned), "--doc", "task.md", "--doc", "nope.md", "fix it"), nil,
+			"agrouter: --doc: nope.md: no such file"},
+		{"directory doc", append(slices.Clone(pinned), "--doc", "sub", "fix it"), nil,
+			"agrouter: --doc: sub: not a regular file"},
+		{"binary doc", append(slices.Clone(pinned), "--doc", "blob.bin", "fix it"), nil,
+			"agrouter: --doc: blob.bin: binary file"},
+		{"bad doc in decision mode", []string{"--doc", "nope.md", "fix it"}, nil,
+			"agrouter: --doc: nope.md: no such file"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

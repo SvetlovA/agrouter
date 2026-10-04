@@ -154,8 +154,8 @@ type routed struct {
 	skipped  []args.Skip
 }
 
-// route reads --prompt-file, captures the prompt and decides, all within the routing deadline. Eligibility warnings go to
-// stderr once the prompt is known to be there.
+// route reads --prompt-file and every --doc, captures the prompt and decides, all within the routing
+// deadline. Eligibility warnings go to stderr once the prompt is known to be there.
 func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router, req *args.Request) (routed, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Agrouter.Timeout)
 	defer cancel()
@@ -167,10 +167,20 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 		}
 		req.FileText = text
 	}
+	// docs are read even when one option will be left, so a bad --doc fails every call alike
+	var docs []string
+	for _, path := range req.Docs {
+		text, err := prompt.ReadTextFile(ctx, a.workDir, path)
+		if err != nil {
+			return routed{}, fmt.Errorf("--doc: %w", err)
+		}
+		docs = append(docs, text)
+	}
 	captured, err := prompt.Capture(ctx, req.Explicit(), a.stdin)
 	if err != nil {
 		return routed{}, err
 	}
+	captured.Docs = docs
 
 	el := router.Eligible(cfg, cat, req)
 	for _, s := range el.Skipped {

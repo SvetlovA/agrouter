@@ -89,6 +89,11 @@ func TestState(t *testing.T) {
 	data, err := json.Marshal(r.State())
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"prompt":"p","files":["f"],"attachments":[{"source":"stdin","type":"image/png","bytes":3}]}`, string(data))
+
+	r.Docs = []string{"project doc"}
+	data, err = json.Marshal(r.State())
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "project doc", "docs are not routing state")
 }
 
 // lines returns n numbered lines, each about width bytes.
@@ -154,6 +159,25 @@ func TestSplit(t *testing.T) {
 		s, err := r.Split(b)
 		require.NoError(t, err)
 		assert.Nil(t, s)
+	})
+
+	t.Run("docs never make a short prompt leave the anchor", func(t *testing.T) {
+		huge := []string{lines("doc", 4000, 100), lines("doc2", 4000, 100)}
+		short := &Result{Prompt: "fix the typo", Docs: huge}
+		assert.True(t, short.Fits(b), "docs don't count toward the state")
+		s, err := short.Split(b)
+		require.NoError(t, err)
+		assert.Nil(t, s)
+
+		withFiles := &Result{Prompt: "fix a.go", Files: []string{lines("a", 1000, 100)}, Docs: huge}
+		s, err = withFiles.Split(b)
+		require.NoError(t, err)
+		checkSplit(t, withFiles, b, s)
+		assert.Equal(t, &Excerpt{Whole: true, Head: "fix a.go"}, s.Anchor.Prompt)
+		for _, c := range s.Chunks {
+			assert.Equal(t, FieldFiles, c.Field, "no doc text in the chunks")
+			assert.NotContains(t, c.Text, "doc line")
+		}
 	})
 
 	t.Run("short instruction plus long stdin keeps the instruction in every anchor", func(t *testing.T) {

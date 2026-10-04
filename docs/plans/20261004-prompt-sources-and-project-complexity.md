@@ -149,11 +149,11 @@ One compiling change: every caller and test of a removed API is updated in this 
 - Modify: `cmd/agrouter/flags.go`, `pkg/args/request.go`, `pkg/prompt/capture.go`, `pkg/prompt/chunk.go`, `cmd/agrouter/app.go`
 - Modify: `cmd/agrouter/flags_test.go`, `pkg/prompt/chunk_test.go`, `cmd/agrouter/app_test.go`
 
-- [ ] repeatable `--doc PATH`; every doc is read strictly on every call (bad path → usage error naming `--doc`, even with one eligible option)
-- [ ] `prompt.Result.Docs`; docs never reach the child argv or stdin, and are not scanned for mentions
-- [ ] `nonEmpty`-style checks in `Split` stay about prompt/files only (docs aren't stage-2 state); add a test that docs never make a short prompt leave the anchor
-- [ ] write tests: repeated `--doc` order kept, doc not in argv/stdin, bad doc → exit 2, docs ignored by mention scanning
-- [ ] run tests - must pass before task 5
+- [x] repeatable `--doc PATH`; every doc is read strictly on every call (bad path → usage error naming `--doc`, even with one eligible option)
+- [x] `prompt.Result.Docs`; docs never reach the child argv or stdin, and are not scanned for mentions
+- [x] `nonEmpty`-style checks in `Split` stay about prompt/files only (docs aren't stage-2 state); add a test that docs never make a short prompt leave the anchor
+- [x] write tests: repeated `--doc` order kept, doc not in argv/stdin, bad doc → exit 2, docs ignored by mention scanning
+- [x] run tests - must pass before task 5
 
 ### Task 5: Complexity questions, budget and doc splitting
 

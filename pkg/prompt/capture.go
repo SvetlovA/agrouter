@@ -67,6 +67,9 @@ type Result struct {
 	Files       []string     // contents of the text files the prompt mentions (ReadMentions)
 	Attachments []Attachment // binary stdin and binary mentioned files, if any
 	Stdin       *Stdin       // nil when there was no stdin
+	// Docs are the --doc contents, in order: routing context only, never in the routing state, the
+	// child's argv or stdin, and not scanned for mentions.
+	Docs []string
 	// Undecidable is why Jev cannot decide from this capture (the routing context's error); Prompt,
 	// Files and Attachments are then empty, and Stdin still replays everything.
 	Undecidable error

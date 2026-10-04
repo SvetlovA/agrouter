@@ -51,6 +51,7 @@ type Request struct {
 	Prompt       Optional // the positional prompt
 	PromptFile   Optional // --prompt-file path, as given
 	FileText     string   // the --prompt-file contents, read by the caller before capture
+	Docs         []string // --doc paths, as given, in order; routing only, never in the child's argv
 	Raw          []string // tokens after the first "--", passed through only with --cli
 }
 
