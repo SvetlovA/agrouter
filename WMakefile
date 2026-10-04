@@ -11,7 +11,7 @@ GOLANGCI_LINT ?= golangci-lint
 
 # replace filename-unsafe branch characters, including /, with -
 BRANCH := $(shell git rev-parse --abbrev-ref HEAD | ForEach-Object { $$_ -replace '[^A-Za-z0-9._-]', '-' })
-BINARY := .bin/agroute.$(BRANCH).exe
+BINARY := .bin/agrouter.$(BRANCH).exe
 
 all: test build
 

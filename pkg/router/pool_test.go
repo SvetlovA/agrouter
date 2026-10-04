@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -472,6 +473,10 @@ func TestRouteChunkedCannotDecideCLIUnknown(t *testing.T) {
 }
 
 func TestRouteChunkedStopsOnDeadline(t *testing.T) {
+	synctest.Test(t, testRouteChunkedStopsOnDeadline)
+}
+
+func testRouteChunkedStopsOnDeadline(t *testing.T) {
 	cfg, cat := embedded(t)
 	req := &args.Request{CLI: "claude"}
 	el := Eligible(cfg, cat, req)
@@ -491,10 +496,14 @@ func TestRouteChunkedStopsOnDeadline(t *testing.T) {
 	require.ErrorIs(t, d.Undecided, context.DeadlineExceeded)
 	mu.Lock()
 	defer mu.Unlock()
-	assert.LessOrEqual(t, started, cfg.Agrouter.ChunkParallel, "no request starts after the deadline")
+	assert.Equal(t, cfg.Agrouter.ChunkParallel, started, "only the first batch starts before the deadline")
 }
 
 func TestRouteChunkedAnsweredAtDeadlineStands(t *testing.T) {
+	synctest.Test(t, testRouteChunkedAnsweredAtDeadlineStands)
+}
+
+func testRouteChunkedAnsweredAtDeadlineStands(t *testing.T) {
 	cfg, cat := embedded(t)
 	req := &args.Request{CLI: "claude"}
 	el := Eligible(cfg, cat, req)
@@ -515,4 +524,5 @@ func TestRouteChunkedAnsweredAtDeadlineStands(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, d.Undecided)
 	assert.Equal(t, "claude-sonnet-5-5@low", d.OptionID)
+	assert.Len(t, client.AskCalls(), len(split.Chunks), "all chunks were asked before the deadline")
 }
