@@ -3,6 +3,7 @@ package prompt
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"unicode/utf8"
 )
@@ -58,19 +59,15 @@ func NewBudget(q Questions) (Budget, error) {
 	return b, errors.Join(errs...)
 }
 
-// CaptureLimit is the text capture limit in bytes for maxChunks chunks: the chunk text that fits
-// beside a maximal anchor, times maxChunks. Text within it can still need more chunks when JSON
-// escaping or line cuts take room, which Split reports.
-func CaptureLimit(b Budget, maxChunks int) int64 {
-	return int64(maxChunks) * int64(max(chunkRoom(b, AnchorTokens*bytesPerToken, maxChunks), 0))
-}
+// indexDigits is the decimal width reserved for a chunk's index and for its count: the widest int,
+// so any number of chunks, renumbered after any re-split, fits the envelope.
+var indexDigits = len(strconv.Itoa(math.MaxInt))
 
 // chunkRoom is the escaped chunk text, in bytes, that fits in a chunk state beside an anchor of
-// anchorLen serialized bytes, with the envelope sized for maxChunks chunks.
-func chunkRoom(b Budget, anchorLen, maxChunks int) int {
-	digits := len(strconv.Itoa(max(maxChunks, 1)))
+// anchorLen serialized bytes.
+func chunkRoom(b Budget, anchorLen int) int {
 	// {"anchor":<anchor>,"chunk":{"field":"prompt","index":N,"of":N,"text":"<text>"}}
-	envelope := len(`{"anchor":,"chunk":{"field":"prompt","index":,"of":,"text":""}}`) + 2*digits
+	envelope := len(`{"anchor":,"chunk":{"field":"prompt","index":,"of":,"text":""}}`) + 2*indexDigits
 	return b.Chunk*bytesPerToken - anchorLen - envelope
 }
 

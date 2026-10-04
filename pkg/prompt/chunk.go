@@ -13,13 +13,9 @@ const (
 	FieldFiles  = "files"
 )
 
-var (
-	// ErrAttachmentsOverAnchor means the attachments exceed their anchor share even summarized, so
-	// Jev cannot decide.
-	ErrAttachmentsOverAnchor = errors.New("attachments over their anchor share")
-	// ErrTooManyChunks means the state needs more than max_chunks chunks, so Jev cannot decide.
-	ErrTooManyChunks = errors.New("state needs more chunks than max_chunks")
-)
+// ErrAttachmentsOverAnchor means the attachments exceed their anchor share even summarized, so Jev
+// cannot decide.
+var ErrAttachmentsOverAnchor = errors.New("attachments over their anchor share")
 
 // minFileShare is the least anchor room, in bytes, worth giving one file's head and tail.
 const minFileShare = 64
@@ -93,9 +89,10 @@ func (r *Result) StateTokens() int {
 }
 
 // Split returns nil when the state fits in one request, and otherwise the anchor and the chunks
-// that together carry every captured byte. It returns ErrAttachmentsOverAnchor or ErrTooManyChunks
-// when Jev cannot decide, and ErrQuestionsOverBudget when the budget leaves no room for chunk text.
-func (r *Result) Split(b Budget, maxChunks int) (*Split, error) {
+// that together carry every captured byte, with no limit on their number. It returns
+// ErrAttachmentsOverAnchor when Jev cannot decide, and ErrQuestionsOverBudget when the budget leaves
+// no room for chunk text.
+func (r *Result) Split(b Budget) (*Split, error) {
 	if r.Fits(b) {
 		return nil, nil //nolint:nilnil // nil split: send the state whole
 	}
@@ -108,7 +105,7 @@ func (r *Result) Split(b Budget, maxChunks int) (*Split, error) {
 		// there is always a chunk to ask about
 		anchor.Prompt, promptWhole = nil, false
 	}
-	room := chunkRoom(b, mustLen(anchor), maxChunks)
+	room := chunkRoom(b, mustLen(anchor))
 	if room < len(`\u0000`) { // the widest escaped rune, so cut advances
 		return nil, fmt.Errorf("%w: no room for chunk text", ErrQuestionsOverBudget)
 	}
@@ -126,9 +123,6 @@ func (r *Result) Split(b Budget, maxChunks int) (*Split, error) {
 		for _, text := range cut(f, room) {
 			chunks = append(chunks, Chunk{Field: FieldFiles, File: i, Text: text})
 		}
-	}
-	if len(chunks) > maxChunks {
-		return nil, fmt.Errorf("%w: %d chunks, max_chunks is %d", ErrTooManyChunks, len(chunks), maxChunks)
 	}
 	for i := range chunks {
 		chunks[i].Index, chunks[i].Of = i+1, len(chunks)

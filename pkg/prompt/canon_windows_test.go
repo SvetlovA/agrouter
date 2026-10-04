@@ -144,7 +144,7 @@ func TestWorkdirOpen_Symlinks(t *testing.T) {
 		assert.Contains(t, err.Error(), msg, path)
 	}
 
-	res := mention(t, t.Context(), cwd, "unc.txt via/x.txt pipe.txt rel.txt", testLimit)
+	res := mention(t, t.Context(), cwd, "unc.txt via/x.txt pipe.txt rel.txt")
 	require.NoError(t, res.Undecidable)
 	assert.Equal(t, []string{"inside"}, res.Files)
 }

@@ -449,13 +449,13 @@ func TestApp_Errors(t *testing.T) {
 
 	t.Run("config error: one line per violation", func(t *testing.T) {
 		e := newEnv(t)
-		e.globalConfig("[agrouter]\nmax_chunks = 0\nchunk_parallel = 0\n")
+		e.globalConfig("[agrouter]\ntimeout = 0s\n[model.synthetic]\ncli = claude\n")
 		r := e.run([]string{"fix it"}, nil)
 
 		assert.Equal(t, 2, r.code)
 		assert.Empty(t, r.stdout)
-		assert.Equal(t, "agrouter: config: [agrouter] max_chunks = 0: must be at least 1\n"+
-			"agrouter: config: [agrouter] chunk_parallel = 0: must be at least 1\n", r.stderr)
+		assert.Equal(t, "agrouter: config: [agrouter] timeout = 0s: must be positive\n"+
+			"agrouter: config: [model.synthetic] name: required\n", r.stderr)
 	})
 
 	t.Run("no enabled options", func(t *testing.T) {
@@ -548,19 +548,18 @@ func TestApp_Exec(t *testing.T) {
 		assert.True(t, strings.HasPrefix(rest, "agrouter: cannot start "), rest)
 	})
 
-	t.Run("stdin over the capture limit reaches the child whole", func(t *testing.T) {
+	t.Run("large stdin is routed in chunks and reaches the child whole", func(t *testing.T) {
 		e := newEnv(t)
-		exe := helperCommand(t)
-		e.globalConfig("[agrouter]\nmax_chunks = 1\n[cli.claude]\ncommand = " + exe + "\n[cli.codex]\ncommand = " + exe + "\n")
-		input := strings.Repeat("line of a long ralphex prompt\n", 20_000) // 600 KB, past one chunk
+		e.fakeCommands()
+		e.jev.pick = "claude-sonnet-5-5@low"
+		input := strings.Repeat("line of a long ralphex prompt\n", 100_000) // 3 MB, no capture limit
 		r := e.run([]string{"exec", "--cli=claude"}, strings.NewReader(input))
 
 		require.Equal(t, 0, r.code, r.stderr)
-		argv, stdin, _ := e.child()
-		assert.Equal(t, []string{"-p"}, argv, "cannot decide: the known CLI runs with its defaults")
+		_, stdin, _ := e.child()
 		assert.Equal(t, input, string(stdin))
-		assert.Empty(t, e.jev.requests())
-		assert.Equal(t, map[string]any{"cli": "claude", "model": nil, "effort": nil}, decision(t, r.stderr))
+		assert.Greater(t, len(e.jev.requests()), 1, "one request per chunk")
+		assert.Equal(t, map[string]any{"cli": "claude", "model": "claude-sonnet-5-5", "effort": "low"}, decision(t, r.stderr))
 	})
 
 	t.Run("skip warnings in exec mode", func(t *testing.T) {

@@ -160,8 +160,7 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Agrouter.Timeout)
 	defer cancel()
 
-	limit := prompt.CaptureLimit(rt.Budget(), cfg.Agrouter.MaxChunks)
-	captured, err := prompt.Capture(ctx, req.Prompt.Value, a.stdin, limit)
+	captured, err := prompt.Capture(ctx, req.Prompt.Value, a.stdin)
 	if err != nil {
 		return routed{}, err
 	}
@@ -173,7 +172,7 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 	a.debug.eligibility(el)
 	// one option runs without Jev, so the files the prompt mentions are not read for it
 	if len(el.Options) > 1 {
-		if err = captured.ReadMentions(ctx, a.workDir, limit); err != nil {
+		if err = captured.ReadMentions(ctx, a.workDir); err != nil {
 			return routed{}, fmt.Errorf("read mentioned files: %w", err)
 		}
 	}

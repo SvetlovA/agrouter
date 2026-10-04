@@ -150,16 +150,15 @@ func runEvalCase(ctx context.Context, r *Router, cfg *config.Config, cat *catalo
 
 	ctx, cancel := context.WithTimeout(ctx, evalTimeout)
 	defer cancel()
-	limit := prompt.CaptureLimit(r.Budget(), cfg.Agrouter.MaxChunks)
 	var stdin io.Reader // nil: no stdin
 	if c.Stdin != "" {
 		stdin = strings.NewReader(c.Stdin)
 	}
-	captured, err := prompt.Capture(ctx, c.Prompt, stdin, limit)
+	captured, err := prompt.Capture(ctx, c.Prompt, stdin)
 	if err != nil {
 		return fail(fmt.Errorf("capture: %w", err))
 	}
-	if err = captured.ReadMentions(ctx, workDir, limit); err != nil {
+	if err = captured.ReadMentions(ctx, workDir); err != nil {
 		return fail(fmt.Errorf("read mentions: %w", err))
 	}
 

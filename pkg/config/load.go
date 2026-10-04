@@ -228,12 +228,6 @@ func (s *section) decodeAgrouter(a *Agrouter) error {
 			a.JevModel = e.value
 		case "timeout":
 			a.Timeout, err = time.ParseDuration(e.value)
-		case "max_chunks":
-			a.MaxChunks, err = strconv.Atoi(e.value)
-		case "chunk_parallel":
-			a.ChunkParallel, err = strconv.Atoi(e.value)
-		case "relevance_floor":
-			a.RelevanceFloor, err = strconv.ParseFloat(e.value, 64)
 		case "question":
 			a.Question = e.value
 		case "chunk_question":

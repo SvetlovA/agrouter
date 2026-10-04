@@ -42,7 +42,7 @@ func New(cfg *config.Config, cat *catalog.Catalog, client JevClient, enc Encodin
 	return &Router{cfg: cfg, jev: client, enc: enc, budget: b}, nil
 }
 
-// Budget is the state budget the questions leave, for the capture limit.
+// Budget is the state budget the questions leave.
 func (r *Router) Budget() prompt.Budget {
 	return r.budget
 }
@@ -97,7 +97,7 @@ func (r *Router) decide(ctx context.Context, el *Eligibility, captured *prompt.R
 	if captured.Undecidable != nil {
 		return outcome{}, captured.Undecidable
 	}
-	split, err := captured.Split(r.budget, r.cfg.Agrouter.MaxChunks)
+	split, err := captured.Split(r.budget)
 	if err != nil {
 		return outcome{}, fmt.Errorf("split the state: %w", err)
 	}

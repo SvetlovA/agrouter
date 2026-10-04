@@ -1,5 +1,5 @@
 {
-  "description": "the same buried requirement with filler close to max_chunks (the documented limit: floored filler can outvote it)",
+  "description": "the same buried requirement under ~3.8 MB of filler, about 50 chunks (the documented limit: zero-relevance filler has no effect, but enough low non-zero relevance still dilutes it in the raw weighted mean)",
   "prompt": "Read the log on stdin.",
   "stdin": "Requirement: the log below shows a data race in the payment ledger; find the root cause across the ledger, the retry queue and the idempotency cache, write a deterministic reproducing test and fix it without double-charging anyone.\n\n",
   "filler": {

@@ -301,9 +301,6 @@ func TestBuildMadeUpCLI(t *testing.T) {
 	const ini = `
 [agrouter]
 timeout         = 10s
-max_chunks      = 8
-chunk_parallel  = 2
-relevance_floor = 0.1
 question        = Which option?
 chunk_question  = Which option for this chunk?
 relevance       = Is this chunk relevant?

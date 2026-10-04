@@ -1,7 +1,6 @@
 package config
 
 import (
-	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -112,29 +111,9 @@ func TestValidate_Violations(t *testing.T) {
 			want:  []string{"[agrouter] timeout = 0s: must be positive"},
 		},
 		{
-			name:  "max_chunks below 1",
-			local: "[agrouter]\nmax_chunks = 0\n",
-			want:  []string{"[agrouter] max_chunks = 0: must be at least 1"},
-		},
-		{
-			name:  "chunk_parallel below 1",
-			local: "[agrouter]\nchunk_parallel = -1\n",
-			want:  []string{"[agrouter] chunk_parallel = -1: must be at least 1"},
-		},
-		{
-			name:  "relevance_floor zero",
-			local: "[agrouter]\nrelevance_floor = 0\n",
-			want:  []string{"[agrouter] relevance_floor = 0: must be in (0, 1]"},
-		},
-		{
-			name:  "relevance_floor above 1",
-			local: "[agrouter]\nrelevance_floor = 1.5\n",
-			want:  []string{"[agrouter] relevance_floor = 1.5: must be in (0, 1]"},
-		},
-		{
 			name:  "several violations reported together",
-			local: "[agrouter]\nmax_chunks = 0\nchunk_parallel = 0\n",
-			want:  []string{"max_chunks = 0", "chunk_parallel = 0"},
+			local: "[agrouter]\ntimeout = 0s\n[model.beta-two]\ncli = beta\n",
+			want:  []string{"timeout = 0s", "[model.beta-two] name: required"},
 		},
 	}
 	for _, tc := range tests {
@@ -159,7 +138,6 @@ func TestValidate_Allowed(t *testing.T) {
 		{name: "braces that are not placeholders", local: "[cli.beta.args]\nverbose = [\"--json={\\\"a\\\": 1}\", \"{}\"]\n"},
 		{name: "no effort mapping when no model has efforts", local: ""},
 		{name: "model of a disabled cli is dropped, not unknown", local: "[cli.beta]\nenabled = false\n"},
-		{name: "relevance_floor of 1", local: "[agrouter]\nrelevance_floor = 1\n"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -169,9 +147,3 @@ func TestValidate_Allowed(t *testing.T) {
 	}
 }
 
-func TestValidate_RelevanceFloorNaN(t *testing.T) {
-	cfg, err := load(t, "", "")
-	require.NoError(t, err)
-	cfg.Agrouter.RelevanceFloor = math.NaN()
-	require.ErrorContains(t, cfg.Validate(), "relevance_floor = NaN: must be in (0, 1]")
-}

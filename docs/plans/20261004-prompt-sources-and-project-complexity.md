@@ -110,14 +110,14 @@ One compiling change: every caller and test of a removed API is updated in this 
 - Modify: `pkg/config/config_test.go`, `pkg/config/validate_test.go`, `pkg/catalog/catalog_test.go`, `pkg/args/build_test.go`, `pkg/prompt/capture_test.go`, `pkg/prompt/mentions_test.go`, `pkg/prompt/chunk_test.go`, `pkg/router/router_test.go`, `pkg/router/pool_test.go`, `pkg/router/evalcase_test.go`, `cmd/agrouter/app_test.go`
 - Modify: `testdata/routing/oversized-buried-requirement-max.json`
 
-- [ ] config: drop the three fields, their key parsing and validation; remove the keys from `defaults/config`; reword the `timeout` comment (covers both stages, cooperative)
-- [ ] `Capture` reads stdin to EOF under ctx with no byte limit; remove `ErrCaptureLimit` and the `limit` parameter (`Undecidable` keeps only the deadline case); `ReadMentions` drops `limit`
-- [ ] remove `CaptureLimit`; `chunkRoom` reserves the decimal width of the largest `int` for each of `index` and `of` (derived from `math.MaxInt`, 19 digits on 64-bit), in addition to the exact JSON envelope and the serialized anchor; `Split(b)` drops `maxChunks` and `ErrTooManyChunks`
-- [ ] `round` starts every pending chunk at once (no semaphore), keeping fail-fast cancel and deadline handling; drop the `MaxChunks` recheck after a re-split; `pool` weight = raw relevance, total 0 -> plain mean
-- [ ] update every caller: `app.route`, the eval harness (`evalcase_test.go`, check it compiles with `-tags eval`), synthetic configs in tests; update the oversized eval case description
-- [ ] write tests: removed keys are unknown-key errors; large stdin captured whole; deadline still undecidable; many chunks with no limit; every serialized chunk state within `Budget.Chunk`, also after `Halve` and renumbering to more digits; all chunks in flight at once (peak = chunk count)
-- [ ] write pooling tests: zero-relevance filler of any length has no effect; all-zero relevance -> plain mean; a finite low-positive-weight example (e.g. 0.95 relevant vs N x 0.01 filler) pinning where dilution flips the result, documenting the raw-mean limit (replaces the "floored filler outweighs it at max_chunks" test)
-- [ ] run `make test` and `go vet -tags eval ./...` - must pass before task 2
+- [x] config: drop the three fields, their key parsing and validation; remove the keys from `defaults/config`; reword the `timeout` comment (covers both stages, cooperative)
+- [x] `Capture` reads stdin to EOF under ctx with no byte limit; remove `ErrCaptureLimit` and the `limit` parameter (`Undecidable` keeps only the deadline case); `ReadMentions` drops `limit`
+- [x] remove `CaptureLimit`; `chunkRoom` reserves the decimal width of the largest `int` for each of `index` and `of` (derived from `math.MaxInt`, 19 digits on 64-bit), in addition to the exact JSON envelope and the serialized anchor; `Split(b)` drops `maxChunks` and `ErrTooManyChunks`
+- [x] `round` starts every pending chunk at once (no semaphore), keeping fail-fast cancel and deadline handling; drop the `MaxChunks` recheck after a re-split; `pool` weight = raw relevance, total 0 -> plain mean
+- [x] update every caller: `app.route`, the eval harness (`evalcase_test.go`, check it compiles with `-tags eval`), synthetic configs in tests; update the oversized eval case description
+- [x] write tests: removed keys are unknown-key errors; large stdin captured whole; deadline still undecidable; many chunks with no limit; every serialized chunk state within `Budget.Chunk`, also after `Halve` and renumbering to more digits; all chunks in flight at once (peak = chunk count)
+- [x] write pooling tests: zero-relevance filler of any length has no effect; all-zero relevance -> plain mean; a finite low-positive-weight example (e.g. 0.95 relevant vs N x 0.01 filler) pinning where dilution flips the result, documenting the raw-mean limit (replaces the "floored filler outweighs it at max_chunks" test)
+- [x] run `make test` and `go vet -tags eval ./...` - must pass before task 2
 
 ### Task 2: Strict reading of explicit files
 

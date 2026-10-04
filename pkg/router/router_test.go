@@ -29,8 +29,8 @@ var update = goflag.Bool("update", false, "rewrite golden files")
 func requestFixture(t *testing.T) (*config.Config, *catalog.Catalog) {
 	t.Helper()
 	cfg := &config.Config{
-		Agrouter: config.Agrouter{JevModel: "test-jev", Timeout: time.Second, MaxChunks: 4, ChunkParallel: 2,
-			RelevanceFloor: 0.1, Question: "Choose an option for state.", ChunkQuestion: "Choose an option for anchor and chunk.",
+		Agrouter: config.Agrouter{JevModel: "test-jev", Timeout: time.Second,
+			Question: "Choose an option for state.", ChunkQuestion: "Choose an option for anchor and chunk.",
 			Relevance: "Does chunk add requirements beyond anchor?"},
 		CLIs: []config.CLI{
 			{Name: "alpha", Command: "alpha", Description: "Alpha agent."},
@@ -317,16 +317,14 @@ func TestRouteCannotDecideWithoutRequest(t *testing.T) {
 		captured *prompt.Result
 		want     error
 	}{
-		{name: "capture over the limit", captured: &prompt.Result{Undecidable: prompt.ErrCaptureLimit},
-			want: prompt.ErrCaptureLimit},
-		{name: "state over max_chunks",
-			captured: captured(strings.Repeat("line of text\n", 20_000)), want: prompt.ErrTooManyChunks},
+		{name: "capture past the deadline", captured: &prompt.Result{Undecidable: context.DeadlineExceeded},
+			want: context.DeadlineExceeded},
+		{name: "attachments over the anchor", captured: overAnchor(), want: prompt.ErrAttachmentsOverAnchor},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			client := &mocks.JevClientMock{}
 			r := newRouter(t, cfg, cat, client)
-			r.cfg = withMaxChunks(r, 1)
 			req := &args.Request{CLI: "codex"}
 			d, err := r.Route(context.Background(), Eligible(cfg, cat, req), req, tc.captured)
 			require.NoError(t, err)
@@ -367,4 +365,15 @@ func mustCLI(t *testing.T, cfg *config.Config, name string) config.CLI {
 	cli, ok := cfg.CLIByName(name)
 	require.True(t, ok)
 	return cli
+}
+
+// overAnchor is a state too large for one request whose attachments exceed their anchor share even
+// summarized.
+func overAnchor() *prompt.Result {
+	c := captured(strings.Repeat("line of text\n", 20_000))
+	for i := range 200 {
+		c.Attachments = append(c.Attachments, prompt.Attachment{Source: prompt.SourceMentioned,
+			Type: fmt.Sprintf("application/x-kind-%d", i), Bytes: 1})
+	}
+	return c
 }

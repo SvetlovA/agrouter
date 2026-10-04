@@ -26,7 +26,7 @@ type ChunkResult struct {
 	Field     string
 	Index     int // as sent; a re-split renumbers the chunks after it
 	Of        int
-	Relevance float64 // the Noul as answered, before the floor
+	Relevance float64 // the Noul as answered: the chunk's weight in the pool
 	Top       []Score
 }
 
@@ -66,14 +66,14 @@ func (r *Router) single(ctx context.Context, el *Eligibility, captured *prompt.R
 		return outcome{}, fmt.Errorf("%w: %w", errUnsplittable, err)
 	}
 	// State 0 forces the split even though the state fit the full budget
-	split, splitErr := captured.Split(prompt.Budget{Chunk: r.budget.Chunk / 2}, r.cfg.Agrouter.MaxChunks)
+	split, splitErr := captured.Split(prompt.Budget{Chunk: r.budget.Chunk / 2})
 	if splitErr != nil {
 		return outcome{}, fmt.Errorf("re-split after %w: %w", err, splitErr)
 	}
 	return r.pooled(ctx, el, split, true)
 }
 
-// pooled asks one request per chunk, chunk_parallel at a time, and pools the answers. A 422 on a
+// pooled asks one request per chunk, all at once, and pools the answers. A 422 on a
 // chunk re-splits it once at half size; any other failure, a second 422, or a 422 on a chunk under
 // the minimum state size means Jev cannot decide.
 func (r *Router) pooled(ctx context.Context, el *Eligibility, split *prompt.Split, resplit bool) (outcome, error) {
@@ -100,14 +100,10 @@ func (r *Router) pooled(ctx context.Context, el *Eligibility, split *prompt.Spli
 		if !again {
 			break
 		}
-		if len(next) > ag.MaxChunks {
-			return outcome{}, fmt.Errorf("after a re-split: %w: %d chunks, max_chunks is %d",
-				prompt.ErrTooManyChunks, len(next), ag.MaxChunks)
-		}
 		seq = next
 	}
 
-	o, top := pool(el.Options, seq, ag.RelevanceFloor)
+	o, top := pool(el.Options, seq)
 	p := &Pooled{Top: top, Chunks: make([]ChunkResult, len(seq))}
 	for i, s := range seq {
 		p.Chunks[i] = s.result
@@ -115,8 +111,9 @@ func (r *Router) pooled(ctx context.Context, el *Eligibility, split *prompt.Spli
 	return outcome{option: o, pooled: p}, nil
 }
 
-// round asks every pending chunk of seq with at most chunk_parallel requests in flight. The first
-// failure other than a 422 cancels the rest and is returned; 422s are left on their slots.
+// round asks every pending chunk of seq at once: Jev runs remotely, and 429s are retried within the
+// deadline. The first failure other than a 422 cancels the rest and is returned; 422s are left on
+// their slots.
 func (r *Router) round(ctx context.Context, cancel context.CancelFunc, el *Eligibility, anchor prompt.Anchor,
 	questions map[string]jev.Question, seq []*slot) error {
 	var (
@@ -124,20 +121,11 @@ func (r *Router) round(ctx context.Context, cancel context.CancelFunc, el *Eligi
 		mu       sync.Mutex
 		firstErr error
 	)
-	sem := make(chan struct{}, r.cfg.Agrouter.ChunkParallel)
 	for _, s := range seq {
 		if s.done {
 			continue
 		}
-		select {
-		case sem <- struct{}{}:
-		case <-ctx.Done():
-		}
-		if ctx.Err() != nil {
-			break
-		}
 		wg.Go(func() {
-			defer func() { <-sem }()
 			err := r.askChunk(ctx, el, anchor, questions, s)
 			if err == nil || errors.Is(err, jev.ErrUnprocessable) {
 				s.err = err
@@ -216,18 +204,27 @@ func resplitRejected(seq []*slot) (next []*slot, again bool, err error) {
 	return next, again, nil
 }
 
-// pool combines the chunks' probabilities: each chunk weighs max(relevance, floor), an option's
-// score is the weighted average of its probabilities, and the highest score wins with catalog order
-// breaking ties.
-func pool(opts []catalog.Option, seq []*slot, floor float64) (catalog.Option, []Score) {
-	scores := make([]float64, len(opts))
+// pool combines the chunks' probabilities: each chunk weighs its raw relevance, an option's score is
+// the weighted average of its probabilities (a plain average when every relevance is 0), and the
+// highest score wins with catalog order breaking ties. Zero-relevance chunks have no effect, but
+// enough low-relevance ones still dilute a relevant chunk: a raw weighted mean has no cap.
+func pool(opts []catalog.Option, seq []*slot) (catalog.Option, []Score) {
 	var total float64
 	for _, s := range seq {
-		w := max(s.result.Relevance, floor)
-		total += w
+		total += s.result.Relevance
+	}
+	scores := make([]float64, len(opts))
+	for _, s := range seq {
+		w := s.result.Relevance
+		if total == 0 {
+			w = 1
+		}
 		for i, o := range opts {
 			scores[i] += w * s.probs[o.ID]
 		}
+	}
+	if total == 0 {
+		total = float64(len(seq))
 	}
 	best := 0
 	for i := range scores {

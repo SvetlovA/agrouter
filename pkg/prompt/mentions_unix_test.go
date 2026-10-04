@@ -23,7 +23,7 @@ func TestReadMentions_FIFONotBlocking(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	res := mention(t, ctx, cwd, "read pipe "+outside+" a.txt", 1<<20)
+	res := mention(t, ctx, cwd, "read pipe "+outside+" a.txt")
 	require.NoError(t, res.Undecidable)
 	assert.Equal(t, []string{"text"}, res.Files)
 	assert.Empty(t, res.Attachments)

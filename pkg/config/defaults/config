@@ -9,15 +9,9 @@
 api_key   =
 # pin a versioned id (e.g. jev-1.13.0) to keep routing stable across Jev releases
 jev_model = jev-latest
-# total budget for all Jev calls, chunk requests and retries included; raise it for very long inputs
+# total routing budget: reading stdin and files, every Jev request (all chunks at once) and retries.
+# cooperative: reading and network stop at it, splitting and encoding do not. raise it for very long inputs
 timeout   = 10s
-# a state over the Jev budget is split into chunks, one Jev request each (see "Splitting large state").
-# more chunks than this = cannot decide; also bounds how much prompt (positional + stdin) and mentioned-file text is read. >= 1
-max_chunks      = 64
-# chunk requests in flight at once. >= 1
-chunk_parallel  = 4
-# lower bound for a chunk's relevance weight; a tunable coefficient, not a probability. 0 < x <= 1
-relevance_floor = 0.05
 # the routing question for a state sent whole; tune the cost/quality preference here
 question  = Which coding-agent CLI, model and reasoning effort should run the task described in `state` (its `prompt`, the `files` the prompt mentions, and `attachments`, where `attachments` lists images, PDFs and other non-text inputs the task includes, by type and size only)? Judge each option as a whole: the model and effort together must be strong enough to complete the task well, at the lowest cost and time that achieves that. Look up each option's `model` in `models` and its `cli` and `effort` in `efforts`.
 # the routing question for one chunk of a split state: same options, same preference

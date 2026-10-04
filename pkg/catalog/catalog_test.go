@@ -16,9 +16,6 @@ import (
 const catalogConfig = `
 [agrouter]
 timeout = 10s
-max_chunks = 2
-chunk_parallel = 1
-relevance_floor = 0.1
 
 [cli.alpha]
 command = alpha

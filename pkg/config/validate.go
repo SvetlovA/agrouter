@@ -45,16 +45,6 @@ func (a Agrouter) validate() []error {
 	if a.Timeout <= 0 {
 		errs = append(errs, fmt.Errorf("[agrouter] timeout = %s: must be positive", a.Timeout))
 	}
-	if a.MaxChunks < 1 {
-		errs = append(errs, fmt.Errorf("[agrouter] max_chunks = %d: must be at least 1", a.MaxChunks))
-	}
-	if a.ChunkParallel < 1 {
-		errs = append(errs, fmt.Errorf("[agrouter] chunk_parallel = %d: must be at least 1", a.ChunkParallel))
-	}
-	// written as a negation so NaN fails too
-	if !(a.RelevanceFloor > 0 && a.RelevanceFloor <= 1) {
-		errs = append(errs, fmt.Errorf("[agrouter] relevance_floor = %v: must be in (0, 1]", a.RelevanceFloor))
-	}
 	return errs
 }
 
