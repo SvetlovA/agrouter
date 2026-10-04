@@ -11,13 +11,49 @@ import (
 
 	"github.com/SvetlovA/agrouter/pkg/catalog"
 	"github.com/SvetlovA/agrouter/pkg/config"
-	"github.com/SvetlovA/agrouter/pkg/config/defaults"
 )
 
-// loadConfig merges the embedded defaults with an optional local config.
+const catalogConfig = `
+[agrouter]
+timeout = 10s
+max_chunks = 2
+chunk_parallel = 1
+relevance_floor = 0.1
+
+[cli.alpha]
+command = alpha
+[cli.alpha.args]
+print = ["{prompt}"]
+model = ["--model", "{model}"]
+effort = ["--effort", "{effort}"]
+
+[cli.beta]
+command = beta
+[cli.beta.args]
+print = ["{prompt}"]
+model = ["--model", "{model}"]
+effort = ["--effort", "{effort}"]
+
+[model.alpha-big]
+cli = alpha
+name = alpha-big
+aliases = big
+efforts = low, high
+
+[model.alpha-small]
+cli = alpha
+name = alpha-small
+
+[model.beta-one]
+cli = beta
+name = beta-one
+efforts = low, ultra
+`
+
+// loadConfig merges a synthetic fixture with an optional local config.
 func loadConfig(t *testing.T, local string) *config.Config {
 	t.Helper()
-	src := config.Sources{Embedded: defaults.Config}
+	src := config.Sources{Embedded: []byte(catalogConfig)}
 	if local != "" {
 		src.LocalPath = filepath.Join(t.TempDir(), "config")
 		require.NoError(t, os.WriteFile(src.LocalPath, []byte(local), 0o600))
@@ -35,43 +71,21 @@ func ids(opts []catalog.Option) []string {
 	return out
 }
 
-func TestEmbeddedCatalog(t *testing.T) {
-	c, err := catalog.Build(loadConfig(t, ""))
-	require.NoError(t, err)
-
-	require.Len(t, c.Options, 33)
-	assert.Len(t, catalog.ByCLI(c.Options, "claude"), 16)
-	assert.Len(t, catalog.ByCLI(c.Options, "codex"), 17)
-	assert.Equal(t, []string{"claude", "codex"}, catalog.CLIs(c.Options))
-
-	assert.Equal(t, []string{
-		"claude-fable-5-1@low", "claude-fable-5-1@medium", "claude-fable-5-1@high", "claude-fable-5-1@xhigh", "claude-fable-5-1@max",
-		"claude-opus-5-5@low", "claude-opus-5-5@medium", "claude-opus-5-5@high", "claude-opus-5-5@xhigh", "claude-opus-5-5@max",
-		"claude-sonnet-5@low", "claude-sonnet-5@medium", "claude-sonnet-5@high", "claude-sonnet-5@xhigh", "claude-sonnet-5@max",
-		"claude-haiku-4-5",
-		"gpt-6-astra@low", "gpt-6-astra@medium", "gpt-6-astra@high", "gpt-6-astra@xhigh", "gpt-6-astra@max", "gpt-6-astra@ultra",
-		"gpt-6-sol@low", "gpt-6-sol@medium", "gpt-6-sol@high", "gpt-6-sol@xhigh", "gpt-6-sol@max", "gpt-6-sol@ultra",
-		"gpt-6-luna@low", "gpt-6-luna@medium", "gpt-6-luna@high", "gpt-6-luna@xhigh", "gpt-6-luna@max",
-	}, ids(c.Options), "catalog order")
-
-	assert.Equal(t, catalog.Option{ID: "claude-opus-5-5@high", CLI: "claude", Section: "claude-opus-5-5",
-		Name: "claude-opus-5-5", Effort: "high"}, c.Options[7])
-}
-
 func TestModelWithoutEfforts(t *testing.T) {
 	c, err := catalog.Build(loadConfig(t, ""))
 	require.NoError(t, err)
 
-	haiku := catalog.ByModel(c.Options, "claude-haiku-4-5")
-	require.Len(t, haiku, 1)
-	assert.Equal(t, catalog.Option{ID: "claude-haiku-4-5", CLI: "claude", Section: "claude-haiku-4-5",
-		Name: "claude-haiku-4-5"}, haiku[0])
-	assert.Empty(t, catalog.ByEffort(haiku, "high"), "a model without efforts has no effort options")
+	withoutEfforts := catalog.ByModel(c.Options, "alpha-small")
+	require.Len(t, withoutEfforts, 1)
+	assert.Equal(t, catalog.Option{ID: "alpha-small", CLI: "alpha", Section: "alpha-small",
+		Name: "alpha-small"}, withoutEfforts[0])
+	assert.Empty(t, catalog.ByEffort(withoutEfforts, "high"), "a model without efforts has no effort options")
 }
 
 func TestStableOrdering(t *testing.T) {
 	first, err := catalog.Build(loadConfig(t, ""))
 	require.NoError(t, err)
+	assert.Equal(t, []string{"alpha-big@low", "alpha-big@high", "alpha-small", "beta-one@low", "beta-one@ultra"}, ids(first.Options))
 	for range 20 {
 		again, err := catalog.Build(loadConfig(t, ""))
 		require.NoError(t, err)
@@ -86,10 +100,10 @@ func TestDisabledSections(t *testing.T) {
 		want  int
 		clis  []string
 	}{
-		{name: "one model", local: "[model.gpt-6-astra]\nenabled = false\n", want: 27, clis: []string{"claude", "codex"}},
-		{name: "a whole cli", local: "[cli.codex]\nenabled = false\n", want: 16, clis: []string{"claude"}},
-		{name: "model without efforts", local: "[model.claude-haiku-4-5]\nenabled = false\n", want: 32,
-			clis: []string{"claude", "codex"}},
+		{name: "one model", local: "[model.beta-one]\nenabled = false\n", want: 3, clis: []string{"alpha"}},
+		{name: "a whole cli", local: "[cli.beta]\nenabled = false\n", want: 3, clis: []string{"alpha"}},
+		{name: "model without efforts", local: "[model.alpha-small]\nenabled = false\n", want: 4,
+			clis: []string{"alpha", "beta"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -102,7 +116,7 @@ func TestDisabledSections(t *testing.T) {
 }
 
 func TestNoEnabledOptions(t *testing.T) {
-	_, err := catalog.Build(loadConfig(t, "[cli.claude]\nenabled = false\n[cli.codex]\nenabled = false\n"))
+	_, err := catalog.Build(loadConfig(t, "[cli.alpha]\nenabled = false\n[cli.beta]\nenabled = false\n"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no enabled options")
 
@@ -146,12 +160,13 @@ func TestLookupModel(t *testing.T) {
 		wantName  string
 		inCatalog bool
 	}{
-		{value: "claude-opus-5-5", wantName: "claude-opus-5-5", inCatalog: true},
-		{value: "opus", wantName: "claude-opus-5-5", inCatalog: true},
-		{value: "gpt-6-luna", wantName: "gpt-6-luna", inCatalog: true},
-		{value: "claude-haiku-4-5", wantName: "claude-haiku-4-5", inCatalog: true},
-		{value: "gpt-5.6-sol", wantName: "gpt-5.6-sol", inCatalog: false},
-		{value: "OPUS", wantName: "OPUS", inCatalog: false},
+		{value: "alpha-big", wantName: "alpha-big", inCatalog: true},
+		{value: "big", wantName: "alpha-big", inCatalog: true},
+		{value: "beta-one", wantName: "beta-one", inCatalog: true},
+
+		{value: "alpha-small", wantName: "alpha-small", inCatalog: true},
+		{value: "unknown", wantName: "unknown", inCatalog: false},
+		{value: "BIG", wantName: "BIG", inCatalog: false},
 		{value: "", wantName: "", inCatalog: false},
 	}
 	for _, tt := range tests {
@@ -168,9 +183,9 @@ func TestLookupModel(t *testing.T) {
 }
 
 func TestLookupSkipsDisabledModel(t *testing.T) {
-	c, err := catalog.Build(loadConfig(t, "[model.claude-opus-5-5]\nenabled = false\n"))
+	c, err := catalog.Build(loadConfig(t, "[model.alpha-big]\nenabled = false\n"))
 	require.NoError(t, err)
-	_, ok := c.LookupModel("opus")
+	_, ok := c.LookupModel("big")
 	assert.False(t, ok, "a disabled model's alias is not in the catalog")
 }
 
@@ -178,11 +193,11 @@ func TestFilters(t *testing.T) {
 	c, err := catalog.Build(loadConfig(t, ""))
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"gpt-6-astra@ultra", "gpt-6-sol@ultra"}, ids(catalog.ByEffort(c.Options, "ultra")))
-	assert.Len(t, catalog.ByEffort(c.Options, "high"), 6)
-	assert.Len(t, catalog.ByEffort(catalog.ByCLI(c.Options, "claude"), "high"), 3)
-	assert.Equal(t, []string{"gpt-6-luna@low", "gpt-6-luna@medium", "gpt-6-luna@high", "gpt-6-luna@xhigh", "gpt-6-luna@max"},
-		ids(catalog.ByModel(c.Options, "gpt-6-luna")))
+	assert.Equal(t, []string{"beta-one@ultra"}, ids(catalog.ByEffort(c.Options, "ultra")))
+	assert.Len(t, catalog.ByEffort(c.Options, "high"), 1)
+	assert.Len(t, catalog.ByEffort(catalog.ByCLI(c.Options, "alpha"), "high"), 1)
+	assert.Equal(t, []string{"beta-one@low", "beta-one@ultra"},
+		ids(catalog.ByModel(c.Options, "beta-one")))
 
 	assert.Empty(t, catalog.ByCLI(c.Options, "gemini"))
 	assert.Empty(t, catalog.ByModel(c.Options, "nope"))

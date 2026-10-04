@@ -8,8 +8,8 @@
     "claude-fable-5-1@medium",
     "gpt-6-astra@high",
     "gpt-6-astra@xhigh",
-    "gpt-6-sol@xhigh",
-    "gpt-6-sol@max",
+    "gpt-6.1-sol@xhigh",
+    "gpt-6.1-sol@max",
     "claude-opus-5-5@medium"
   ]
 }

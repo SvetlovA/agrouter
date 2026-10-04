@@ -1,5 +1,5 @@
 {
-  "model": "jev-latest",
+  "model": "test-jev",
   "state": {
     "prompt": "fix the flaky test in pkg/foo/foo_test.go",
     "files": [
@@ -17,41 +17,29 @@
     "route": {
       "type": "choice",
       "instructions": {
-        "question": "Which coding-agent CLI, model and reasoning effort should run the task described in `state` (its `prompt`, the `files` the prompt mentions, and `attachments`, where `attachments` lists images, PDFs and other non-text inputs the task includes, by type and size only)? Judge each option as a whole: the model and effort together must be strong enough to complete the task well, at the lowest cost and time that achieves that. Look up each option's `model` in `models` and its `cli` and `effort` in `efforts`.",
+        "question": "Choose an option for state.",
         "clis": {
-          "claude": "Claude Code (Anthropic). Agentic coding CLI with file editing, shell, subagents (Task tool) and MCP."
+          "alpha": "Alpha agent."
         },
         "models": {
-          "claude-fable-5-1": "Most capable model open to all customers. For demanding reasoning and long-horizon agentic work: multi-hour agent sessions, multistep deep research, analysis carried through to a finished document, spreadsheet or deck. Use when Opus 5.5 at higher effort still falls short. Slower; $10 / $50 per MTok.",
-          "claude-opus-5-5": "For long-running agentic coding and knowledge work: multi-hour autonomous coding, large-scale refactoring, complex systems engineering, vision-heavy workflows. Recommended starting point for most workloads. Moderate latency; $4 / $20 per MTok.",
-          "claude-sonnet-5": "Best combination of speed and intelligence. Everyday coding, code generation, data analysis, agentic tool use. Fast; $2 / $10 per MTok.",
-          "claude-haiku-4-5": "Fastest model with near-frontier intelligence. Real-time and high-volume processing, cost-sensitive work, subagent tasks. 200K context. Fastest; $1 / $5 per MTok."
+          "strong-model": "Strong model.",
+          "fast-model": "Fast model."
         },
         "efforts": {
-          "claude": {
+          "alpha": {
             "turbo": "not in the catalog for this CLI: passed through as given"
           }
         }
       },
       "criteria": {
-        "claude-fable-5-1": {
-          "cli": "claude",
-          "model": "claude-fable-5-1",
+        "strong": {
+          "cli": "alpha",
+          "model": "strong-model",
           "effort": "turbo"
         },
-        "claude-opus-5-5": {
-          "cli": "claude",
-          "model": "claude-opus-5-5",
-          "effort": "turbo"
-        },
-        "claude-sonnet-5": {
-          "cli": "claude",
-          "model": "claude-sonnet-5",
-          "effort": "turbo"
-        },
-        "claude-haiku-4-5": {
-          "cli": "claude",
-          "model": "claude-haiku-4-5",
+        "fast": {
+          "cli": "alpha",
+          "model": "fast-model",
           "effort": "turbo"
         }
       }

@@ -151,8 +151,8 @@ func TestParseArgs_Config(t *testing.T) {
 		}, req.Args)
 	})
 	t.Run("-c model and effort become constraints, TOML quotes removed", func(t *testing.T) {
-		req := parseOK(t, []string{"-c", `model="gpt-6-sol"`, "-c", "model_reasoning_effort=high", "x"}, noEnv)
-		assert.Equal(t, "gpt-6-sol", req.Model)
+		req := parseOK(t, []string{"-c", `model="gpt-6.1-sol"`, "-c", "model_reasoning_effort=high", "x"}, noEnv)
+		assert.Equal(t, "gpt-6.1-sol", req.Model)
 		assert.Equal(t, args.SourceConfig, req.ModelSource)
 		assert.Equal(t, "high", req.Effort)
 		assert.Equal(t, args.SourceConfig, req.EffortSource)
@@ -164,9 +164,9 @@ func TestParseArgs_Config(t *testing.T) {
 		assert.Equal(t, "b", req.Model)
 	})
 	t.Run("-c model beside --model stays a config.model key", func(t *testing.T) {
-		req := parseOK(t, []string{"-c", `model="gpt-6"`, "--model", "gpt-6-sol",
+		req := parseOK(t, []string{"-c", `model="gpt-6"`, "--model", "gpt-6.1-sol",
 			"-c", "model_reasoning_effort=low", "--effort", "high", "x"}, noEnv)
-		assert.Equal(t, "gpt-6-sol", req.Model)
+		assert.Equal(t, "gpt-6.1-sol", req.Model)
 		assert.Equal(t, args.SourceFlag, req.ModelSource)
 		assert.Equal(t, "high", req.Effort)
 		assert.Equal(t, args.SourceFlag, req.EffortSource)
@@ -212,7 +212,7 @@ func TestParseArgs_RalphexCodex(t *testing.T) {
 		"-c", `project_doc_fallback_filenames=["CLAUDE.md"]`,
 		"--dangerously-bypass-approvals-and-sandbox",
 		"--sandbox", "danger-full-access",
-		"-c", `model="gpt-6-sol"`,
+		"-c", `model="gpt-6.1-sol"`,
 		"-c", "model_reasoning_effort=xhigh",
 		"-c", "stream_idle_timeout_ms=3600000",
 		"-c", `project_doc="/tmp/doc.md"`,
@@ -221,7 +221,7 @@ func TestParseArgs_RalphexCodex(t *testing.T) {
 	assert.Equal(t, args.ModeExec, req.Mode)
 	assert.Empty(t, req.CLI)
 	assert.False(t, req.Prompt.Set)
-	assert.Equal(t, "gpt-6-sol", req.Model)
+	assert.Equal(t, "gpt-6.1-sol", req.Model)
 	assert.Equal(t, args.SourceConfig, req.ModelSource)
 	assert.Equal(t, "xhigh", req.Effort)
 	assert.Equal(t, args.SourceConfig, req.EffortSource)

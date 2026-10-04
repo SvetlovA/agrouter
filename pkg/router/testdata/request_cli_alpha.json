@@ -19,20 +19,14 @@
       "instructions": {
         "question": "Choose an option for state.",
         "clis": {
-          "alpha": "Alpha agent.",
-          "beta": "Beta agent."
+          "alpha": "Alpha agent."
         },
         "models": {
           "strong-model": "Strong model.",
-          "fast-model": "Fast model.",
-          "worker-model": "Worker model."
+          "fast-model": "Fast model."
         },
         "efforts": {
           "alpha": {
-            "low": "Quick reasoning.",
-            "high": "Deep reasoning."
-          },
-          "beta": {
             "low": "Quick reasoning.",
             "high": "Deep reasoning."
           }
@@ -53,16 +47,6 @@
           "cli": "alpha",
           "model": "fast-model",
           "effort": "none (not supported)"
-        },
-        "worker@low": {
-          "cli": "beta",
-          "model": "worker-model",
-          "effort": "low"
-        },
-        "worker@high": {
-          "cli": "beta",
-          "model": "worker-model",
-          "effort": "high"
         }
       }
     }

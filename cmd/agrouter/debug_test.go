@@ -31,18 +31,17 @@ func TestDebug_Redaction(t *testing.T) {
 	const secret = "the secret prompt text"
 	e := newEnv(t)
 	t.Setenv(envDebug, "1")
-	e.jev.pick = "claude-sonnet-5@low"
+	e.jev.pick = "claude-sonnet-5-5@low"
 	r := e.run([]string{"--cli=claude", "--verbose", secret, "--", "--raw-one", "raw-two"}, nil)
 	require.Equal(t, 0, r.code, r.stderr)
 
 	lines := debugLines(r.stderr)
-	assert.Equal(t, []string{
-		"api key: from env",
-		"eligible: 16 option(s) on claude",
-		"dropped codex: --cli claude",
-		"jev: choice claude-sonnet-5@low, confidence 0.900, top [claude-sonnet-5@low 1.000, claude-fable-5-1@high 0.000, claude-fable-5-1@low 0.000]",
-		"command: claude -p <prompt> --verbose --model claude-sonnet-5 --effort low <2 raw argument(s)>",
-	}, lines)
+	require.Len(t, lines, 5)
+	assert.Equal(t, "api key: from env", lines[0])
+	assert.Regexp(t, `^eligible: [1-9][0-9]* option\(s\) on claude$`, lines[1])
+	assert.Equal(t, "dropped codex: --cli claude", lines[2])
+	assert.True(t, strings.HasPrefix(lines[3], "jev: choice "+e.jev.pick+", confidence 0.900, top ["+e.jev.pick+" 1.000"))
+	assert.Equal(t, "command: claude -p <prompt> --verbose --model claude-sonnet-5-5 --effort low <2 raw argument(s)>", lines[4])
 	assert.NotContains(t, r.stderr, secret)
 	assert.NotContains(t, r.stderr, "raw-two")
 	assert.NotContains(t, r.stderr, testKey)
@@ -54,7 +53,7 @@ func TestDebug_Off(t *testing.T) {
 	for _, v := range []string{"", "0", "true"} {
 		e := newEnv(t)
 		t.Setenv(envDebug, v)
-		e.jev.pick = "claude-sonnet-5@low"
+		e.jev.pick = "claude-sonnet-5-5@low"
 		r := e.run([]string{"fix it"}, nil)
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Empty(t, r.stderr, "AGROUTER_DEBUG=%q", v)

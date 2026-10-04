@@ -234,7 +234,7 @@ func TestApp_RalphexClaudeMode(t *testing.T) {
 	t.Run("Jev chooses", func(t *testing.T) {
 		e := newEnv(t)
 		e.fakeCommands()
-		e.jev.pick = "claude-sonnet-5@medium"
+		e.jev.pick = "claude-sonnet-5-5@medium"
 		r := e.run([]string{"exec", "--cli=claude", "--dangerously-skip-permissions", "--output-format", "stream-json",
 			"--verbose", "--print"}, strings.NewReader(task))
 
@@ -242,7 +242,7 @@ func TestApp_RalphexClaudeMode(t *testing.T) {
 		assert.Empty(t, r.stderr)
 		argv, stdin, environ := e.child()
 		assert.Equal(t, []string{"-p", "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose",
-			"--model", "claude-sonnet-5", "--effort", "medium"}, argv)
+			"--model", "claude-sonnet-5-5", "--effort", "medium"}, argv)
 		assert.Equal(t, task, string(stdin))
 		assert.Equal(t, []string{`{"prompt":"implement task 3\nof the plan\n"}`}, e.jev.requests())
 		for _, kv := range environ {
@@ -258,7 +258,7 @@ func TestApp_RalphexCodexMode(t *testing.T) {
 	t.Run("executor", func(t *testing.T) {
 		e := newEnv(t)
 		e.fakeCommands()
-		e.jev.pick = "gpt-6-sol@medium"
+		e.jev.pick = "gpt-6.1-sol@medium"
 		r := e.run([]string{"exec",
 			"-c", "features.multi_agent=true",
 			"-c", desc,
@@ -280,7 +280,7 @@ func TestApp_RalphexCodexMode(t *testing.T) {
 			"--sandbox", "danger-full-access",
 			"-c", "stream_idle_timeout_ms=3600000",
 			"-c", `project_doc="/tmp/doc.md"`,
-			"--model", "gpt-6-sol", "-c", `model_reasoning_effort="medium"`,
+			"--model", "gpt-6.1-sol", "-c", `model_reasoning_effort="medium"`,
 		}, argv)
 		assert.Equal(t, task, string(stdin))
 	})
@@ -288,14 +288,14 @@ func TestApp_RalphexCodexMode(t *testing.T) {
 	t.Run("model constraints from -c: no Jev call", func(t *testing.T) {
 		e := newEnv(t)
 		e.fakeCommands()
-		r := e.run([]string{"exec", "-c", `model="gpt-6-sol"`, "-c", "model_reasoning_effort=xhigh",
+		r := e.run([]string{"exec", "-c", `model="gpt-6.1-sol"`, "-c", "model_reasoning_effort=xhigh",
 			"-c", "stream_idle_timeout_ms=3600000", "--sandbox", "workspace-write"}, strings.NewReader(task))
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Empty(t, r.stderr)
 		argv, _, _ := e.child()
 		assert.Equal(t, []string{"exec", "-c", "stream_idle_timeout_ms=3600000", "--sandbox", "workspace-write",
-			"--model", "gpt-6-sol", "-c", `model_reasoning_effort="xhigh"`}, argv)
+			"--model", "gpt-6.1-sol", "-c", `model_reasoning_effort="xhigh"`}, argv)
 		assert.Empty(t, e.jev.requests())
 	})
 
@@ -318,14 +318,14 @@ func TestApp_RalphexCodexMode(t *testing.T) {
 func TestApp_Decision(t *testing.T) {
 	t.Run("prompt only", func(t *testing.T) {
 		e := newEnv(t)
-		e.jev.pick = "claude-sonnet-5@low"
+		e.jev.pick = "claude-sonnet-5-5@low"
 		r := e.run([]string{"fix the typo in README"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Empty(t, r.stderr)
 		assert.Equal(t, map[string]any{
-			"cli": "claude", "model": "claude-sonnet-5", "effort": "low",
-			"argv":    strs("claude", "-p", "fix the typo in README", "--model", "claude-sonnet-5", "--effort", "low"),
+			"cli": "claude", "model": "claude-sonnet-5-5", "effort": "low",
+			"argv":    strs("claude", "-p", "fix the typo in README", "--model", "claude-sonnet-5-5", "--effort", "low"),
 			"skipped": []any{},
 		}, decision(t, r.stdout))
 		assert.Equal(t, []string{`{"prompt":"fix the typo in README"}`}, e.jev.requests())
@@ -334,7 +334,7 @@ func TestApp_Decision(t *testing.T) {
 	t.Run("mentioned file sent to Jev", func(t *testing.T) {
 		e := newEnv(t)
 		require.NoError(t, os.WriteFile(filepath.Join(e.workDir, "notes.md"), []byte("use opus\n"), 0o600))
-		e.jev.pick = "claude-sonnet-5@low"
+		e.jev.pick = "claude-sonnet-5-5@low"
 		r := e.run([]string{"summarize notes.md"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
@@ -406,7 +406,7 @@ func TestApp_Decision(t *testing.T) {
 
 	t.Run("html characters are not escaped", func(t *testing.T) {
 		e := newEnv(t)
-		e.jev.pick = "claude-sonnet-5@low"
+		e.jev.pick = "claude-sonnet-5-5@low"
 		r := e.run([]string{"a <b> & c"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
@@ -459,7 +459,7 @@ func TestApp_Errors(t *testing.T) {
 
 	t.Run("unknown --cli is a warning", func(t *testing.T) {
 		e := newEnv(t)
-		e.jev.pick = "claude-sonnet-5@low"
+		e.jev.pick = "claude-sonnet-5-5@low"
 		r := e.run([]string{"--cli=nope", "fix it"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
@@ -471,7 +471,7 @@ func TestApp_Errors(t *testing.T) {
 
 	t.Run("eligibility skips come before argv skips", func(t *testing.T) {
 		e := newEnv(t)
-		e.jev.pick = "claude-sonnet-5@low"
+		e.jev.pick = "claude-sonnet-5-5@low"
 		// claude skips --sandbox and codex skips --output-format json, so both stay eligible
 		r := e.run([]string{"--cli=nope", "--sandbox", "read-only", "--output-format", "json", "fix it"}, nil)
 

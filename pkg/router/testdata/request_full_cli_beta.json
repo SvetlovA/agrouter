@@ -18,8 +18,8 @@
       "type": "choice",
       "instructions": "Choose an option for state.",
       "criteria": {
-        "alpha": "CLI alpha: Alpha agent.\nModel unknown-model: not in the catalog: passed through as given\nEffort: the CLI's default",
-        "beta": "CLI beta: Beta agent.\nModel unknown-model: not in the catalog: passed through as given\nEffort: the CLI's default"
+        "worker@low": "CLI beta: Beta agent.\nModel worker-model: Worker model.\nEffort low: Quick reasoning.",
+        "worker@high": "CLI beta: Beta agent.\nModel worker-model: Worker model.\nEffort high: Deep reasoning."
       }
     }
   }

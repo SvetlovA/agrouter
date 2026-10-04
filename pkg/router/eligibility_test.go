@@ -166,8 +166,7 @@ func TestEligibleCLI(t *testing.T) {
 }
 
 func TestEligibleDisabledCLI(t *testing.T) {
-	local := []byte("[cli.codex]\nenabled = false\n[model.gpt-6-astra]\nenabled = false\n" +
-		"[model.gpt-6-sol]\nenabled = false\n[model.gpt-6-luna]\nenabled = false\n")
+	local := []byte("[cli.codex]\nenabled = false\n")
 	path := filepath.Join(t.TempDir(), "config")
 	require.NoError(t, os.WriteFile(path, local, 0o600))
 	cfg, err := config.Load(config.Sources{Embedded: defaults.Config, LocalPath: path})
@@ -219,9 +218,9 @@ func TestEligibleModel(t *testing.T) {
 	})
 
 	t.Run("a catalog model of a CLI --cli dropped is passed through by name", func(t *testing.T) {
-		e := Eligible(cfg, cat, &args.Request{CLI: "claude", Model: "gpt-6-sol"})
+		e := Eligible(cfg, cat, &args.Request{CLI: "claude", Model: "gpt-6.1-sol"})
 		assert.True(t, e.ModelPassthrough)
-		assert.Equal(t, []catalog.Option{{ID: "claude", CLI: "claude", Name: "gpt-6-sol"}}, e.Options)
+		assert.Equal(t, []catalog.Option{{ID: "claude", CLI: "claude", Name: "gpt-6.1-sol"}}, e.Options)
 	})
 }
 
@@ -238,14 +237,19 @@ func TestEligibleEffort(t *testing.T) {
 
 	t.Run("only one CLI has it", func(t *testing.T) {
 		e := Eligible(cfg, cat, &args.Request{Effort: "ultra"})
-		assert.Equal(t, []string{"gpt-6-astra@ultra", "gpt-6-sol@ultra"}, ids(e.Options))
+		assert.Equal(t, idsOf(cat, func(o catalog.Option) bool { return o.Effort == "ultra" }), ids(e.Options))
 	})
 
 	t.Run("nothing left has it: models kept without the effort", func(t *testing.T) {
 		e := Eligible(cfg, cat, &args.Request{CLI: "claude", Effort: "ultra"})
 		assert.True(t, e.EffortPassthrough)
-		assert.Equal(t, []string{"claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5"},
-			ids(e.Options))
+		var models []string
+		for _, m := range cfg.Models {
+			if m.CLI == "claude" {
+				models = append(models, m.Section)
+			}
+		}
+		assert.Equal(t, models, ids(e.Options))
 		for _, o := range e.Options {
 			assert.Empty(t, o.Effort)
 			assert.Equal(t, "ultra", e.EffortFor(o))

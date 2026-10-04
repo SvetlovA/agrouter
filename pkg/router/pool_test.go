@@ -237,10 +237,12 @@ func TestRouteChunkedConfidenceNotAveraged(t *testing.T) {
 }
 
 func TestRouteChunkGoldenRequest(t *testing.T) {
-	cfg, cat := embedded(t)
-	req := &args.Request{CLI: "claude"}
+	cfg, cat := requestFixture(t)
+	req := &args.Request{CLI: "alpha"}
 	el := Eligible(cfg, cat, req)
-	client := chunked(t, byMarker(el.Options))
+	client := chunked(t, func(prompt.ChunkState) (map[string]jev.Answer, error) {
+		return chunkAnswers(favoring(el.Options, "fast", 0.9), 0.5), nil
+	})
 	r := newRouter(t, cfg, cat, client)
 	r.budget = prompt.Budget{State: 1, Chunk: 120} // force a small state into two chunks
 	c := &prompt.Result{Prompt: "fix the flaky test in pkg/foo/foo_test.go",
@@ -498,7 +500,7 @@ func TestRouteChunkedAnsweredAtDeadlineStands(t *testing.T) {
 	el := Eligible(cfg, cat, req)
 	client := &mocks.JevClientMock{AskFunc: func(ctx context.Context, _ jev.Request) (map[string]jev.Answer, error) {
 		<-ctx.Done() // every chunk answers just as the deadline passes
-		return chunkAnswers(favoring(el.Options, "claude-sonnet-5@low", 0.9), 0.5), nil
+		return chunkAnswers(favoring(el.Options, "claude-sonnet-5-5@low", 0.9), 0.5), nil
 	}}
 	r := newRouter(t, cfg, cat, client)
 	c := captured(filler(150_000))
@@ -512,5 +514,5 @@ func TestRouteChunkedAnsweredAtDeadlineStands(t *testing.T) {
 	d, err := r.Route(ctx, el, req, c)
 	require.NoError(t, err)
 	require.NoError(t, d.Undecided)
-	assert.Equal(t, "claude-sonnet-5@low", d.OptionID)
+	assert.Equal(t, "claude-sonnet-5-5@low", d.OptionID)
 }

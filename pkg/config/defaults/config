@@ -105,12 +105,12 @@ efforts     = low, medium, high, xhigh, max
 description = For long-running agentic coding and knowledge work: multi-hour autonomous coding, large-scale refactoring, complex systems engineering, vision-heavy workflows. Recommended starting point for most workloads. Moderate latency; $4 / $20 per MTok.
 source      = https://platform.claude.com/docs/en/models/opus-5-5/overview
 
-[model.claude-sonnet-5]
+[model.claude-sonnet-5-5]
 cli         = claude
-name        = claude-sonnet-5
+name        = claude-sonnet-5-5
 efforts     = low, medium, high, xhigh, max
 description = Best combination of speed and intelligence. Everyday coding, code generation, data analysis, agentic tool use. Fast; $2 / $10 per MTok.
-source      = https://platform.claude.com/docs/en/models/sonnet-5/overview
+source      = https://platform.claude.com/docs/en/models/sonnet-5-5/overview
 
 [model.claude-haiku-4-5]
 cli         = claude
@@ -153,12 +153,12 @@ efforts     = low, medium, high, xhigh, max, ultra
 description = Frontier intelligence for the most demanding end-to-end reasoning, coding, computer use, research and documents, where quality and judgment dominate. $10 / $50 per MTok.
 source      = https://developers.openai.com/api/docs/models/gpt-6-astra
 
-[model.gpt-6-sol]
+[model.gpt-6.1-sol]
 cli         = codex
-name        = gpt-6-sol
+name        = gpt-6.1-sol
 efforts     = low, medium, high, xhigh, max, ultra
 description = Workhorse for complex coding and agent workflows; better factual reliability than 5.6 Sol. The capable everyday choice. $2 / $10 per MTok.
-source      = https://developers.openai.com/api/docs/models/gpt-6-sol
+source      = https://developers.openai.com/api/docs/models/gpt-6.1-sol
 
 [model.gpt-6-luna]
 cli         = codex

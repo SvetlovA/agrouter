@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,6 +24,34 @@ import (
 )
 
 var update = goflag.Bool("update", false, "rewrite golden files")
+
+// requestFixture keeps request-format goldens independent of the shipped catalog and defaults.
+func requestFixture(t *testing.T) (*config.Config, *catalog.Catalog) {
+	t.Helper()
+	cfg := &config.Config{
+		Agrouter: config.Agrouter{JevModel: "test-jev", Timeout: time.Second, MaxChunks: 4, ChunkParallel: 2,
+			RelevanceFloor: 0.1, Question: "Choose an option for state.", ChunkQuestion: "Choose an option for anchor and chunk.",
+			Relevance: "Does chunk add requirements beyond anchor?"},
+		CLIs: []config.CLI{
+			{Name: "alpha", Command: "alpha", Description: "Alpha agent."},
+			{Name: "beta", Command: "beta", Description: "Beta agent."},
+		},
+		Models: []config.Model{
+			{Section: "strong", CLI: "alpha", Name: "strong-model", Efforts: []string{"low", "high"}, Description: "Strong model."},
+			{Section: "fast", CLI: "alpha", Name: "fast-model", Description: "Fast model."},
+			{Section: "worker", CLI: "beta", Name: "worker-model", Efforts: []string{"low", "high"}, Description: "Worker model."},
+		},
+		Efforts: map[string]config.Effort{
+			"alpha.low":  {CLI: "alpha", Level: "low", Description: "Quick reasoning."},
+			"alpha.high": {CLI: "alpha", Level: "high", Description: "Deep reasoning."},
+			"beta.low":   {CLI: "beta", Level: "low", Description: "Quick reasoning."},
+			"beta.high":  {CLI: "beta", Level: "high", Description: "Deep reasoning."},
+		},
+	}
+	cat, err := catalog.Build(cfg)
+	require.NoError(t, err)
+	return cfg, cat
+}
 
 func newRouter(t *testing.T, cfg *config.Config, cat *catalog.Catalog, client JevClient) *Router {
 	t.Helper()
@@ -79,7 +108,7 @@ func TestRouteSingleOptionPassthrough(t *testing.T) {
 
 func TestRouteJevChoice(t *testing.T) {
 	cfg, cat := embedded(t)
-	client := answering("gpt-6-sol@medium")
+	client := answering("gpt-6.1-sol@medium")
 	r := newRouter(t, cfg, cat, client)
 
 	req := &args.Request{}
@@ -87,38 +116,38 @@ func TestRouteJevChoice(t *testing.T) {
 	d, err := r.Route(context.Background(), el, req, captured("fix it"))
 	require.NoError(t, err)
 	assert.Equal(t, "codex", d.CLI)
-	assert.Equal(t, "gpt-6-sol", d.Model)
+	assert.Equal(t, "gpt-6.1-sol", d.Model)
 	assert.Equal(t, "medium", d.Effort)
-	assert.Equal(t, "gpt-6-sol@medium", d.OptionID)
+	assert.Equal(t, "gpt-6.1-sol@medium", d.OptionID)
 	require.NotNil(t, d.Answer)
 	assert.InDelta(t, 0.9, d.Answer.Confidence, 1e-9)
 	require.NoError(t, d.Undecided)
 
 	require.Len(t, client.AskCalls(), 1)
 	sent := client.AskCalls()[0].Req
-	assert.Equal(t, "jev-latest", sent.Model)
+	assert.Equal(t, cfg.Agrouter.JevModel, sent.Model)
 	assert.Equal(t, prompt.State{Prompt: "fix it"}, sent.State)
 	assert.Equal(t, ids(el.Options), sent.Questions[questionRoute].Criteria.Names())
 }
 
 func TestRouteGoldenRequest(t *testing.T) {
-	cfg, cat := embedded(t)
+	cfg, cat := requestFixture(t)
 	tests := []struct {
 		name   string
 		req    *args.Request
 		choice string
 		enc    Encoding
 	}{
-		{name: "all", req: &args.Request{}, choice: "claude-haiku-4-5"},
-		{name: "full_cli_codex", req: &args.Request{CLI: "codex"}, choice: "gpt-6-sol@low", enc: EncodingFull},
-		{name: "full_effort_passthrough", req: &args.Request{CLI: "claude", Effort: "turbo", EffortSource: args.SourceFlag},
-			choice: "claude-haiku-4-5", enc: EncodingFull},
-		{name: "cli_claude", req: &args.Request{CLI: "claude"}, choice: "claude-haiku-4-5"},
-		{name: "effort_passthrough", req: &args.Request{CLI: "claude", Effort: "turbo", EffortSource: args.SourceFlag},
-			choice: "claude-haiku-4-5"},
-		{name: "model_passthrough", req: &args.Request{Model: "gpt-9", ModelSource: args.SourceFlag}, choice: "codex"},
-		{name: "full_model_passthrough", req: &args.Request{Model: "gpt-9", ModelSource: args.SourceFlag},
-			choice: "codex", enc: EncodingFull},
+		{name: "all", req: &args.Request{}, choice: "fast"},
+		{name: "full_cli_beta", req: &args.Request{CLI: "beta"}, choice: "worker@low", enc: EncodingFull},
+		{name: "full_effort_passthrough", req: &args.Request{CLI: "alpha", Effort: "turbo", EffortSource: args.SourceFlag},
+			choice: "fast", enc: EncodingFull},
+		{name: "cli_alpha", req: &args.Request{CLI: "alpha"}, choice: "fast"},
+		{name: "effort_passthrough", req: &args.Request{CLI: "alpha", Effort: "turbo", EffortSource: args.SourceFlag},
+			choice: "fast"},
+		{name: "model_passthrough", req: &args.Request{Model: "unknown-model", ModelSource: args.SourceFlag}, choice: "beta"},
+		{name: "full_model_passthrough", req: &args.Request{Model: "unknown-model", ModelSource: args.SourceFlag},
+			choice: "beta", enc: EncodingFull},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -155,7 +184,7 @@ func TestRouteQuestionContents(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "Q?", in.Question)
 	assert.Equal(t, []string{"claude"}, in.CLIs.Names(), "only the remaining CLIs")
-	assert.NotContains(t, in.Models.Names(), "gpt-6-sol")
+	assert.NotContains(t, in.Models.Names(), "gpt-6.1-sol")
 	assert.Equal(t, []string{"claude"}, in.Efforts.Names())
 	for _, c := range q.Criteria {
 		if c.Name == "claude-haiku-4-5" {
@@ -316,7 +345,7 @@ func TestRouteMalformedAnswers(t *testing.T) {
 		answers map[string]jev.Answer
 	}{
 		{name: "missing route answer", answers: map[string]jev.Answer{}},
-		{name: "choice outside the options", answers: map[string]jev.Answer{questionRoute: {Choice: "gpt-6-sol@high"}}},
+		{name: "choice outside the options", answers: map[string]jev.Answer{questionRoute: {Choice: "gpt-6.1-sol@high"}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
