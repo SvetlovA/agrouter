@@ -112,6 +112,35 @@ func TestState(t *testing.T) {
 	data, err = json.Marshal(r.State())
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "project doc", "docs are not routing state")
+
+	r.Project = &Project{Complexity: 0}
+	data, err = json.Marshal(r.State())
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"project":{"complexity":0}`, "a zero complexity is still sent")
+}
+
+func TestSplitWithProject(t *testing.T) {
+	b := Budget{State: 1_000, Chunk: 4_000 + MinStateTokens}
+	r := &Result{Prompt: lines("p", 10, 80), Files: []string{lines("f", 400, 80)}, Project: &Project{Complexity: 6.9}}
+	s, err := r.Split(b)
+	require.NoError(t, err)
+	checkSplit(t, r, b, s)
+	assert.Equal(t, &Project{Complexity: 6.9}, s.Anchor.Project, "every chunk repeats the project in the anchor")
+
+	// a prompt that overflows the anchor leaves the project in it, within the anchor share
+	r = &Result{Prompt: lines("p", 400, 80), Project: &Project{Complexity: 6.9}}
+	s, err = r.Split(b)
+	require.NoError(t, err)
+	checkSplit(t, r, b, s)
+	assert.Equal(t, &Project{Complexity: 6.9}, s.Anchor.Project)
+	assert.Contains(t, string(mustJSON(t, s.Anchor)), `"project":{"complexity":6.9}`)
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	data, err := json.Marshal(v)
+	require.NoError(t, err)
+	return data
 }
 
 // lines returns n numbered lines, each about width bytes.

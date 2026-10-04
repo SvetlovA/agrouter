@@ -55,18 +55,20 @@ func helper() int {
 	return code
 }
 
-// fakeJev answers every Choice with pick (which must be among the options sent) and every Noul with
-// 0.5, and records each request's state.
+// fakeJev answers every route Choice with pick (which must be among the options sent), a complexity
+// Choice (criteria without pick) with level, and every Noul with 0.5, and records each request's
+// state.
 type fakeJev struct {
 	t      *testing.T
 	mu     sync.Mutex
 	pick   string
+	level  string
 	states []string
 	srv    *httptest.Server
 }
 
 func newFakeJev(t *testing.T) *fakeJev {
-	f := &fakeJev{t: t}
+	f := &fakeJev{t: t, level: "7"}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.handle))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -88,7 +90,7 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	f.states = append(f.states, string(req.State))
-	pick := f.pick
+	pick, level := f.pick, f.level
 	f.mu.Unlock()
 
 	answers := map[string]any{}
@@ -101,11 +103,15 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 		for name := range q.Criteria {
 			probs[name] = 0
 		}
+		choice := pick
 		if _, ok := probs[pick]; !ok {
-			f.t.Errorf("fake jev: pick %q is not among the options sent", pick)
+			choice = level
 		}
-		probs[pick] = 1
-		answers[id] = map[string]any{"type": q.Type, "choice": pick, "probabilities": probs, "confidence": 0.9}
+		if _, ok := probs[choice]; !ok {
+			f.t.Errorf("fake jev: neither pick %q nor level %q is among the criteria sent", pick, level)
+		}
+		probs[choice] = 1
+		answers[id] = map[string]any{"type": q.Type, "choice": choice, "probabilities": probs, "confidence": 0.9}
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"model": req.Model, "answers": answers})
 }
@@ -582,17 +588,50 @@ func TestApp_Docs(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600))
 	}
 
-	t.Run("decision: docs are not in Jev's routing state, argv, or read for mentions", func(t *testing.T) {
+	t.Run("decision: docs are scored, then only their complexity reaches the routing state", func(t *testing.T) {
 		e := newEnv(t)
 		writeFile(t, e.workDir, "project.md", "DOC TEXT, see notes.md\n")
 		writeFile(t, e.workDir, "notes.md", "NOTES\n")
 		e.jev.pick = "claude-sonnet-5-5@low"
+		e.jev.level = "8"
 		r := e.run([]string{"--cli=claude", "--doc", "project.md", "fix it"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, []string{jevPrompt(t, "fix it")}, e.jev.requests())
+		assert.Equal(t, []string{
+			`{"docs":["DOC TEXT, see notes.md\n"]}`,
+			`{"prompt":"fix it","project":{"complexity":8}}`,
+		}, e.jev.requests(), "the docs are not read for mentions and not resent")
+		assert.Equal(t, "claude-sonnet-5-5", decision(t, r.stdout)["model"])
 		assert.NotContains(t, r.stdout, "DOC TEXT")
-		assert.NotContains(t, r.stdout, "NOTES")
+		assert.NotContains(t, r.stdout, "complexity", "the decision JSON is unchanged")
+	})
+
+	t.Run("decision: no docs, no complexity stage and no project", func(t *testing.T) {
+		e := newEnv(t)
+		e.jev.pick = "claude-sonnet-5-5@low"
+		r := e.run([]string{"--cli=claude", "fix it"}, nil)
+
+		require.Equal(t, 0, r.code, r.stderr)
+		assert.Equal(t, []string{jevPrompt(t, "fix it")}, e.jev.requests())
+	})
+
+	t.Run("decision: an empty doc has nothing to score", func(t *testing.T) {
+		e := newEnv(t)
+		writeFile(t, e.workDir, "empty.md", "")
+		e.jev.pick = "claude-sonnet-5-5@low"
+		r := e.run([]string{"--cli=claude", "--doc", "empty.md", "fix it"}, nil)
+
+		require.Equal(t, 0, r.code, r.stderr)
+		assert.Equal(t, []string{jevPrompt(t, "fix it")}, e.jev.requests())
+	})
+
+	t.Run("decision: one eligible option asks Jev nothing, docs or not", func(t *testing.T) {
+		e := newEnv(t)
+		writeFile(t, e.workDir, "project.md", "DOC TEXT\n")
+		r := e.run([]string{"--model=claude-opus-5-5", "--effort=high", "--doc", "project.md", "fix it"}, nil)
+
+		require.Equal(t, 0, r.code, r.stderr)
+		assert.Empty(t, e.jev.requests())
 	})
 
 	t.Run("exec: the child gets neither the docs nor their paths", func(t *testing.T) {

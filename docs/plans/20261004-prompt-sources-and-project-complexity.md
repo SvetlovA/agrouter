@@ -193,12 +193,13 @@ One compiling change: every caller and test of a removed API is updated in this 
 - Modify: `pkg/prompt/chunk.go`, `pkg/router/router.go`, `pkg/router/pool.go`, `pkg/config/defaults/config`, `cmd/agrouter/debug.go`
 - Modify: `pkg/router/router_test.go`, `pkg/router/pool_test.go`, `cmd/agrouter/debug_test.go`, `cmd/agrouter/app_test.go`, goldens in `pkg/router/testdata`
 
-- [ ] `State.Project` / `Anchor.Project`; `Route` runs stage 1 after the one-option bypass when docs have text, then sets the project on the single state or the anchor; the anchor size includes it
-- [ ] any stage-1 error → `cannotDecide`
-- [ ] reword `question` and `chunk_question` defaults: `project.complexity` (0-10, when present) is context about the codebase, judged against the specific task
-- [ ] debug output: stage-1 per-chunk score/evidence and the final complexity, no doc text
-- [ ] write tests: no `--doc` → requests byte-identical to before (golden), with `--doc` → `project.complexity` in single and chunk states (goldens), one eligible option → no Jev calls at all, stage-1 failure with one CLI left vs several, debug lines, end-to-end decision with `--doc` via `httptest` Jev
-- [ ] run tests - must pass before task 8
+- [x] `State.Project` / `Anchor.Project`; `Route` runs stage 1 after the one-option bypass when docs have text, then sets the project on the single state or the anchor; the anchor size includes it
+- [x] any stage-1 error → `cannotDecide`
+- [x] reword `question` and `chunk_question` defaults: `project.complexity` (0-10, when present) is context about the codebase, judged against the specific task
+- [x] debug output: stage-1 per-chunk score/evidence and the final complexity, no doc text
+- [x] write tests: no `--doc` → requests byte-identical to before (golden), with `--doc` → `project.complexity` in single and chunk states (goldens), one eligible option → no Jev calls at all, stage-1 failure with one CLI left vs several, debug lines, end-to-end decision with `--doc` via `httptest` Jev
+- [x] run tests - must pass before task 8
+- ➕ the project rides on `prompt.Result.Project` (set on a copy of the capture), so `State()` and `anchor()` include it and the anchor size counts it; an undecidable capture goes to `cannotDecide` before stage 1; `Decision.Complexity` is kept when stage 2 fails, for debug; goldens `request_project.json` and `request_chunk_project.json`
 
 ### Task 8: Eval cases for project complexity
 

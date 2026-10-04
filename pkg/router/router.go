@@ -62,6 +62,9 @@ type Decision struct {
 	Answer *jev.Answer
 	// Pooled is how a split state was decided, for debug output; nil unless it was split.
 	Pooled *Pooled
+	// Complexity is how the docs were scored, for debug output; nil unless the complexity stage ran
+	// to completion.
+	Complexity *ComplexityResult
 }
 
 // outcome is what Jev decided: the option, with the single answer or the pooled chunks.
@@ -77,26 +80,40 @@ func (d Decision) Choice() args.Choice {
 }
 
 // Route decides among el's options for the captured prompt. With one option Jev is not asked. When
-// Jev cannot decide, the CLI is used with only the caller's fixed --model and --effort if it is
-// known (one CLI left); otherwise Route returns an error matching ErrCannotDecide.
+// the docs have text, the complexity stage scores them first and the routing state carries the
+// project complexity. When Jev cannot decide, in either stage, the CLI is used with only the
+// caller's fixed --model and --effort if it is known (one CLI left); otherwise Route returns an
+// error matching ErrCannotDecide.
 func (r *Router) Route(ctx context.Context, el *Eligibility, req *args.Request, captured *prompt.Result) (Decision, error) {
 	if len(el.Options) == 1 {
 		return r.chosen(el, el.Options[0], nil), nil
 	}
+	if captured.Undecidable != nil {
+		return r.cannotDecide(el, req, captured.Undecidable)
+	}
+	var cx *ComplexityResult
+	if captured.HasDocs() {
+		var err error
+		if cx, err = r.complexity(ctx, captured); err != nil {
+			return r.cannotDecide(el, req, fmt.Errorf("complexity stage: %w", err))
+		}
+		withProject := *captured
+		withProject.Project = &prompt.Project{Complexity: cx.Complexity}
+		captured = &withProject
+	}
 	out, err := r.decide(ctx, el, captured)
 	if err != nil {
-		return r.cannotDecide(el, req, err)
+		d, policyErr := r.cannotDecide(el, req, err)
+		d.Complexity = cx
+		return d, policyErr
 	}
 	d := r.chosen(el, out.option, out.answer)
-	d.Pooled = out.pooled
+	d.Pooled, d.Complexity = out.pooled, cx
 	return d, nil
 }
 
 // decide sends the state whole when it fits, and otherwise one request per chunk, pooled.
 func (r *Router) decide(ctx context.Context, el *Eligibility, captured *prompt.Result) (outcome, error) {
-	if captured.Undecidable != nil {
-		return outcome{}, captured.Undecidable
-	}
 	split, err := captured.Split(r.budget)
 	if err != nil {
 		return outcome{}, fmt.Errorf("split the state: %w", err)

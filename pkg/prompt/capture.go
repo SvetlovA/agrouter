@@ -70,6 +70,9 @@ type Result struct {
 	// Docs are the --doc contents, in order: routing context only, never in the routing state, the
 	// child's argv or stdin, and not scanned for mentions.
 	Docs []string
+	// Project is what the docs say about the codebase, set by the router after the complexity stage;
+	// nil without docs. It goes in the single state and in the anchor of every chunk state.
+	Project *Project
 	// Undecidable is why Jev cannot decide from this capture (the routing context's error); Prompt,
 	// Files and Attachments are then empty, and Stdin still replays everything.
 	Undecidable error

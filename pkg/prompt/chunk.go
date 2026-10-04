@@ -20,16 +20,22 @@ var ErrAttachmentsOverAnchor = errors.New("attachments over their anchor share")
 // minFileShare is the least anchor room, in bytes, worth giving one file's head and tail.
 const minFileShare = 64
 
+// Project is context about the codebase the task runs in.
+type Project struct {
+	Complexity float64 `json:"complexity"` // 0 to 10, from the docs
+}
+
 // State is the state of a single Jev request.
 type State struct {
 	Prompt      string       `json:"prompt"`
 	Files       []string     `json:"files,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
+	Project     *Project     `json:"project,omitempty"`
 }
 
 // State returns the captured prompt as a single request's state.
 func (r *Result) State() State {
-	return State{Prompt: r.Prompt, Files: r.Files, Attachments: r.Attachments}
+	return State{Prompt: r.Prompt, Files: r.Files, Attachments: r.Attachments, Project: r.Project}
 }
 
 // Excerpt is text in the anchor: a whole field (Whole), or the head and tail of a longer one.
@@ -55,6 +61,7 @@ type Anchor struct {
 	Attachments []Attachment `json:"attachments,omitempty"`
 	Prompt      *Excerpt     `json:"prompt,omitempty"`
 	Files       []Excerpt    `json:"files,omitempty"`
+	Project     *Project     `json:"project,omitempty"`
 }
 
 // Chunk is one part of the text not kept whole in the anchor.
@@ -158,7 +165,7 @@ func halveText(text string) []string {
 // reports whether the prompt is whole in it.
 func (r *Result) anchor() (Anchor, bool, error) {
 	limit := AnchorTokens * bytesPerToken
-	var a Anchor
+	a := Anchor{Project: r.Project}
 	if len(r.Attachments) > 0 {
 		a.Attachments = r.Attachments
 		if Tokens(mustLen(a.Attachments)) > attachmentShare {

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -103,6 +105,20 @@ func TestDebug_SingleOption(t *testing.T) {
 	assert.Empty(t, e.jev.requests())
 }
 
+func TestDebug_Docs(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv(envDebug, "1")
+	require.NoError(t, os.WriteFile(filepath.Join(e.workDir, "project.md"), []byte("SECRET DOC TEXT\n"), 0o600))
+	e.jev.pick = "claude-sonnet-5-5@low"
+	r := e.run([]string{"--cli=claude", "--doc", "project.md", "fix it"}, nil)
+	require.Equal(t, 0, r.code, r.stderr)
+
+	lines := debugLines(r.stderr)
+	assert.Contains(t, lines, "doc 1/1: score 7.000, evidence 0.500")
+	assert.Contains(t, lines, "project complexity: 7.0")
+	assert.NotContains(t, r.stderr, "SECRET DOC TEXT")
+}
+
 func TestDebugLog(t *testing.T) {
 	t.Run("nil prints nothing", func(t *testing.T) {
 		var l *debugLog
@@ -136,6 +152,19 @@ agrouter debug: model: passed through
 agrouter debug: effort: passed through
 agrouter debug: chunk prompt 1/2: relevance 0.800, top [b 0.600, a 0.400]
 agrouter debug: pooled: choice b, top [b 0.550]
+`, buf.String())
+	})
+
+	t.Run("complexity before the routing outcome", func(t *testing.T) {
+		var buf bytes.Buffer
+		newDebugLog("1", &buf).decision(router.Decision{CLI: "made-up", Undecided: errors.New("boom"),
+			Complexity: &router.ComplexityResult{Complexity: 6.9, Chunks: []router.DocScore{
+				{Index: 1, Of: 2, Score: 8.25, Evidence: 0.9}, {Index: 2, Of: 2, Score: 1, Evidence: 0.1},
+			}}})
+		assert.Equal(t, `agrouter debug: doc 1/2: score 8.250, evidence 0.900
+agrouter debug: doc 2/2: score 1.000, evidence 0.100
+agrouter debug: project complexity: 6.9
+agrouter debug: jev failed: boom; running made-up with the caller's fixed values
 `, buf.String())
 	})
 
