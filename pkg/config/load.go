@@ -234,6 +234,10 @@ func (s *section) decodeAgrouter(a *Agrouter) error {
 			a.ChunkQuestion = e.value
 		case "relevance":
 			a.Relevance = e.value
+		case "complexity_question":
+			a.ComplexityQuestion = e.value
+		case "complexity_evidence":
+			a.ComplexityEvidence = e.value
 		default:
 			return s.unknownKey(k)
 		}

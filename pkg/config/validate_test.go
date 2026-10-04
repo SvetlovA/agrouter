@@ -20,6 +20,12 @@ func TestValidate_Violations(t *testing.T) {
 		want  []string // substrings of the error
 	}{
 		{
+			name:  "empty complexity questions",
+			local: "[agrouter]\ncomplexity_question =\ncomplexity_evidence = \" \"\n",
+			want: []string{"[agrouter] complexity_question: must not be empty",
+				"[agrouter] complexity_evidence: must not be empty"},
+		},
+		{
 			name:  "empty command",
 			local: "[cli.beta]\ncommand =\n",
 			want:  []string{"[cli.beta] command: must not be empty"},

@@ -18,6 +18,10 @@ question  = Which coding-agent CLI, model and reasoning effort should run the ta
 chunk_question = Which coding-agent CLI, model and reasoning effort should run the task described by `anchor` and `chunk.text` together (`anchor.attachments` lists images, PDFs and other non-text inputs the task includes, by type and size only), where `chunk.text` is one part of a longer input? Judge each option as a whole: the model and effort together must be strong enough to complete the task well, at the lowest cost and time that achieves that. Look up each option's `model` in `models` and its `cli` and `effort` in `efforts`.
 # the relevance question asked beside chunk_question
 relevance = Does the text in `chunk.text` state the task to perform, its requirements, or what makes it hard, beyond what `anchor` already says?
+# the complexity stage, asked of the --doc text only (never the prompt) when --doc is given:
+# a score from 0 to 10 for the project the docs describe, and whether the text is evidence for it at all
+complexity_question = How complex is the project that the docs in `state` describe (`docs`, or `doc.text` when it is one part of longer docs)? Judge the codebase as a whole: its size, architecture, dependencies and constraints, not any single task in it. Pick the level whose description fits the project best.
+complexity_evidence = Does the text in `state` (`docs` or `doc.text`) say anything about the project's size, architecture, dependencies or constraints?
 
 [cli.claude]
 command      = claude

@@ -163,12 +163,13 @@ One compiling change: every caller and test of a removed API is updated in this 
 - Modify: `pkg/config/validate_test.go`, `pkg/prompt/chunk_test.go`
 - Create: `pkg/router/question_test.go` (if absent), golden `pkg/router/testdata/request_complexity*.json`
 
-- [ ] config keys `complexity_question` and `complexity_evidence` (non-empty), with default texts in `defaults/config`
-- [ ] `complexityQuestion`: Choice over `"0"`..`"10"` with anchored descriptions as constants in `question.go`; `evidenceQuestion`: Noul with true/false criteria
-- [ ] `Budget.Doc` from both question sizes; over-budget → config error
-- [ ] `SplitDocs(b)`: one state when all docs fit, else doc chunks cut on lines/UTF-8; `HalveDoc` for 422s (or a shared halving helper)
-- [ ] write tests: budget derivation and over-budget error, single vs split doc states, every doc state within `Budget.Doc`, golden requests for a single and a chunked doc request
-- [ ] run tests - must pass before task 6
+- [x] config keys `complexity_question` and `complexity_evidence` (non-empty), with default texts in `defaults/config`
+- [x] `complexityQuestion`: Choice over `"0"`..`"10"` with anchored descriptions as constants in `question.go`; `evidenceQuestion`: Noul with true/false criteria
+- [x] `Budget.Doc` from both question sizes; over-budget → config error
+- [x] `SplitDocs(b)`: one state when all docs fit, else doc chunks cut on lines/UTF-8; `HalveDoc` for 422s (or a shared halving helper)
+- [x] write tests: budget derivation and over-budget error, single vs split doc states, every doc state within `Budget.Doc`, golden requests for a single and a chunked doc request
+- [x] run tests - must pass before task 6
+- ➕ `SplitDocs` returns nil when the docs fit; `DocChunks(tokens)` cuts unconditionally, for the whole-docs 422 split at half of `Budget.Doc` in Task 6; `complexityQuestions(ag)` builds both doc questions; `DocChunk.Doc` (not serialized) keeps the doc index
 
 ### Task 6: Complexity stage: map, reduce and failure policy
 

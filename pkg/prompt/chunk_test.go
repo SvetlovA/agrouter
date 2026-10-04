@@ -21,9 +21,27 @@ func TestTokens(t *testing.T) {
 
 func TestNewBudget(t *testing.T) {
 	t.Run("from the questions", func(t *testing.T) {
-		b, err := NewBudget(Questions{Route: 3000, ChunkRoute: 6000, Relevance: 300})
+		b, err := NewBudget(Questions{Route: 3000, ChunkRoute: 6000, Relevance: 300, Complexity: 1500, Evidence: 900})
 		require.NoError(t, err)
-		assert.Equal(t, Budget{State: 29_000, Chunk: 28_000}, b)
+		assert.Equal(t, Budget{State: 29_000, Chunk: 28_000, Doc: 29_500}, b)
+	})
+	t.Run("longest doc question sets the doc budget", func(t *testing.T) {
+		b, err := NewBudget(Questions{Complexity: 300, Evidence: 9000})
+		require.NoError(t, err)
+		assert.Equal(t, 27_000, b.Doc)
+	})
+	t.Run("doc state plus both doc questions within 64k", func(t *testing.T) {
+		b, err := NewBudget(Questions{Complexity: 60_000, Evidence: 60_000})
+		require.NoError(t, err)
+		assert.LessOrEqual(t, b.Doc+20_000+20_000, totalLimit)
+		assert.LessOrEqual(t, b.Doc+20_000, stateLimit)
+	})
+	t.Run("doc questions over budget", func(t *testing.T) {
+		_, err := NewBudget(Questions{Complexity: 84_003})
+		require.ErrorIs(t, err, ErrQuestionsOverBudget)
+		assert.Contains(t, err.Error(), "complexity_question and complexity_evidence leave 1999 tokens for the doc state")
+		_, err = NewBudget(Questions{Complexity: 84_000})
+		require.NoError(t, err)
 	})
 	t.Run("longest chunk question sets the chunk budget", func(t *testing.T) {
 		b, err := NewBudget(Questions{ChunkRoute: 300, Relevance: 9000})

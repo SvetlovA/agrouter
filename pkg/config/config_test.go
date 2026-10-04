@@ -17,6 +17,8 @@ api_key   =
 jev_model = jev-latest
 timeout   = 10s
 question  = Which option? Look up ` + "`models`" + `; answer "well".
+complexity_question = How complex is the project?
+complexity_evidence = Does the text describe the project?
 
 [cli.alpha]
 command     = alpha
@@ -93,10 +95,12 @@ func TestLoad_Embedded(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, Agrouter{
-		APIKeySource: LayerEmbedded,
-		JevModel:     "jev-latest",
-		Timeout:      10 * time.Second,
-		Question:     "Which option? Look up `models`; answer \"well\".",
+		APIKeySource:       LayerEmbedded,
+		JevModel:           "jev-latest",
+		Timeout:            10 * time.Second,
+		Question:           "Which option? Look up `models`; answer \"well\".",
+		ComplexityQuestion: "How complex is the project?",
+		ComplexityEvidence: "Does the text describe the project?",
 	}, cfg.Agrouter)
 
 	require.Len(t, cfg.CLIs, 2)

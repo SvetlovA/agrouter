@@ -31,7 +31,9 @@ func requestFixture(t *testing.T) (*config.Config, *catalog.Catalog) {
 	cfg := &config.Config{
 		Agrouter: config.Agrouter{JevModel: "test-jev", Timeout: time.Second,
 			Question: "Choose an option for state.", ChunkQuestion: "Choose an option for anchor and chunk.",
-			Relevance: "Does chunk add requirements beyond anchor?"},
+			Relevance:          "Does chunk add requirements beyond anchor?",
+			ComplexityQuestion: "Rate the project the docs describe.",
+			ComplexityEvidence: "Does the text describe the project?"},
 		CLIs: []config.CLI{
 			{Name: "alpha", Command: "alpha", Description: "Alpha agent."},
 			{Name: "beta", Command: "beta", Description: "Beta agent."},
@@ -221,7 +223,7 @@ func TestFullEncodingCriteria(t *testing.T) {
 
 func TestNewQuestionOverBudget(t *testing.T) {
 	long := strings.Repeat("x", 100_000)
-	for _, key := range []string{"question", "chunk_question", "relevance"} {
+	for _, key := range []string{"question", "chunk_question", "relevance", "complexity_question", "complexity_evidence"} {
 		t.Run(key, func(t *testing.T) {
 			local := filepath.Join(t.TempDir(), "config")
 			require.NoError(t, os.WriteFile(local, fmt.Appendf(nil, "[agrouter]\n%s = %s\n", key, long), 0o600))
@@ -244,6 +246,8 @@ func TestNewBudgetFromWholeCatalog(t *testing.T) {
 	assert.Positive(t, b.State)
 	assert.Less(t, b.State, 30_000)
 	assert.Positive(t, b.Chunk)
+	assert.GreaterOrEqual(t, b.Doc, prompt.MinStateTokens)
+	assert.Less(t, b.Doc, 30_000)
 }
 
 func TestRouteCannotDecide(t *testing.T) {

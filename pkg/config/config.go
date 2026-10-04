@@ -30,6 +30,9 @@ type Agrouter struct {
 	Question      string
 	ChunkQuestion string
 	Relevance     string
+	// ComplexityQuestion and ComplexityEvidence are asked of the --doc text in the complexity stage.
+	ComplexityQuestion string
+	ComplexityEvidence string
 }
 
 // CLI is a [cli.<name>] section together with its [cli.<name>.args] mappings.

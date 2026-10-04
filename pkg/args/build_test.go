@@ -330,6 +330,8 @@ timeout         = 10s
 question        = Which option?
 chunk_question  = Which option for this chunk?
 relevance       = Is this chunk relevant?
+complexity_question = How complex is the project?
+complexity_evidence = Does the text describe the project?
 
 [cli.zeta]
 command     = zeta-agent

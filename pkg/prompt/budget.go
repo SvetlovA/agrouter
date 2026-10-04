@@ -32,22 +32,27 @@ type Questions struct {
 	Route      int // the single request's route question, catalog included
 	ChunkRoute int // a chunk request's route question, catalog included
 	Relevance  int // a chunk request's relevance question
+	Complexity int // a doc request's complexity question
+	Evidence   int // a doc request's evidence question
 }
 
 // Budget is how many tokens the state may take in each kind of request.
 type Budget struct {
 	State int // the single request's state
 	Chunk int // a chunk request's state: anchor, chunk envelope and chunk text
+	Doc   int // a doc request's state: the docs whole, or one doc chunk in its envelope
 }
 
 // NewBudget derives the state budgets from the question sizes: the single state gets 30k minus the
 // route question; a chunk state gets 30k minus the longer chunk question, and no more than leaves
-// the state plus both questions within 64k. It returns ErrQuestionsOverBudget when the single state,
-// or a chunk state beside a maximal anchor, would get less than MinStateTokens.
+// the state plus both questions within 64k; a doc state likewise beside the complexity and evidence
+// questions. It returns ErrQuestionsOverBudget when the single state, a chunk state beside a maximal
+// anchor, or a doc state would get less than MinStateTokens.
 func NewBudget(q Questions) (Budget, error) {
 	b := Budget{
 		State: stateLimit - Tokens(q.Route),
-		Chunk: min(stateLimit-Tokens(max(q.ChunkRoute, q.Relevance)), totalLimit-Tokens(q.ChunkRoute)-Tokens(q.Relevance)),
+		Chunk: pairBudget(q.ChunkRoute, q.Relevance),
+		Doc:   pairBudget(q.Complexity, q.Evidence),
 	}
 	var errs []error
 	if b.State < MinStateTokens {
@@ -56,7 +61,16 @@ func NewBudget(q Questions) (Budget, error) {
 	if left := b.Chunk - AnchorTokens; left < MinStateTokens {
 		errs = append(errs, fmt.Errorf("%w: chunk_question and relevance leave %d tokens beside the anchor, need %d", ErrQuestionsOverBudget, left, MinStateTokens))
 	}
+	if b.Doc < MinStateTokens {
+		errs = append(errs, fmt.Errorf("%w: complexity_question and complexity_evidence leave %d tokens for the doc state, need %d", ErrQuestionsOverBudget, b.Doc, MinStateTokens))
+	}
 	return b, errors.Join(errs...)
+}
+
+// pairBudget is the state budget beside two questions of a and b serialized bytes: 30k minus the
+// longer one, and no more than leaves the state plus both within 64k.
+func pairBudget(a, b int) int {
+	return min(stateLimit-Tokens(max(a, b)), totalLimit-Tokens(a)-Tokens(b))
 }
 
 // indexDigits is the decimal width reserved for a chunk's index and for its count: the widest int,
@@ -69,6 +83,13 @@ func chunkRoom(b Budget, anchorLen int) int {
 	// {"anchor":<anchor>,"chunk":{"field":"prompt","index":N,"of":N,"text":"<text>"}}
 	envelope := len(`{"anchor":,"chunk":{"field":"prompt","index":,"of":,"text":""}}`) + 2*indexDigits
 	return b.Chunk*bytesPerToken - anchorLen - envelope
+}
+
+// docRoom is the escaped doc text, in bytes, that fits in a doc chunk state of tokens.
+func docRoom(tokens int) int {
+	// {"doc":{"index":N,"of":N,"text":"<text>"}}
+	envelope := len(`{"doc":{"index":,"of":,"text":""}}`) + 2*indexDigits
+	return tokens*bytesPerToken - envelope
 }
 
 // jsonLen is the length of s once encoded as a JSON string by encoding/json, without the quotes.

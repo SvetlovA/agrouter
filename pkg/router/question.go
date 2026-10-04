@@ -3,6 +3,7 @@ package router
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/SvetlovA/agrouter/pkg/catalog"
 	"github.com/SvetlovA/agrouter/pkg/config"
@@ -12,8 +13,10 @@ import (
 
 // Question ids in a Jev request.
 const (
-	questionRoute     = "route"
-	questionRelevance = "relevance"
+	questionRoute      = "route"
+	questionRelevance  = "relevance"
+	questionComplexity = "complexity"
+	questionEvidence   = "complexity_evidence"
 )
 
 // Encoding selects how the catalog goes into the route question.
@@ -49,6 +52,28 @@ const (
 const (
 	relevanceTrue  = "`chunk.text` adds to what the task is, what it requires, or what makes it hard"
 	relevanceFalse = "`chunk.text` is only material the task works on, or repeats `anchor`"
+)
+
+// Complexity levels of a doc request's complexity question, "0" to "10" in order, each anchored by a
+// short description so the scale means the same in every request.
+var complexityLevels = [...]string{
+	"a snippet or a single file: no architecture, dependencies or constraints to speak of",
+	"a small script or one-off tool",
+	"a small single-purpose utility or library of a few files",
+	"a small application with a handful of modules and common dependencies",
+	"a moderate codebase: several packages, a build and test setup, conventions to follow",
+	"a medium application with several components, integrations and documented conventions",
+	"a larger codebase with a layered architecture, many dependencies and cross-cutting rules",
+	"a multi-service or multi-platform system with integration points and compatibility constraints",
+	"a large production system with strict invariants and performance, security or concurrency constraints",
+	"a large enterprise system: many modules and teams, legacy and compliance constraints, a wide blast radius",
+	"a very large, critical system where almost any change needs deep cross-system understanding",
+}
+
+// Evidence criteria of a doc request.
+const (
+	evidenceTrue  = "the text describes the project's size, architecture, dependencies or constraints"
+	evidenceFalse = "the text is only style rules, workflow instructions or other content that says nothing about the project itself"
 )
 
 // routeCriterion is one option's criterion in the compact encoding.
@@ -133,6 +158,32 @@ func relevanceQuestion(text string) jev.Question {
 	}}
 }
 
+// complexityQuestion is the Choice over the complexity levels asked in every doc request.
+func complexityQuestion(text string) jev.Question {
+	criteria := make(jev.Criteria, len(complexityLevels))
+	for i, desc := range complexityLevels {
+		criteria[i] = jev.Criterion{Name: strconv.Itoa(i), Value: desc}
+	}
+	return jev.Question{Type: jev.TypeChoice, Instructions: text, Criteria: criteria}
+}
+
+// evidenceQuestion is the Noul asked beside the complexity question: whether the doc text says
+// anything about the project, so the reduce weighs chunks by it.
+func evidenceQuestion(text string) jev.Question {
+	return jev.Question{Type: jev.TypeNoul, Instructions: text, Criteria: jev.Criteria{
+		{Name: "true", Value: evidenceTrue},
+		{Name: "false", Value: evidenceFalse},
+	}}
+}
+
+// complexityQuestions are the questions of every doc request.
+func complexityQuestions(ag config.Agrouter) map[string]jev.Question {
+	return map[string]jev.Question{
+		questionComplexity: complexityQuestion(ag.ComplexityQuestion),
+		questionEvidence:   evidenceQuestion(ag.ComplexityEvidence),
+	}
+}
+
 func modelDescription(models map[string]config.Model, o catalog.Option) string {
 	if m, ok := models[o.Name]; ok {
 		return m.Description
@@ -173,10 +224,12 @@ func budget(cfg *config.Config, cat *catalog.Catalog, enc Encoding) (prompt.Budg
 		Route:      questionLen(questionRoute, routeQuestion(cfg, ag.Question, cat.Options, "", enc)),
 		ChunkRoute: questionLen(questionRoute, routeQuestion(cfg, ag.ChunkQuestion, cat.Options, "", enc)),
 		Relevance:  questionLen(questionRelevance, relevanceQuestion(ag.Relevance)),
+		Complexity: questionLen(questionComplexity, complexityQuestion(ag.ComplexityQuestion)),
+		Evidence:   questionLen(questionEvidence, evidenceQuestion(ag.ComplexityEvidence)),
 	}
 	b, err := prompt.NewBudget(sizes)
 	if err != nil {
-		return b, fmt.Errorf("config: [agrouter] question, chunk_question or relevance: %w", err)
+		return b, fmt.Errorf("config: [agrouter] question, chunk_question, relevance, complexity_question or complexity_evidence: %w", err)
 	}
 	return b, nil
 }

@@ -16,6 +16,8 @@ import (
 const catalogConfig = `
 [agrouter]
 timeout = 10s
+complexity_question = How complex?
+complexity_evidence = Is it evidence?
 
 [cli.alpha]
 command = alpha
