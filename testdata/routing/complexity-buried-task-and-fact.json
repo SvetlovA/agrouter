@@ -1,0 +1,21 @@
+{
+  "description": "the task sits mid-way through long meeting notes (--prompt-file) and the fact that makes it hard (audited, idempotent partner retries in shared code) mid-way through a long handbook doc",
+  "prompt_file": "complexity-buried.txt",
+  "docs": [
+    {
+      "file": "complexity-buried-doc.md"
+    }
+  ],
+  "acceptable": [
+    "claude-opus-5-5@medium",
+    "claude-opus-5-5@high",
+    "claude-opus-5-5@xhigh",
+    "claude-fable-5-1@medium",
+    "claude-fable-5-1@high",
+    "claude-sonnet-5-5@high",
+    "gpt-6-astra@high",
+    "gpt-6-astra@xhigh",
+    "gpt-6.1-sol@high",
+    "gpt-6.1-sol@xhigh"
+  ]
+}

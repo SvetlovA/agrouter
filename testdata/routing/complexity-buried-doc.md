@@ -1,0 +1,168 @@
+# Handbook
+
+## Glossary
+- Term 1: an internal name for on-call handover, kept for historical reasons.
+- Term 2: an internal name for the design review backlog, kept for historical reasons.
+- Term 3: an internal name for office move logistics, kept for historical reasons.
+- Term 4: an internal name for the hiring pipeline, kept for historical reasons.
+- Term 5: an internal name for the quarterly survey, kept for historical reasons.
+- Term 6: an internal name for the lunch-and-learn schedule, kept for historical reasons.
+- Term 7: an internal name for dashboard colors, kept for historical reasons.
+- Term 8: an internal name for the wiki cleanup, kept for historical reasons.
+- Term 9: an internal name for meeting room bookings, kept for historical reasons.
+- Term 10: an internal name for the release calendar, kept for historical reasons.
+- Term 11: an internal name for on-call handover, kept for historical reasons.
+- Term 12: an internal name for the design review backlog, kept for historical reasons.
+- Term 13: an internal name for office move logistics, kept for historical reasons.
+- Term 14: an internal name for the hiring pipeline, kept for historical reasons.
+- Term 15: an internal name for the quarterly survey, kept for historical reasons.
+- Term 16: an internal name for the lunch-and-learn schedule, kept for historical reasons.
+- Term 17: an internal name for dashboard colors, kept for historical reasons.
+- Term 18: an internal name for the wiki cleanup, kept for historical reasons.
+- Term 19: an internal name for meeting room bookings, kept for historical reasons.
+- Term 20: an internal name for the release calendar, kept for historical reasons.
+- Term 21: an internal name for on-call handover, kept for historical reasons.
+- Term 22: an internal name for the design review backlog, kept for historical reasons.
+- Term 23: an internal name for office move logistics, kept for historical reasons.
+- Term 24: an internal name for the hiring pipeline, kept for historical reasons.
+- Term 25: an internal name for the quarterly survey, kept for historical reasons.
+- Term 26: an internal name for the lunch-and-learn schedule, kept for historical reasons.
+- Term 27: an internal name for dashboard colors, kept for historical reasons.
+- Term 28: an internal name for the wiki cleanup, kept for historical reasons.
+- Term 29: an internal name for meeting room bookings, kept for historical reasons.
+- Term 30: an internal name for the release calendar, kept for historical reasons.
+- Term 31: an internal name for on-call handover, kept for historical reasons.
+- Term 32: an internal name for the design review backlog, kept for historical reasons.
+- Term 33: an internal name for office move logistics, kept for historical reasons.
+- Term 34: an internal name for the hiring pipeline, kept for historical reasons.
+- Term 35: an internal name for the quarterly survey, kept for historical reasons.
+- Term 36: an internal name for the lunch-and-learn schedule, kept for historical reasons.
+- Term 37: an internal name for dashboard colors, kept for historical reasons.
+- Term 38: an internal name for the wiki cleanup, kept for historical reasons.
+- Term 39: an internal name for meeting room bookings, kept for historical reasons.
+- Term 40: an internal name for the release calendar, kept for historical reasons.
+- Term 41: an internal name for on-call handover, kept for historical reasons.
+- Term 42: an internal name for the design review backlog, kept for historical reasons.
+- Term 43: an internal name for office move logistics, kept for historical reasons.
+- Term 44: an internal name for the hiring pipeline, kept for historical reasons.
+- Term 45: an internal name for the quarterly survey, kept for historical reasons.
+- Term 46: an internal name for the lunch-and-learn schedule, kept for historical reasons.
+- Term 47: an internal name for dashboard colors, kept for historical reasons.
+- Term 48: an internal name for the wiki cleanup, kept for historical reasons.
+- Term 49: an internal name for meeting room bookings, kept for historical reasons.
+- Term 50: an internal name for the release calendar, kept for historical reasons.
+- Term 51: an internal name for on-call handover, kept for historical reasons.
+- Term 52: an internal name for the design review backlog, kept for historical reasons.
+- Term 53: an internal name for office move logistics, kept for historical reasons.
+- Term 54: an internal name for the hiring pipeline, kept for historical reasons.
+- Term 55: an internal name for the quarterly survey, kept for historical reasons.
+- Term 56: an internal name for the lunch-and-learn schedule, kept for historical reasons.
+- Term 57: an internal name for dashboard colors, kept for historical reasons.
+- Term 58: an internal name for the wiki cleanup, kept for historical reasons.
+- Term 59: an internal name for meeting room bookings, kept for historical reasons.
+- Term 60: an internal name for the release calendar, kept for historical reasons.
+- Term 61: an internal name for on-call handover, kept for historical reasons.
+- Term 62: an internal name for the design review backlog, kept for historical reasons.
+- Term 63: an internal name for office move logistics, kept for historical reasons.
+- Term 64: an internal name for the hiring pipeline, kept for historical reasons.
+- Term 65: an internal name for the quarterly survey, kept for historical reasons.
+- Term 66: an internal name for the lunch-and-learn schedule, kept for historical reasons.
+- Term 67: an internal name for dashboard colors, kept for historical reasons.
+- Term 68: an internal name for the wiki cleanup, kept for historical reasons.
+- Term 69: an internal name for meeting room bookings, kept for historical reasons.
+- Term 70: an internal name for the release calendar, kept for historical reasons.
+- Term 71: an internal name for on-call handover, kept for historical reasons.
+- Term 72: an internal name for the design review backlog, kept for historical reasons.
+- Term 73: an internal name for office move logistics, kept for historical reasons.
+- Term 74: an internal name for the hiring pipeline, kept for historical reasons.
+- Term 75: an internal name for the quarterly survey, kept for historical reasons.
+- Term 76: an internal name for the lunch-and-learn schedule, kept for historical reasons.
+- Term 77: an internal name for dashboard colors, kept for historical reasons.
+- Term 78: an internal name for the wiki cleanup, kept for historical reasons.
+- Term 79: an internal name for meeting room bookings, kept for historical reasons.
+- Term 80: an internal name for the release calendar, kept for historical reasons.
+- Term 81: an internal name for on-
+## Outbound calls
+`client/partner.go` talks to 30+ bank and card-network partners. Each partner contract fixes the retry count, backoff and idempotency key; retrying a non-idempotent capture twice is a financial incident, and retry behavior is part of the PCI DSS audit. `client/notify.go` and `client/partner.go` are imported by all 42 services of the monorepo.
+
+## Glossary (continued)
+call handover, kept for historical reasons.
+- Term 82: an internal name for the design review backlog, kept for historical reasons.
+- Term 83: an internal name for office move logistics, kept for historical reasons.
+- Term 84: an internal name for the hiring pipeline, kept for historical reasons.
+- Term 85: an internal name for the quarterly survey, kept for historical reasons.
+- Term 86: an internal name for the lunch-and-learn schedule, kept for historical reasons.
+- Term 87: an internal name for dashboard colors, kept for historical reasons.
+- Term 88: an internal name for the wiki cleanup, kept for historical reasons.
+- Term 89: an internal name for meeting room bookings, kept for historical reasons.
+- Term 90: an internal name for the release calendar, kept for historical reasons.
+- Term 91: an internal name for on-call handover, kept for historical reasons.
+- Term 92: an internal name for the design review backlog, kept for historical reasons.
+- Term 93: an internal name for office move logistics, kept for historical reasons.
+- Term 94: an internal name for the hiring pipeline, kept for historical reasons.
+- Term 95: an internal name for the quarterly survey, kept for historical reasons.
+- Term 96: an internal name for the lunch-and-learn schedule, kept for historical reasons.
+- Term 97: an internal name for dashboard colors, kept for historical reasons.
+- Term 98: an internal name for the wiki cleanup, kept for historical reasons.
+- Term 99: an internal name for meeting room bookings, kept for historical reasons.
+- Term 100: an internal name for the release calendar, kept for historical reasons.
+- Term 101: an internal name for on-call handover, kept for historical reasons.
+- Term 102: an internal name for the design review backlog, kept for historical reasons.
+- Term 103: an internal name for office move logistics, kept for historical reasons.
+- Term 104: an internal name for the hiring pipeline, kept for historical reasons.
+- Term 105: an internal name for the quarterly survey, kept for historical reasons.
+- Term 106: an internal name for the lunch-and-learn schedule, kept for historical reasons.
+- Term 107: an internal name for dashboard colors, kept for historical reasons.
+- Term 108: an internal name for the wiki cleanup, kept for historical reasons.
+- Term 109: an internal name for meeting room bookings, kept for historical reasons.
+- Term 110: an internal name for the release calendar, kept for historical reasons.
+- Term 111: an internal name for on-call handover, kept for historical reasons.
+- Term 112: an internal name for the design review backlog, kept for historical reasons.
+- Term 113: an internal name for office move logistics, kept for historical reasons.
+- Term 114: an internal name for the hiring pipeline, kept for historical reasons.
+- Term 115: an internal name for the quarterly survey, kept for historical reasons.
+- Term 116: an internal name for the lunch-and-learn schedule, kept for historical reasons.
+- Term 117: an internal name for dashboard colors, kept for historical reasons.
+- Term 118: an internal name for the wiki cleanup, kept for historical reasons.
+- Term 119: an internal name for meeting room bookings, kept for historical reasons.
+- Term 120: an internal name for the release calendar, kept for historical reasons.
+- Term 121: an internal name for on-call handover, kept for historical reasons.
+- Term 122: an internal name for the design review backlog, kept for historical reasons.
+- Term 123: an internal name for office move logistics, kept for historical reasons.
+- Term 124: an internal name for the hiring pipeline, kept for historical reasons.
+- Term 125: an internal name for the quarterly survey, kept for historical reasons.
+- Term 126: an internal name for the lunch-and-learn schedule, kept for historical reasons.
+- Term 127: an internal name for dashboard colors, kept for historical reasons.
+- Term 128: an internal name for the wiki cleanup, kept for historical reasons.
+- Term 129: an internal name for meeting room bookings, kept for historical reasons.
+- Term 130: an internal name for the release calendar, kept for historical reasons.
+- Term 131: an internal name for on-call handover, kept for historical reasons.
+- Term 132: an internal name for the design review backlog, kept for historical reasons.
+- Term 133: an internal name for office move logistics, kept for historical reasons.
+- Term 134: an internal name for the hiring pipeline, kept for historical reasons.
+- Term 135: an internal name for the quarterly survey, kept for historical reasons.
+- Term 136: an internal name for the lunch-and-learn schedule, kept for historical reasons.
+- Term 137: an internal name for dashboard colors, kept for historical reasons.
+- Term 138: an internal name for the wiki cleanup, kept for historical reasons.
+- Term 139: an internal name for meeting room bookings, kept for historical reasons.
+- Term 140: an internal name for the release calendar, kept for historical reasons.
+- Term 141: an internal name for on-call handover, kept for historical reasons.
+- Term 142: an internal name for the design review backlog, kept for historical reasons.
+- Term 143: an internal name for office move logistics, kept for historical reasons.
+- Term 144: an internal name for the hiring pipeline, kept for historical reasons.
+- Term 145: an internal name for the quarterly survey, kept for historical reasons.
+- Term 146: an internal name for the lunch-and-learn schedule, kept for historical reasons.
+- Term 147: an internal name for dashboard colors, kept for historical reasons.
+- Term 148: an internal name for the wiki cleanup, kept for historical reasons.
+- Term 149: an internal name for meeting room bookings, kept for historical reasons.
+- Term 150: an internal name for the release calendar, kept for historical reasons.
+- Term 151: an internal name for on-call handover, kept for historical reasons.
+- Term 152: an internal name for the design review backlog, kept for historical reasons.
+- Term 153: an internal name for office move logistics, kept for historical reasons.
+- Term 154: an internal name for the hiring pipeline, kept for historical reasons.
+- Term 155: an internal name for the quarterly survey, kept for historical reasons.
+- Term 156: an internal name for the lunch-and-learn schedule, kept for historical reasons.
+- Term 157: an internal name for dashboard colors, kept for historical reasons.
+- Term 158: an internal name for the wiki cleanup, kept for historical reasons.
+- Term 159: an internal name for meeting room bookings, kept for historical reasons.
+- Term 160: an internal name for the release calendar, kept for historical reasons.

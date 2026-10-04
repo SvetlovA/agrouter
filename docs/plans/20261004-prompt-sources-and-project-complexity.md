@@ -207,10 +207,11 @@ One compiling change: every caller and test of a removed API is updated in this 
 - Modify: `pkg/router/evalcase_test.go`, `pkg/router/evalcase_load_test.go`
 - Create: `testdata/routing/complexity-*.json`
 
-- [ ] case format gains `docs` (inline text or files beside the case) and `prompt_file`
-- [ ] cases: same refactor task with a small-script doc vs an enterprise doc (different acceptable sets); a trivial typo fix in an enterprise repo; a style-rules-only doc; task and the relevant doc fact both buried mid-text; a doc describing an unrelated module
-- [ ] write tests for loading the new fields (untagged, against the mock)
-- [ ] run tests - must pass before task 9
+- [x] case format gains `docs` (inline text or files beside the case) and `prompt_file`
+- [x] cases: same refactor task with a small-script doc vs an enterprise doc (different acceptable sets); a trivial typo fix in an enterprise repo; a style-rules-only doc; task and the relevant doc fact both buried mid-text; a doc describing an unrelated module
+- [x] write tests for loading the new fields (untagged, against the mock)
+- [x] run tests - must pass before task 9
+- ➕ `docs` is a list of `{"text"}` or `{"file"}` entries; `prompt_file` and doc files are read with `prompt.ReadTextFile` (strict, like the CLI); results report `project N.N` per case; `evalMock` answers the complexity Choice with its last level
 
 ### Task 9: Verify acceptance criteria
 - [ ] verify all requirements from Overview are implemented

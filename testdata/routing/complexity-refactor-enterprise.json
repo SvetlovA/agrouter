@@ -1,0 +1,21 @@
+{
+  "description": "the same retry refactor in a 42-service payments monorepo where retries are audited and must stay idempotent (contrast with complexity-refactor-small-script)",
+  "prompt": "Replace the hand-written retry loops around the outbound HTTP calls with one shared retry helper (exponential backoff with jitter, honoring Retry-After) and use it in every place that retries today.",
+  "docs": [
+    {
+      "file": "complexity-enterprise.md"
+    }
+  ],
+  "acceptable": [
+    "claude-opus-5-5@medium",
+    "claude-opus-5-5@high",
+    "claude-opus-5-5@xhigh",
+    "claude-fable-5-1@medium",
+    "claude-fable-5-1@high",
+    "claude-sonnet-5-5@high",
+    "gpt-6-astra@high",
+    "gpt-6-astra@xhigh",
+    "gpt-6.1-sol@high",
+    "gpt-6.1-sol@xhigh"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "description": "a doc with style rules only says nothing about size: the task alone decides",
+  "prompt": "Add a --dry-run flag to the sync command in sync.py that prints the files it would copy and delete without touching them.",
+  "docs": [
+    {
+      "file": "complexity-style-only.md"
+    },
+    {
+      "text": "Run the formatter before committing.\n"
+    }
+  ],
+  "acceptable": [
+    "claude-sonnet-5-5@low",
+    "claude-sonnet-5-5@medium",
+    "claude-sonnet-5-5@high",
+    "gpt-6-luna@medium",
+    "gpt-6.1-sol@low",
+    "gpt-6.1-sol@medium",
+    "claude-opus-5-5@low"
+  ]
+}

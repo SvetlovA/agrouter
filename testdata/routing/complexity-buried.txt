@@ -1,0 +1,246 @@
+# Weekly sync notes
+
+- Item 1: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 2: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 3: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 4: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 5: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 6: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 7: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 8: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 9: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 10: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 11: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 12: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 13: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 14: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 15: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 16: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 17: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 18: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 19: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 20: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 21: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 22: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 23: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 24: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 25: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 26: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 27: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 28: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 29: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 30: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 31: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 32: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 33: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 34: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 35: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 36: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 37: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 38: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 39: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 40: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 41: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 42: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 43: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 44: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 45: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 46: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 47: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 48: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 49: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 50: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 51: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 52: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 53: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 54: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 55: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 56: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 57: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 58: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 59: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 60: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 61: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 62: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 63: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 64: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 65: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 66: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 67: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 68: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 69: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 70: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 71: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 72: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 73: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 74: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 75: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 76: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 77: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 78: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 79: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 80: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 81: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 82: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 83: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 84: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 85: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 86: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 87: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 88: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 89: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 90: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 91: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 92: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 93: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 94: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 95: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 96: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 97: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 98: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 99: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 100: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 101: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 102: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 103: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 104: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 105: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 106: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 107: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 108: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 109: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 110: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 111: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 112: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 113: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 114: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 115: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 116: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 117: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 118: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 119: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 120: discussed the release calendar; no decision needed, follow up next week if anything changes.
+
+## Action item for the agent
+Replace the hand-written retry loops around outbound HTTP calls in `client/notify.go` and `client/partner.go` with one shared retry helper (exponential backoff with jitter, honoring Retry-After), and use it in both places.
+
+- Item 121: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 122: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 123: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 124: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 125: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 126: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 127: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 128: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 129: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 130: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 131: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 132: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 133: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 134: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 135: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 136: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 137: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 138: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 139: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 140: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 141: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 142: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 143: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 144: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 145: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 146: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 147: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 148: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 149: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 150: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 151: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 152: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 153: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 154: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 155: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 156: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 157: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 158: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 159: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 160: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 161: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 162: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 163: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 164: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 165: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 166: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 167: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 168: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 169: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 170: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 171: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 172: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 173: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 174: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 175: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 176: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 177: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 178: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 179: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 180: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 181: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 182: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 183: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 184: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 185: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 186: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 187: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 188: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 189: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 190: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 191: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 192: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 193: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 194: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 195: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 196: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 197: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 198: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 199: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 200: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 201: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 202: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 203: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 204: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 205: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 206: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 207: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 208: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 209: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 210: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 211: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 212: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 213: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 214: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 215: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 216: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 217: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 218: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 219: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 220: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 221: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 222: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 223: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 224: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 225: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 226: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 227: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 228: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 229: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 230: discussed the release calendar; no decision needed, follow up next week if anything changes.
+- Item 231: discussed on-call handover; no decision needed, follow up next week if anything changes.
+- Item 232: discussed the design review backlog; no decision needed, follow up next week if anything changes.
+- Item 233: discussed office move logistics; no decision needed, follow up next week if anything changes.
+- Item 234: discussed the hiring pipeline; no decision needed, follow up next week if anything changes.
+- Item 235: discussed the quarterly survey; no decision needed, follow up next week if anything changes.
+- Item 236: discussed the lunch-and-learn schedule; no decision needed, follow up next week if anything changes.
+- Item 237: discussed dashboard colors; no decision needed, follow up next week if anything changes.
+- Item 238: discussed the wiki cleanup; no decision needed, follow up next week if anything changes.
+- Item 239: discussed meeting room bookings; no decision needed, follow up next week if anything changes.
+- Item 240: discussed the release calendar; no decision needed, follow up next week if anything changes.

@@ -1,0 +1,19 @@
+{
+  "description": "a one-word typo fix stays trivial in an enterprise codebase",
+  "prompt": "fix the typo 'recieve' -> 'receive' in README.md",
+  "files": {
+    "README.md": "# payments\n\nCall recieve() to get the next settlement message.\n"
+  },
+  "docs": [
+    {
+      "file": "complexity-enterprise.md"
+    }
+  ],
+  "acceptable": [
+    "claude-haiku-4-5",
+    "claude-sonnet-5-5@low",
+    "gpt-6-luna@low",
+    "gpt-6-luna@medium",
+    "gpt-6.1-sol@low"
+  ]
+}
