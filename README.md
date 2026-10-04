@@ -11,7 +11,7 @@ The full specification is [`docs/design.md`](docs/design.md).
 
 ## Install
 
-Requires Go 1.26 or later. Exec mode also needs the chosen CLI (`claude`, `codex`) on `PATH`; otherwise agrouter exits `127`.
+Requires Go 1.27 or later. Exec mode also needs the chosen CLI (`claude`, `codex`) on `PATH`; otherwise agrouter exits `127`.
 
 ```sh
 go install github.com/SvetlovA/agrouter/cmd/agrouter@latest

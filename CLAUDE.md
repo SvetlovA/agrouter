@@ -1,6 +1,6 @@
 # agrouter
 
-Go CLI that asks TypeSafe's Jev which `(cli, model, effort)` should run a prompt, then prints the decision or runs the chosen CLI. Module `github.com/SvetlovA/agrouter`, Go 1.26, dependencies vendored.
+Go CLI that asks TypeSafe's Jev which `(cli, model, effort)` should run a prompt, then prints the decision or runs the chosen CLI. Module `github.com/SvetlovA/agrouter`, Go 1.27, dependencies vendored.
 
 ## Spec
 

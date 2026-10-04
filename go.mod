@@ -1,6 +1,6 @@
 module github.com/SvetlovA/agrouter
 
-go 1.26.0
+go 1.27.0
 
 require (
 	github.com/jessevdk/go-flags v1.6.1
