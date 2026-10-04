@@ -42,8 +42,8 @@ func (r *Result) ReadMentions(ctx context.Context, cwd string) error {
 
 // mentions reads the files one prompt mentions.
 type mentions struct {
-	ctx       context.Context
-	wd        *workdir        // working directory files are opened through
+	ctx   context.Context
+	wd    *workdir        // working directory files are opened through
 	cwd   string          // working directory as given, made absolute
 	tried map[string]bool // candidate spellings already tried
 	seen  map[string]bool // canonical paths already read (case-folded on Windows)
@@ -107,7 +107,7 @@ func (m *mentions) try(name string) (bool, error) {
 // readFile sniffs one mentioned file and adds it as text or as an attachment. Only text is read past
 // the sniffed prefix, to EOF.
 func (m *mentions) readFile(f io.Reader, size int64) error {
-	buf, eof, err := m.readUpTo(f, nil, SniffLen)
+	buf, eof, err := readUpTo(m.ctx, f, nil, SniffLen)
 	if err != nil {
 		return m.split(err)
 	}
@@ -116,7 +116,7 @@ func (m *mentions) readFile(f io.Reader, size int64) error {
 		return nil
 	}
 	if !eof {
-		if buf, _, err = m.readUpTo(f, buf, -1); err != nil {
+		if buf, _, err = readUpTo(m.ctx, f, buf, -1); err != nil {
 			return m.split(err)
 		}
 	}
@@ -142,11 +142,11 @@ func (m *mentions) split(err error) error {
 }
 
 // readUpTo appends reads from f to buf until it holds n bytes (n < 0: to EOF) or f ends, checking
-// the routing context between reads. It reports whether f ended.
-func (m *mentions) readUpTo(f io.Reader, buf []byte, n int64) ([]byte, bool, error) {
+// ctx between reads. It reports whether f ended.
+func readUpTo(ctx context.Context, f io.Reader, buf []byte, n int64) ([]byte, bool, error) {
 	for n < 0 || int64(len(buf)) < n {
-		if err := m.ctx.Err(); err != nil {
-			return buf, false, err //nolint:wrapcheck // sorted and wrapped by mentions.split
+		if err := ctx.Err(); err != nil {
+			return buf, false, err //nolint:wrapcheck // wrapped by the caller
 		}
 		size := int64(readSize)
 		if n >= 0 {

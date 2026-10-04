@@ -9,6 +9,9 @@ import (
 	"syscall"
 )
 
+// openReadFlags opens a file for reading without blocking, so a FIFO without a writer does not hang.
+const openReadFlags = os.O_RDONLY | syscall.O_NONBLOCK
+
 // workdir is the working directory mentioned files are read from: its canonical path, for checks, and
 // an os.Root opened on it, through which every file is opened.
 type workdir struct {
@@ -58,7 +61,7 @@ func (w *workdir) open(path string) (*os.File, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("%s: %w", canon, err)
 	}
-	f, err := w.dir.OpenFile(rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	f, err := w.dir.OpenFile(rel, openReadFlags, 0)
 	if err != nil {
 		return nil, "", fmt.Errorf("open %s: %w", canon, err)
 	}

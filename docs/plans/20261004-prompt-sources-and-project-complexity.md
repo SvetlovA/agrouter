@@ -124,10 +124,10 @@ One compiling change: every caller and test of a removed API is updated in this 
 **Files:**
 - Create: `pkg/prompt/file.go`, `pkg/prompt/file_test.go`
 
-- [ ] `ReadTextFile(ctx, cwd, path string) (string, error)`: resolve relative to cwd, require a regular file, read under ctx, reject binary content (reuse `detect.go`), wrap errors with the path
-- [ ] sentinel errors for missing / not a regular file / binary, so the CLI can say which flag failed
-- [ ] write tests: text file read exactly (bytes unchanged, CRLF kept), relative and absolute paths, missing, directory, binary, unreadable (Unix-only case behind the build tag)
-- [ ] run tests - must pass before task 3
+- [x] `ReadTextFile(ctx, cwd, path string) (string, error)`: resolve relative to cwd, require a regular file, read under ctx, reject binary content (reuse `detect.go`), wrap errors with the path
+- [x] sentinel errors for missing / not a regular file / binary, so the CLI can say which flag failed
+- [x] write tests: text file read exactly (bytes unchanged, CRLF kept), relative and absolute paths, missing, directory, binary, unreadable (Unix-only case behind the build tag)
+- [x] run tests - must pass before task 3
 
 ### Task 3: -p, --prompt-file and positional/stdin prompt sources
 

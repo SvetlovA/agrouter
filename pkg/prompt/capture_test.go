@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-
 var (
 	pngBytes  = append([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"), bytes.Repeat([]byte{0xAB}, 64)...)
 	jpegBytes = append([]byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00"), bytes.Repeat([]byte{0x01}, 64)...)

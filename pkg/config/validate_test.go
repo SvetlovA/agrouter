@@ -146,4 +146,3 @@ func TestValidate_Allowed(t *testing.T) {
 		})
 	}
 }
-
