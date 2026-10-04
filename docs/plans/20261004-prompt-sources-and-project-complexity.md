@@ -135,12 +135,13 @@ One compiling change: every caller and test of a removed API is updated in this 
 - Modify: `cmd/agrouter/flags.go`, `pkg/args/request.go`, `pkg/prompt/capture.go`, `cmd/agrouter/app.go`
 - Modify: `cmd/agrouter/flags_test.go`, `pkg/prompt/capture_test.go`, `cmd/agrouter/app_test.go`
 
-- [ ] replace `-p/--print` with `-p, --prompt TEXT`; add `--prompt-file PATH`; a second `-p` or `--prompt-file` is a usage error; update usage line and help text
-- [ ] `args.Request` carries the `-p` text, positional text and prompt-file path separately; `app` reads the file (Task 2) before capture; usage error names `--prompt-file`
-- [ ] `Capture` takes the explicit texts (in order: `-p`, positional, file) and joins them with stdin text by `"\n\n"`; `ErrNoPrompt` when everything is empty; the error text names all four sources
-- [ ] `{prompt}` gets `-p` + positional + file text only; stdin is replayed, never in argv
-- [ ] write tests: each source alone, all four together (order pinned), empty `-p ""` with stdin, all empty → exit 2, repeated flags → exit 2, `-p --model x` rejected, bad `--prompt-file` → exit 2, argv contents for a native helper, a Windows `.cmd` shim with a prompt file containing a newline → exit 127 (Windows build tag)
-- [ ] run tests - must pass before task 4
+- [x] replace `-p/--print` with `-p, --prompt TEXT`; add `--prompt-file PATH`; a second `-p` or `--prompt-file` is a usage error; update usage line and help text
+- [x] `args.Request` carries the `-p` text, positional text and prompt-file path separately; `app` reads the file (Task 2) before capture; usage error names `--prompt-file`
+- [x] `Capture` takes the explicit texts (in order: `-p`, positional, file) and joins them with stdin text by `"\n\n"`; `ErrNoPrompt` when everything is empty; the error text names all four sources
+- [x] `{prompt}` gets `-p` + positional + file text only; stdin is replayed, never in argv
+- [x] write tests: each source alone, all four together (order pinned), empty `-p ""` with stdin, all empty → exit 2, repeated flags → exit 2, `-p --model x` rejected, bad `--prompt-file` → exit 2, argv contents for a native helper, a Windows `.cmd` shim with a prompt file containing a newline → exit 127 (Windows build tag)
+- [x] run tests - must pass before task 4
+- ➕ `--print` stays as a long-only no-op: ralphex's Claude mode passes it with the prompt on stdin, so only `-p` changes meaning (README update in Task 10)
 
 ### Task 4: --doc flag and docs in the captured result
 

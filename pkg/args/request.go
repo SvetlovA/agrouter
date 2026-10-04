@@ -2,6 +2,8 @@
 // the [cli.*.args] templates. Parsing the command line stays in cmd/agrouter.
 package args
 
+import "github.com/SvetlovA/agrouter/pkg/prompt"
+
 // Mode selects what agrouter does with its decision.
 type Mode int
 
@@ -45,6 +47,21 @@ type Request struct {
 	EffortSource Source
 	EffortSpell  string   // how the caller gave the effort constraint, for a warning when the CLI cannot map it
 	Args         []Arg    // mapped arguments in the caller's order
+	PromptFlag   Optional // -p, --prompt
 	Prompt       Optional // the positional prompt
+	PromptFile   Optional // --prompt-file path, as given
+	FileText     string   // the --prompt-file contents, read by the caller before capture
 	Raw          []string // tokens after the first "--", passed through only with --cli
+}
+
+// Explicit returns the prompt texts given on the command line, in prompt order: -p, the positional
+// prompt, then the --prompt-file contents. Stdin is not among them.
+func (r *Request) Explicit() []string {
+	return []string{r.PromptFlag.Value, r.Prompt.Value, r.FileText}
+}
+
+// ArgvPrompt is the {prompt} text: the explicit texts joined like the prompt Jev sees, without stdin,
+// which the child gets replayed instead.
+func (r *Request) ArgvPrompt() string {
+	return prompt.Join(r.Explicit()...)
 }

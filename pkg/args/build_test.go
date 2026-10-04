@@ -236,6 +236,9 @@ func TestBuildPrompt(t *testing.T) {
 	assert.Equal(t, []string{"alpha", "-p"}, res.Argv, "{prompt} dropped to zero tokens")
 	res = Build(alpha, &Request{Prompt: Optional{Set: true}}, Choice{})
 	assert.Equal(t, []string{"alpha", "-p"}, res.Argv, "an empty prompt is never an empty token")
+	res = Build(alpha, &Request{PromptFlag: Optional{Set: true}, Prompt: Optional{Set: true}, PromptFile: Optional{Value: "f", Set: true}},
+		Choice{})
+	assert.Equal(t, []string{"alpha", "-p"}, res.Argv, "empty sources and the file path never reach argv")
 
 	// prompt at the end through the prompt key
 	beta.Args = cloneArgs(beta.Args)
@@ -245,6 +248,29 @@ func TestBuildPrompt(t *testing.T) {
 		Raw: []string{"--search"}}, Choice{Model: "worker-model", Effort: "high", Pinned: true})
 	assert.Equal(t, []string{"beta", "exec", "--json", "--model", "worker-model", "-c", `model_reasoning_effort="high"`,
 		prompt, "--search"}, res.Argv)
+}
+
+func TestBuildPromptSources(t *testing.T) {
+	alpha := fixtureCLI(t, "alpha")
+	tests := []struct {
+		name string
+		req  Request
+		want string
+	}{
+		{"-p only", Request{PromptFlag: Optional{Value: "flag", Set: true}}, "flag"},
+		{"file only", Request{PromptFile: Optional{Value: "task.md", Set: true}, FileText: "file\r\n"}, "file\r\n"},
+		{"all three in order", Request{PromptFlag: Optional{Value: "flag", Set: true}, Prompt: Optional{Value: "pos", Set: true},
+			PromptFile: Optional{Value: "task.md", Set: true}, FileText: "file"}, "flag\n\npos\n\nfile"},
+		{"empty -p skipped", Request{PromptFlag: Optional{Set: true}, FileText: "file"}, "file"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			res := Build(alpha, &tc.req, Choice{})
+			assert.Equal(t, []string{"alpha", "-p", tc.want}, res.Argv, "one {prompt} token, without the file path")
+			assert.Equal(t, tc.want, tc.req.ArgvPrompt())
+			assert.Equal(t, "alpha -p <prompt>", res.Redacted())
+		})
+	}
 }
 
 func TestBuildModelAndEffort(t *testing.T) {

@@ -1,5 +1,6 @@
-// Package prompt builds the state agrouter sends to Jev from the positional prompt, stdin and the
-// files the prompt mentions, and keeps stdin for the child byte-for-byte.
+// Package prompt builds the state agrouter sends to Jev from the explicit prompt texts (-p, the
+// positional prompt, --prompt-file), stdin and the files the prompt mentions, and keeps stdin for the
+// child byte-for-byte.
 package prompt
 
 import (
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
 
 // Sources of an attachment.
@@ -20,8 +22,22 @@ const (
 // readSize is the size of one read from stdin.
 const readSize = 32 << 10
 
-// ErrNoPrompt means neither a positional prompt nor stdin was given; the caller exits 2.
-var ErrNoPrompt = errors.New("no prompt: give a positional prompt or stdin")
+// ErrNoPrompt means every prompt source was empty; the caller exits 2.
+var ErrNoPrompt = errors.New("no prompt: give -p, a positional prompt, --prompt-file or stdin")
+
+// sourceSep joins the prompt sources.
+const sourceSep = "\n\n"
+
+// Join joins the non-empty texts, in order, with a blank line. Bytes are kept as they are.
+func Join(texts ...string) string {
+	kept := make([]string, 0, len(texts))
+	for _, t := range texts {
+		if t != "" {
+			kept = append(kept, t)
+		}
+	}
+	return strings.Join(kept, sourceSep)
+}
 
 // Attachment is the metadata of one binary input: never its content or name.
 type Attachment struct {
@@ -47,7 +63,7 @@ func (s *Stdin) Reader() io.Reader {
 
 // Result is the captured prompt.
 type Result struct {
-	Prompt      string       // Jev's prompt: positional, stdin text, or both joined by "\n\n"
+	Prompt      string       // Jev's prompt: the explicit texts, then stdin text, joined by Join
 	Files       []string     // contents of the text files the prompt mentions (ReadMentions)
 	Attachments []Attachment // binary stdin and binary mentioned files, if any
 	Stdin       *Stdin       // nil when there was no stdin
@@ -70,9 +86,10 @@ func StdinOf(f *os.File) io.Reader {
 }
 
 // Capture reads stdin (nil for none) to EOF under ctx, with no size limit, and builds Jev's prompt
-// from it and the positional prompt. It returns ErrNoPrompt when there is neither a positional prompt
-// nor any stdin byte, and an error when stdin cannot be read.
-func Capture(ctx context.Context, positional string, stdin io.Reader) (*Result, error) {
+// from the explicit texts (-p, positional, --prompt-file, in that order) followed by stdin text. It
+// returns ErrNoPrompt when every explicit text is empty and there is no stdin byte, and an error when
+// stdin cannot be read.
+func Capture(ctx context.Context, explicit []string, stdin io.Reader) (*Result, error) {
 	res := &Result{}
 	c := &capturer{ctx: ctx, eof: true}
 	if stdin != nil {
@@ -91,21 +108,17 @@ func Capture(ctx context.Context, positional string, stdin io.Reader) (*Result, 
 			return res, nil //nolint:nilerr // undecidable is recorded in res, not returned
 		}
 	}
-	if positional == "" && len(c.buf) == 0 {
+	given := Join(explicit...)
+	if given == "" && len(c.buf) == 0 {
 		return nil, ErrNoPrompt
 	}
 
-	switch {
-	case c.binary:
-		res.Prompt = positional
+	if c.binary {
+		res.Prompt = given
 		res.Attachments = []Attachment{{Source: SourceStdin, Type: c.mediaType, Bytes: c.size}}
-	case positional == "":
-		res.Prompt = string(c.buf)
-	case len(c.buf) == 0:
-		res.Prompt = positional
-	default:
-		res.Prompt = positional + "\n\n" + string(c.buf)
+		return res, nil
 	}
+	res.Prompt = Join(given, string(c.buf))
 	return res, nil
 }
 

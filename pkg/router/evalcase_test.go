@@ -154,7 +154,7 @@ func runEvalCase(ctx context.Context, r *Router, cfg *config.Config, cat *catalo
 	if c.Stdin != "" {
 		stdin = strings.NewReader(c.Stdin)
 	}
-	captured, err := prompt.Capture(ctx, c.Prompt, stdin)
+	captured, err := prompt.Capture(ctx, []string{c.Prompt}, stdin)
 	if err != nil {
 		return fail(fmt.Errorf("capture: %w", err))
 	}

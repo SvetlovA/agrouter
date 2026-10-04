@@ -491,6 +491,135 @@ func TestApp_Errors(t *testing.T) {
 	})
 }
 
+// jevPrompt is the Jev state for a prompt alone.
+func jevPrompt(t *testing.T, p string) string {
+	t.Helper()
+	data, err := json.Marshal(map[string]string{"prompt": p})
+	require.NoError(t, err)
+	return string(data)
+}
+
+func TestApp_PromptSources(t *testing.T) {
+	writeFile := func(t *testing.T, dir, name, content string) {
+		t.Helper()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600))
+	}
+
+	t.Run("each source alone", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			argv     []string
+			stdin    string
+			wantJev  string
+			wantArgv []any
+		}{
+			{"-p", []string{"-p", "from flag"}, "", "from flag", strs("claude", "-p", "from flag")},
+			{"positional", []string{"from positional"}, "", "from positional", strs("claude", "-p", "from positional")},
+			{"prompt file", []string{"--prompt-file", "task.md"}, "", "from file\r\n", strs("claude", "-p", "from file\r\n")},
+			{"stdin", nil, "from stdin", "from stdin", strs("claude", "-p")},
+			{"empty -p with stdin", []string{"-p", ""}, "from stdin", "from stdin", strs("claude", "-p")},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				e := newEnv(t)
+				writeFile(t, e.workDir, "task.md", "from file\r\n")
+				e.jev.pick = "claude-sonnet-5-5@low"
+				var stdin io.Reader
+				if tc.stdin != "" {
+					stdin = strings.NewReader(tc.stdin)
+				}
+				r := e.run(append([]string{"--cli=claude"}, tc.argv...), stdin)
+
+				require.Equal(t, 0, r.code, r.stderr)
+				assert.Equal(t, []string{jevPrompt(t, tc.wantJev)}, e.jev.requests())
+				d := decision(t, r.stdout)
+				assert.Equal(t, tc.wantArgv, d["argv"].([]any)[:len(tc.wantArgv)])
+			})
+		}
+	})
+
+	t.Run("all four in order: Jev sees every source, argv no stdin", func(t *testing.T) {
+		e := newEnv(t)
+		writeFile(t, e.workDir, "task.md", "file text\n")
+		e.jev.pick = "claude-sonnet-5-5@low"
+		r := e.run([]string{"--prompt-file=task.md", "positional text", "--cli=claude", "-p", "flag text"},
+			strings.NewReader("stdin text"))
+
+		require.Equal(t, 0, r.code, r.stderr)
+		assert.Equal(t, []string{jevPrompt(t, "flag text\n\npositional text\n\nfile text\n\n\nstdin text")}, e.jev.requests())
+		assert.Equal(t, strs("claude", "-p", "flag text\n\npositional text\n\nfile text\n",
+			"--model", "claude-sonnet-5-5", "--effort", "low"), decision(t, r.stdout)["argv"])
+	})
+
+	t.Run("a prompt file mentioning a file sends its contents", func(t *testing.T) {
+		e := newEnv(t)
+		writeFile(t, e.workDir, "task.md", "follow notes.md")
+		writeFile(t, e.workDir, "notes.md", "use opus\n")
+		e.jev.pick = "claude-sonnet-5-5@low"
+		r := e.run([]string{"--cli=claude", "--prompt-file", "task.md"}, nil)
+
+		require.Equal(t, 0, r.code, r.stderr)
+		assert.Equal(t, []string{`{"prompt":"follow notes.md","files":["use opus\n"]}`}, e.jev.requests())
+	})
+
+	t.Run("exec: native child gets the explicit prompt in argv and stdin replayed", func(t *testing.T) {
+		e := newEnv(t)
+		e.fakeCommands()
+		writeFile(t, e.workDir, "task.md", "line one\nline two\n")
+		r := e.run([]string{"exec", "--cli=claude", "--model=opus", "--effort=low", "-p", "flag", "--prompt-file", "task.md"},
+			strings.NewReader("piped\r\n"))
+
+		require.Equal(t, 0, r.code, r.stderr)
+		argv, stdin, _ := e.child()
+		assert.Equal(t, []string{"-p", "flag\n\nline one\nline two\n", "--model", "claude-opus-5-5", "--effort", "low"}, argv)
+		assert.Equal(t, "piped\r\n", string(stdin))
+	})
+}
+
+func TestApp_PromptSourceErrors(t *testing.T) {
+	oneLine := func(t *testing.T, r result, prefix string) {
+		t.Helper()
+		assert.Equal(t, 2, r.code)
+		assert.Empty(t, r.stdout)
+		assert.Equal(t, 1, strings.Count(r.stderr, "\n"), r.stderr)
+		assert.True(t, strings.HasPrefix(r.stderr, prefix), r.stderr)
+	}
+	// model and effort fixed leave one eligible option: a bad prompt file still fails, though Jev is not asked
+	pinned := []string{"exec", "--cli=claude", "--model=opus", "--effort=low"}
+
+	tests := []struct {
+		name   string
+		argv   []string
+		stdin  io.Reader
+		prefix string
+	}{
+		{"all empty", []string{"-p", "", ""}, strings.NewReader(""), "agrouter: no prompt: give -p, a positional prompt, --prompt-file or stdin"},
+		{"second -p", []string{"-p", "a", "-p", "b"}, nil, "agrouter: -p/--prompt given more than once"},
+		{"second --prompt-file", []string{"--prompt-file", "task.md", "--prompt-file", "task.md"}, nil,
+			"agrouter: --prompt-file given more than once"},
+		{"-p swallowing a flag", []string{"-p", "--model", "x"}, nil, "agrouter: expected argument"},
+		{"missing prompt file", append(slices.Clone(pinned), "--prompt-file", "nope.md"), nil,
+			"agrouter: --prompt-file: nope.md: no such file"},
+		{"directory prompt file", append(slices.Clone(pinned), "--prompt-file", "sub"), nil,
+			"agrouter: --prompt-file: sub: not a regular file"},
+		{"binary prompt file", append(slices.Clone(pinned), "--prompt-file", "blob.bin", "fix it"), nil,
+			"agrouter: --prompt-file: blob.bin: binary file"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.fakeCommands()
+			require.NoError(t, os.WriteFile(filepath.Join(e.workDir, "task.md"), []byte("x"), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(e.workDir, "blob.bin"), []byte{0x89, 'P', 'N', 'G', 0, 0, 1}, 0o600))
+			require.NoError(t, os.Mkdir(filepath.Join(e.workDir, "sub"), 0o700))
+
+			oneLine(t, e.run(tc.argv, tc.stdin), tc.prefix)
+			assert.Empty(t, e.jev.requests())
+			assert.NoFileExists(t, filepath.Join(e.out, "argv.json"), "the child must not run")
+		})
+	}
+}
+
 func TestApp_ExecSelectionBeforeChild(t *testing.T) {
 	e := newEnv(t)
 	e.globalConfig(madeUpConfig(t, "acme", "test-child", "large", "future-model", "thorough"))

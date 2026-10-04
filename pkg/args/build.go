@@ -36,7 +36,7 @@ type Result struct {
 // not map, or maps to [], is skipped with a warning; arguments hitting the same mapping key (and,
 // for config.* keys, the same key=value) are emitted once.
 func Build(cli config.CLI, req *Request, choice Choice) Result {
-	b := builder{cli: cli, prompt: req.Prompt, res: Result{promptAt: -1}}
+	b := builder{cli: cli, prompt: req.ArgvPrompt(), res: Result{promptAt: -1}}
 	b.res.Argv = append(b.res.Argv, cli.Command)
 	b.emit(config.KeyPrint, "")
 
@@ -82,7 +82,7 @@ func Build(cli config.CLI, req *Request, choice Choice) Result {
 // builder accumulates one Build call.
 type builder struct {
 	cli           config.CLI
-	prompt        Optional
+	prompt        string
 	model, effort string
 	res           Result
 }
@@ -108,16 +108,16 @@ func (b *builder) skip(spelling, reason string) {
 }
 
 // emit appends key's template with placeholders substituted. A missing key emits nothing. The
-// {prompt} token becomes the positional prompt, or zero tokens when there is none.
+// {prompt} token becomes the explicit prompt (Request.ArgvPrompt), or zero tokens when it is empty.
 func (b *builder) emit(key, value string) {
 	r := strings.NewReplacer(config.PlaceholderModel, b.model, config.PlaceholderEffort, b.effort, config.PlaceholderValue, value)
 	for _, tok := range b.cli.Args[key] {
 		if tok == config.PlaceholderPrompt {
-			if b.prompt.Value == "" {
+			if b.prompt == "" {
 				continue
 			}
 			b.res.promptAt = len(b.res.Argv)
-			b.res.Argv = append(b.res.Argv, b.prompt.Value)
+			b.res.Argv = append(b.res.Argv, b.prompt)
 			continue
 		}
 		b.res.Argv = append(b.res.Argv, r.Replace(tok))

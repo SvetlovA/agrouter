@@ -77,12 +77,10 @@ func TestParseArgs_Mode(t *testing.T) {
 }
 
 func TestParseArgs_OwnFlags(t *testing.T) {
-	t.Run("-p and --print accepted, never mapped", func(t *testing.T) {
-		for _, f := range []string{"-p", "--print"} {
-			req := parseOK(t, []string{f, "x"}, noEnv)
-			assert.Empty(t, req.Args)
-			assert.Equal(t, positional("x"), req.Prompt)
-		}
+	t.Run("--print accepted, never mapped", func(t *testing.T) {
+		req := parseOK(t, []string{"--print", "x"}, noEnv)
+		assert.Empty(t, req.Args)
+		assert.Equal(t, positional("x"), req.Prompt)
 	})
 	t.Run("AGROUTER_CLI used without --cli", func(t *testing.T) {
 		req := parseOK(t, []string{"x"}, envOf(map[string]string{cliEnv: "codex"}))
@@ -126,6 +124,8 @@ func TestParseArgs_OwnFlags(t *testing.T) {
 		assert.Contains(t, cmd.help, "process")
 		assert.Contains(t, cmd.help, "--cli=NAME")
 		assert.Contains(t, cmd.help, "-c, --config=KEY=VALUE")
+		assert.Contains(t, cmd.help, "-p, --prompt=TEXT")
+		assert.Contains(t, cmd.help, "--prompt-file=PATH")
 		assert.NotContains(t, cmd.help, "/cli")
 	})
 	t.Run("--version", func(t *testing.T) {
@@ -134,6 +134,37 @@ func TestParseArgs_OwnFlags(t *testing.T) {
 		assert.True(t, cmd.version)
 		assert.Nil(t, cmd.req)
 	})
+}
+
+func TestParseArgs_PromptSources(t *testing.T) {
+	tests := []struct {
+		name              string
+		argv              []string
+		wantFlag, wantPos args.Optional
+		wantFile          args.Optional
+		wantArgs          []args.Arg
+	}{
+		{name: "-p alone", argv: []string{"-p", "fix it"}, wantFlag: positional("fix it")},
+		{name: "--prompt = form", argv: []string{"--prompt=fix it"}, wantFlag: positional("fix it")},
+		{name: "-p attached", argv: []string{"-pfix"}, wantFlag: positional("fix")},
+		{name: "empty -p is set", argv: []string{"-p", ""}, wantFlag: positional("")},
+		{name: "--prompt-file alone", argv: []string{"--prompt-file", "task.md"}, wantFile: positional("task.md")},
+		{name: "every source", argv: []string{"--prompt-file=task.md", "positional", "-p", "flag", "--verbose"},
+			wantFlag: positional("flag"), wantPos: positional("positional"), wantFile: positional("task.md"),
+			wantArgs: []args.Arg{{Spelling: "--verbose", Key: "verbose"}}},
+		{name: "slash values survive", argv: []string{"-p", "/review", "--prompt-file", "/tmp/task.md"},
+			wantFlag: positional("/review"), wantFile: positional("/tmp/task.md")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := parseOK(t, tc.argv, noEnv)
+			assert.Equal(t, tc.wantFlag, req.PromptFlag)
+			assert.Equal(t, tc.wantPos, req.Prompt)
+			assert.Equal(t, tc.wantFile, req.PromptFile)
+			assert.Equal(t, tc.wantArgs, req.Args)
+			assert.Empty(t, req.FileText, "the file is read by the app, not the parser")
+		})
+	}
 }
 
 func TestParseArgs_Config(t *testing.T) {
@@ -275,6 +306,11 @@ func TestParseArgs_Errors(t *testing.T) {
 		{"second positional", []string{"one", "two"}, "more than one positional"},
 		{"second positional around flags", []string{"exec", "one", "--verbose", "two"}, "more than one positional"},
 		{"missing value", []string{"x", "--model"}, "model"},
+		{"second -p", []string{"-p", "a", "--prompt", "b"}, "-p/--prompt given more than once"},
+		{"second --prompt-file", []string{"--prompt-file", "a", "--prompt-file=b"}, "--prompt-file given more than once"},
+		{"-p value looks like a flag", []string{"-p", "--model", "x"}, "expected argument"},
+		{"-p without value", []string{"x", "-p"}, "prompt"},
+		{"--prompt-file without value", []string{"x", "--prompt-file"}, "prompt-file"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -318,7 +354,7 @@ func TestPosixHelp(t *testing.T) {
 		name, in, want string
 	}{
 		{"value option", "      /cli:NAME      restrict", "      --cli=NAME     restrict"},
-		{"short and long", "  /p, /print         accepted", "  -p, --print        accepted"},
+		{"short and long", "  /p, /prompt:TEXT        the", "  -p, --prompt=TEXT       the"},
 		{"long flag", "      /verbose       verbose", "      --verbose      verbose"},
 		{"windows-only help line dropped", "x\n  /?                 Show\ny", "x\ny"},
 		{"description continuation kept", "                     CLI (env)", "                     CLI (env)"},

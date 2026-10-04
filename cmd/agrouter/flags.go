@@ -37,8 +37,10 @@ Without "exec" it prints that decision as one JSON line; with "exec" as the
 first token it runs the chosen CLI with the arguments translated through its
 config.
 
-The prompt is the positional argument and/or stdin. Tokens after "--" are
-passed to the chosen CLI unchanged, only with --cli.
+The prompt is -p TEXT, the positional argument, the --prompt-file text and
+stdin, in that order, joined by blank lines; at least one must be non-empty.
+The chosen CLI gets the first three as its prompt argument and stdin replayed.
+Tokens after "--" are passed to the chosen CLI unchanged, only with --cli.
 
 The Jev API key comes from --jev-api-key, then TYPESAFE_API_KEY, then api_key
 in the config. A key on the command line is visible to other local users in
@@ -67,11 +69,11 @@ func parseArgs(argv []string, getenv func(string) string) (command, error) {
 		flagArgv, req.Raw = argv[:i], append([]string{}, argv[i+1:]...)
 	}
 
-	cliSet := false
-	opts := newFlagSet(req, &cliSet)
+	var seen flagCounts
+	opts := newFlagSet(req, &seen)
 	parser := flags.NewParser(opts, flags.HelpFlag)
 	parser.Name = "agrouter"
-	parser.Usage = "[exec] [OPTIONS] [PROMPT] [-- RAW ARGS...]"
+	parser.Usage = "[exec] [OPTIONS] [-p TEXT] [--prompt-file PATH] [PROMPT] [-- RAW ARGS...]"
 	parser.LongDescription = helpText
 
 	rest, err := parser.ParseArgs(escapeSlashes(flagArgv))
@@ -85,6 +87,12 @@ func parseArgs(argv []string, getenv func(string) string) (command, error) {
 	if opts.Version {
 		return command{version: true}, nil
 	}
+	if seen.prompt > 1 {
+		return command{}, errors.New("-p/--prompt given more than once: pass the prompt as one argument")
+	}
+	if seen.promptFile > 1 {
+		return command{}, errors.New("--prompt-file given more than once")
+	}
 
 	switch len(rest) {
 	case 0:
@@ -94,7 +102,7 @@ func parseArgs(argv []string, getenv func(string) string) (command, error) {
 		return command{}, errors.New("more than one positional argument: pass the prompt as one quoted argument")
 	}
 
-	if !cliSet {
+	if !seen.cli {
 		req.CLI = getenv(cliEnv)
 	}
 	applyConfigConstraints(req)
@@ -106,8 +114,11 @@ func parseArgs(argv []string, getenv func(string) string) (command, error) {
 type flagSet struct {
 	CLI       func(string) `long:"cli" value-name:"NAME" unquote:"false" description:"restrict routing to one CLI (env AGROUTER_CLI)"`
 	JevAPIKey func(string) `long:"jev-api-key" value-name:"KEY" unquote:"false" description:"TypeSafe API key for Jev; empty clears it (env TYPESAFE_API_KEY)"`
-	Print     bool         `short:"p" long:"print" description:"accepted for compatibility; the CLI's print mapping is always emitted"`
 	Version   bool         `long:"version" description:"print agrouter's version and exit"`
+
+	Prompt     func(string) `short:"p" long:"prompt" value-name:"TEXT" unquote:"false" description:"the prompt, before the positional prompt, --prompt-file and stdin"`
+	PromptFile func(string) `long:"prompt-file" value-name:"PATH" unquote:"false" description:"read prompt text from a file, after -p and the positional prompt"`
+	Print      bool         `long:"print" description:"accepted for compatibility; the CLI's print mapping is always emitted"`
 
 	Model  func(string) `long:"model" value-name:"MODEL" unquote:"false" description:"use this model; Jev chooses only its effort"`
 	Effort func(string) `long:"effort" value-name:"EFFORT" unquote:"false" description:"use this effort; Jev chooses among options with it"`
@@ -121,8 +132,15 @@ type flagSet struct {
 	Config          func(string) `short:"c" long:"config" value-name:"KEY=VALUE" unquote:"false" description:"config override, repeatable (mapped by key)"`
 }
 
-// newFlagSet binds the options to req. cliSet records whether --cli was given, even empty.
-func newFlagSet(req *args.Request, cliSet *bool) *flagSet {
+// flagCounts records options whose repetition or presence matters after parsing.
+type flagCounts struct {
+	cli        bool // --cli was given, even empty
+	prompt     int
+	promptFile int
+}
+
+// newFlagSet binds the options to req, recording in seen what parseArgs checks afterwards.
+func newFlagSet(req *args.Request, seen *flagCounts) *flagSet {
 	valueKeyed := func(flag string) func(string) {
 		return func(v string) {
 			v = unescape(v)
@@ -135,7 +153,15 @@ func newFlagSet(req *args.Request, cliSet *bool) *flagSet {
 	const bypassKey = "permission-mode.bypassPermissions"
 
 	return &flagSet{
-		CLI: func(v string) { req.CLI, *cliSet = unescape(v), true },
+		CLI: func(v string) { req.CLI, seen.cli = unescape(v), true },
+		Prompt: func(v string) {
+			req.PromptFlag = args.Optional{Value: unescape(v), Set: true}
+			seen.prompt++
+		},
+		PromptFile: func(v string) {
+			req.PromptFile = args.Optional{Value: unescape(v), Set: true}
+			seen.promptFile++
+		},
 		JevAPIKey: func(v string) {
 			req.APIKey = args.Optional{Value: unescape(v), Set: true}
 		},
@@ -205,12 +231,12 @@ func escapeSlashes(argv []string) []string {
 	return out
 }
 
-// windowsOption matches one option name as go-flags renders it in Windows help: "/p", "/print",
+// windowsOption matches one option name as go-flags renders it in Windows help: "/p", "/prompt",
 // "/cli:NAME", with the spaces that pad it to the description column.
 var windowsOption = regexp.MustCompile(`/([^\s,:]+)(:\S+)?( *)`)
 
-// posixHelp rewrites go-flags' Windows help, which lists "/cli:NAME" and "/p, /print", to the
-// spellings agrouter accepts, "--cli=NAME" and "-p, --print", keeping the description column. The
+// posixHelp rewrites go-flags' Windows help, which lists "/cli:NAME" and "/p, /prompt:TEXT", to the
+// spellings agrouter accepts, "--cli=NAME" and "-p, --prompt=TEXT", keeping the description column. The
 // "/?" line is dropped: escapeSlashes makes "/?" a prompt. Help on other platforms is unchanged.
 func posixHelp(help string) string {
 	lines := strings.Split(help, "\n")
