@@ -112,7 +112,7 @@ type flagSet struct {
 	Model  func(string) `long:"model" value-name:"MODEL" unquote:"false" description:"use this model; Jev chooses only its effort"`
 	Effort func(string) `long:"effort" value-name:"EFFORT" unquote:"false" description:"use this effort; Jev chooses among options with it"`
 
-	PermissionMode  func(string) `long:"permission-mode" value-name:"MODE" unquote:"false" description:"permission mode, Claude names (mapped)"`
+	PermissionMode  func(string) `long:"permission-mode" value-name:"MODE" unquote:"false" description:"permission mode (mapped through config)"`
 	SkipPermissions func()       `long:"dangerously-skip-permissions" description:"alias for --permission-mode bypassPermissions"`
 	BypassApprovals func()       `long:"dangerously-bypass-approvals-and-sandbox" description:"alias for --permission-mode bypassPermissions"`
 	OutputFormat    func(string) `long:"output-format" value-name:"FORMAT" unquote:"false" description:"text, json or stream-json (mapped)"`

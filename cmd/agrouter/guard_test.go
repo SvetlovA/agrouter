@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -18,10 +19,10 @@ import (
 	"github.com/SvetlovA/agrouter/pkg/config/defaults"
 )
 
-// TestGuard_NoCLINamesInProduction enforces the CLI-agnostic core: production Go sources outside the
-// embedded defaults name no shipped CLI in identifiers, literals or comments. --help text (the
-// flag descriptions and helpText) is exempt, and so are test files, testdata and vendor.
-func TestGuard_NoCLINamesInProduction(t *testing.T) {
+// TestGuard_NoCatalogNamesInProduction keeps catalog names in config. CLI names are checked in
+// identifiers, literals, and comments; model names, aliases, and effort levels in string literals.
+// Test files, testdata, mocks, vendor, and embedded defaults are exempt.
+func TestGuard_NoCatalogNamesInProduction(t *testing.T) {
 	cfg, err := config.Load(config.Sources{Embedded: defaults.Config})
 	require.NoError(t, err)
 	names := make([]string, 0, len(cfg.CLIs))
@@ -30,6 +31,19 @@ func TestGuard_NoCLINamesInProduction(t *testing.T) {
 	}
 	require.NotEmpty(t, names)
 	re := regexp.MustCompile(`(?i)` + strings.Join(names, "|"))
+	values := map[string]bool{}
+	for _, model := range cfg.Models {
+		values[model.Section], values[model.Name] = true, true
+		for _, alias := range model.Aliases {
+			values[alias] = true
+		}
+		for _, effort := range model.Efforts {
+			values[effort] = true
+		}
+	}
+	for _, effort := range cfg.Efforts {
+		values[effort.Level] = true
+	}
 
 	root := filepath.Join("..", "..")
 	skipDirs := map[string]bool{
@@ -53,8 +67,8 @@ func TestGuard_NoCLINamesInProduction(t *testing.T) {
 			return nil
 		}
 		checked++
-		for _, hit := range cliNames(t, path, re) {
-			t.Errorf("%s: names a CLI: %s", filepath.ToSlash(path), hit)
+		for _, hit := range catalogNames(t, path, re, values) {
+			t.Errorf("%s: hardcodes a catalog name: %s", filepath.ToSlash(path), hit)
 		}
 		return nil
 	})
@@ -62,9 +76,8 @@ func TestGuard_NoCLINamesInProduction(t *testing.T) {
 	assert.Positive(t, checked)
 }
 
-// cliNames returns every identifier, literal and comment in the file at path that matches re,
-// except struct tags and the helpText constant.
-func cliNames(t *testing.T, path string, re *regexp.Regexp) []string {
+// catalogNames checks CLI names anywhere in source and catalog values in string literals.
+func catalogNames(t *testing.T, path string, re *regexp.Regexp, values map[string]bool) []string {
 	t.Helper()
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
@@ -82,7 +95,9 @@ func cliNames(t *testing.T, path string, re *regexp.Regexp) []string {
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.Field:
-			// struct tags are go-flags' --help descriptions; the rest of the field is still checked
+			if n.Tag != nil {
+				add(n.Tag.Pos(), n.Tag.Value)
+			}
 			for _, name := range n.Names {
 				add(name.Pos(), name.Name)
 			}
@@ -93,14 +108,16 @@ func cliNames(t *testing.T, path string, re *regexp.Regexp) []string {
 				return true
 			})
 			return false
-		case *ast.ValueSpec:
-			if len(n.Names) == 1 && n.Names[0].Name == "helpText" {
-				return false
-			}
 		case *ast.Ident:
 			add(n.Pos(), n.Name)
 		case *ast.BasicLit:
 			add(n.Pos(), n.Value)
+			if n.Kind == token.STRING && !re.MatchString(n.Value) {
+				value, err := strconv.Unquote(n.Value)
+				if err == nil && values[value] {
+					hits = append(hits, fset.Position(n.Pos()).String()+": "+n.Value)
+				}
+			}
 		}
 		return true
 	})
@@ -112,19 +129,38 @@ func TestGuard_DetectsCLINames(t *testing.T) {
 	src := `package x
 
 // runs acme
-const helpText = "acme help is exempt"
+const helpText = "acme help"
 
 type opts struct {
-	Mode string ` + "`description:\"acme mode, exempt\"`" + `
+	Mode string ` + "`description:\"acme mode\"`" + `
 }
 
 var acmeCommand = "acme"
 `
 	path := filepath.Join(dir, "x.go")
 	require.NoError(t, os.WriteFile(path, []byte(src), 0o600))
-	hits := cliNames(t, path, regexp.MustCompile(`(?i)acme`))
-	require.Len(t, hits, 3, hits)
+	hits := catalogNames(t, path, regexp.MustCompile(`(?i)acme`), nil)
+	require.Len(t, hits, 5, hits)
 	assert.Contains(t, hits[0], "runs acme")
-	assert.Contains(t, hits[1], "acmeCommand")
-	assert.Contains(t, hits[2], `"acme"`)
+	assert.Contains(t, hits[1], "acme help")
+	assert.Contains(t, hits[2], "acme mode")
+	assert.Contains(t, hits[3], "acmeCommand")
+	assert.Contains(t, hits[4], `"acme"`)
+}
+
+func TestGuard_DetectsModelAndEffortNames(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.go")
+	require.NoError(t, os.WriteFile(path, []byte(`package x
+var model = "test-model"
+var alias = "test-alias"
+var effort = "test-effort"
+var label = "effort"
+`), 0o600))
+	hits := catalogNames(t, path, regexp.MustCompile(`(?i)acme`), map[string]bool{
+		"test-model": true, "test-alias": true, "test-effort": true,
+	})
+	require.Len(t, hits, 3, hits)
+	assert.Contains(t, hits[0], `"test-model"`)
+	assert.Contains(t, hits[1], `"test-alias"`)
+	assert.Contains(t, hits[2], `"test-effort"`)
 }

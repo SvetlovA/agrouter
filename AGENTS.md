@@ -11,7 +11,7 @@ Go CLI that asks TypeSafe's Jev which `(cli, model, effort)` should run a prompt
 ```
 cmd/agrouter/          # go-flags parsing, app pipeline (app.go), debug output, exit codes; end-to-end tests
 pkg/config/            # INI loading, layering (embedded < global < local < env), validation
-pkg/config/defaults/   # embedded config: the v1 catalog and argument mappings (the only place CLI names live)
+pkg/config/defaults/   # embedded config: the v1 catalog and argument mappings (the only place catalog names live in production)
 pkg/catalog/           # options (model x effort), option ids, model/alias lookup
 pkg/args/              # request model, argv building from templates, skipped arguments, redaction
 pkg/prompt/            # prompt capture, stdin, binary detection, mentioned files, budget, chunking
@@ -24,7 +24,7 @@ Dependencies point one way: `config` <- `catalog` <- `router`; `prompt` depends 
 
 ## Rules
 
-- **No CLI names in code.** No production Go code outside `pkg/config/defaults` may name `Codex`/`codex`; `cmd/agrouter/guard_test.go` enforces it (struct tags and `helpText` exempt; tests, testdata and mocks may name them). Per-CLI behavior belongs in `[cli.*]`/`[cli.*.args]` config.
+- **CLI, model, and effort names come only from config.** Production Go code outside `pkg/config/defaults` must not hardcode catalog names, model aliases, or effort levels, including in help text. Per-CLI behavior and argument templates belong in `[cli.*]`/`[cli.*.args]`; models and efforts come from `[model.*]`/`[effort.*]`. `cmd/agrouter/guard_test.go` enforces this; tests, testdata, and mocks may use explicit synthetic names.
 - **stdout carries only the decision JSON** (and `--help`/`--version`). Warnings, one-line `agrouter:` errors and `AGROUTER_DEBUG=1` output go to stderr, with the prompt and API key redacted.
 - Unmapped arguments are skipped with a warning, never errors; values outside the catalog are passed through. Exit `2` only for the cases in the design's "Still errors" list; `127` when the child can't start.
 

@@ -104,7 +104,7 @@ timeout   = 20s
 enabled = false
 ```
 
-A new CLI, model, effort or argument mapping is added in config; no code names a CLI. See the design's [Configuration](docs/design.md#configuration) for every key.
+CLI names, model IDs and aliases, and effort labels come from the merged config. Adding or renaming any of them, or changing their argument mappings, requires no Go code changes. See the design's [Configuration](docs/design.md#configuration) for every key.
 
 ## ralphex
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -533,19 +534,22 @@ func TestApp_Exec(t *testing.T) {
 	})
 }
 
-// madeUpConfig defines one CLI, named name, only in config, and disables the shipped ones.
-func madeUpConfig(name, command string) string {
-	return strings.NewReplacer("NAME", name, "COMMAND", command).Replace(`
-[cli.claude]
-enabled = false
-[cli.codex]
-enabled = false
-
-[cli.NAME]
+// madeUpConfig defines custom names in config and disables the shipped CLIs dynamically.
+func madeUpConfig(t *testing.T, name, command, section, model, effort string) string {
+	t.Helper()
+	cfg, err := config.Load(config.Sources{Embedded: defaults.Config})
+	require.NoError(t, err)
+	var disabled strings.Builder
+	for _, cli := range cfg.CLIs {
+		fmt.Fprintf(&disabled, "[cli.%s]\nenabled = false\n", cli.Name)
+	}
+	return disabled.String() + strings.NewReplacer("CLI_NAME", name, "COMMAND", command,
+		"MODEL_SECTION", section, "MODEL_NAME", model, "EFFORT_NAME", effort).Replace(`
+[cli.CLI_NAME]
 command     = COMMAND
 description = A coding agent that exists only in this test.
 
-[cli.NAME.args]
+[cli.CLI_NAME.args]
 print                     = ["run", "--quiet", "{prompt}"]
 model                     = ["--llm", "{model}"]
 effort                    = ["--think={effort}"]
@@ -554,46 +558,62 @@ permission-mode.plan      = ["--mode", "read"]
 verbose                   = []
 
 [model.small]
-cli         = NAME
+cli         = CLI_NAME
 name        = small-1
-efforts     = low, high
+efforts     = quick, EFFORT_NAME
 description = Small and fast.
 
-[model.big]
-cli         = NAME
-name        = big-1
-efforts     = low, high
+[model.MODEL_SECTION]
+cli         = CLI_NAME
+name        = MODEL_NAME
+aliases     = preferred
+efforts     = quick, EFFORT_NAME
 description = Large and thorough.
+
+[effort.CLI_NAME.EFFORT_NAME]
+description = Custom reasoning effort.
 `)
 }
 
-func TestApp_MadeUpCLI(t *testing.T) {
+func TestApp_ConfigDrivenNames(t *testing.T) {
 	stdin := "line one\r\nline two\n\ttabbed \"quoted\" & 100%\n"
 	argv := []string{"exec", "--output-format", "stream-json", "--verbose", "--permission-mode", "plan", "do it now"}
 
-	runAs := func(t *testing.T, name string) (result, []string, []byte, []string) {
-		e := newEnv(t)
-		e.globalConfig(madeUpConfig(name, helperCommand(t)))
-		e.jev.pick = "big@high"
-		r := e.run(argv, strings.NewReader(stdin))
-		got, gotStdin, _ := e.child()
-		return r, got, gotStdin, e.jev.requests()
+	tests := []struct {
+		cli     string
+		section string
+		model   string
+		effort  string
+	}{
+		{cli: "acme", section: "big", model: "big-1", effort: "deep"},
+		{cli: "zeta", section: "big", model: "big-1", effort: "deep"},
+		{cli: "nova", section: "new-reasoner", model: "future-2027", effort: "thorough"},
 	}
+	for _, tc := range tests {
+		t.Run(tc.cli, func(t *testing.T) {
+			e := newEnv(t)
+			e.globalConfig(madeUpConfig(t, tc.cli, helperCommand(t), tc.section, tc.model, tc.effort))
+			e.jev.pick = tc.section + "@" + tc.effort
+			r := e.run(argv, strings.NewReader(stdin))
+			require.Equal(t, 0, r.code, r.stderr)
+			assert.Equal(t, "agrouter: warning: skipped --verbose: maps to nothing for "+tc.cli+"\n", r.stderr)
+			got, gotStdin, _ := e.child()
+			assert.Equal(t, []string{"run", "--quiet", "do it now", "--events", "ndjson", "--mode", "read",
+				"--llm", tc.model, "--think=" + tc.effort}, got)
+			assert.Equal(t, stdin, string(gotStdin))
+			require.Len(t, e.jev.requests(), 1)
 
-	r, got, gotStdin, reqs := runAs(t, "acme")
-	require.Equal(t, 0, r.code, r.stderr)
-	assert.Equal(t, "agrouter: warning: skipped --verbose: maps to nothing for acme\n", r.stderr)
-	assert.Equal(t, []string{"run", "--quiet", "do it now", "--events", "ndjson", "--mode", "read",
-		"--llm", "big-1", "--think=high"}, got)
-	assert.Equal(t, stdin, string(gotStdin))
-	require.Len(t, reqs, 1)
-
-	r2, got2, gotStdin2, reqs2 := runAs(t, "zeta")
-	require.Equal(t, 0, r2.code, r2.stderr)
-	assert.Equal(t, strings.ReplaceAll(r.stderr, "acme", "zeta"), r2.stderr)
-	assert.Equal(t, got, got2)
-	assert.Equal(t, gotStdin, gotStdin2)
-	assert.Equal(t, reqs, reqs2)
+			r = e.run([]string{"--cli", tc.cli, "--model", "preferred", "--effort", tc.effort, "do it"}, nil)
+			require.Equal(t, 0, r.code, r.stderr)
+			d := decision(t, r.stdout)
+			assert.Equal(t, tc.cli, d["cli"])
+			assert.Equal(t, tc.model, d["model"])
+			assert.Equal(t, tc.effort, d["effort"])
+			assert.Equal(t, strs(helperCommand(t), "run", "--quiet", "do it", "--llm", tc.model,
+				"--think="+tc.effort), d["argv"])
+			assert.Len(t, e.jev.requests(), 1, "a model alias plus an effort selects one option without Jev")
+		})
+	}
 }
 
 func TestApp_HelpHasKeyCautions(t *testing.T) {
