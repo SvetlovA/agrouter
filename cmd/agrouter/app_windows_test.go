@@ -22,10 +22,10 @@ func TestApp_PromptFileThroughBatchShim(t *testing.T) {
 	shim := "@echo off\r\n\"" + helperCommand(t) + "\" %*\r\nexit /b %errorlevel%\r\n"
 	require.NoError(t, os.WriteFile(filepath.Join(bin, "fakecli.cmd"), []byte(shim), 0o600))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	e.globalConfig("[cli.claude]\ncommand = fakecli\n")
+	e.globalConfig(strings.ReplaceAll(syntheticCLIs(t), helperCommand(t), "fakecli"))
 	require.NoError(t, os.WriteFile(filepath.Join(e.workDir, "task.md"), []byte("line one\nline two\n"), 0o600))
 
-	r := e.run([]string{"exec", "--cli=claude", "--model=opus", "--effort=low", "--prompt-file", "task.md"}, nil)
+	r := e.run([]string{"exec", "--cli=alpha", "--model=strong", "--effort=low", "--prompt-file", "task.md"}, nil)
 
 	assert.Equal(t, runner.ExitStartFailure, r.code)
 	assert.Empty(t, r.stdout)

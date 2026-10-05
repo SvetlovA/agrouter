@@ -55,14 +55,9 @@ type Request struct {
 	Raw          []string // tokens after the first "--", passed through only with --cli
 }
 
-// Explicit returns the prompt texts given on the command line, in prompt order: -p, the positional
-// prompt, then the --prompt-file contents. Stdin is not among them.
-func (r *Request) Explicit() []string {
-	return []string{r.PromptFlag.Value, r.Prompt.Value, r.FileText}
-}
-
-// ArgvPrompt is the {prompt} text: the explicit texts joined like the prompt Jev sees, without stdin,
-// which the child gets replayed instead.
+// ArgvPrompt is the {prompt} text: the prompt texts given on the command line joined in prompt
+// order (-p, the positional prompt, then the --prompt-file contents), like the prompt Jev sees but
+// without stdin, which the child gets replayed instead.
 func (r *Request) ArgvPrompt() string {
-	return prompt.Join(r.Explicit()...)
+	return prompt.Join(r.PromptFlag.Value, r.Prompt.Value, r.FileText)
 }

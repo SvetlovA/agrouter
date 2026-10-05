@@ -54,7 +54,7 @@ func TestCapture_PositionalAndStdin(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := Capture(t.Context(), []string{tc.positional}, tc.stdin)
+			res, err := Capture(t.Context(), tc.positional, tc.stdin)
 			require.NoError(t, err)
 			require.NoError(t, res.Undecidable)
 			assert.Equal(t, tc.wantPrompt, res.Prompt)
@@ -88,7 +88,7 @@ func TestCapture_Sources(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := Capture(t.Context(), tc.explicit, strings.NewReader(tc.stdin))
+			res, err := Capture(t.Context(), Join(tc.explicit...), strings.NewReader(tc.stdin))
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantPrompt, res.Prompt)
 			assert.Equal(t, []byte(tc.stdin), replay(t, res), "stdin replayed alone, never joined")
@@ -98,10 +98,10 @@ func TestCapture_Sources(t *testing.T) {
 
 func TestCapture_NoPrompt(t *testing.T) {
 	for _, explicit := range [][]string{nil, {"", "", ""}} {
-		_, err := Capture(t.Context(), explicit, nil)
+		_, err := Capture(t.Context(), Join(explicit...), nil)
 		require.ErrorIs(t, err, ErrNoPrompt)
 
-		_, err = Capture(t.Context(), explicit, strings.NewReader(""))
+		_, err = Capture(t.Context(), Join(explicit...), strings.NewReader(""))
 		require.ErrorIs(t, err, ErrNoPrompt)
 	}
 	for _, source := range []string{"-p", "positional", "--prompt-file", "stdin"} {
@@ -118,7 +118,7 @@ func TestJoin(t *testing.T) {
 
 func TestCapture_BinaryStdin(t *testing.T) {
 	t.Run("with a positional prompt", func(t *testing.T) {
-		res, err := Capture(t.Context(), []string{"describe this image"}, bytes.NewReader(pngBytes))
+		res, err := Capture(t.Context(), "describe this image", bytes.NewReader(pngBytes))
 		require.NoError(t, err)
 		assert.Equal(t, "describe this image", res.Prompt, "binary stdin stays out of Jev's prompt")
 		assert.Equal(t, []Attachment{{Source: SourceStdin, Type: "image/png", Bytes: int64(len(pngBytes))}}, res.Attachments)
@@ -126,21 +126,21 @@ func TestCapture_BinaryStdin(t *testing.T) {
 	})
 
 	t.Run("binary only is still a prompt", func(t *testing.T) {
-		res, err := Capture(t.Context(), nil, bytes.NewReader(jpegBytes))
+		res, err := Capture(t.Context(), "", bytes.NewReader(jpegBytes))
 		require.NoError(t, err)
 		assert.Empty(t, res.Prompt)
 		assert.Equal(t, []Attachment{{Source: SourceStdin, Type: "image/jpeg", Bytes: int64(len(jpegBytes))}}, res.Attachments)
 	})
 
 	t.Run("ascii-looking pdf", func(t *testing.T) {
-		res, err := Capture(t.Context(), nil, bytes.NewReader(pdfBytes))
+		res, err := Capture(t.Context(), "", bytes.NewReader(pdfBytes))
 		require.NoError(t, err)
 		assert.Equal(t, []Attachment{{Source: SourceStdin, Type: "application/pdf", Bytes: int64(len(pdfBytes))}}, res.Attachments)
 	})
 
 	t.Run("NUL past the prefix", func(t *testing.T) {
 		data := append(bytes.Repeat([]byte("text "), 4000), 0, 'x')
-		res, err := Capture(t.Context(), []string{"p"}, bytes.NewReader(data))
+		res, err := Capture(t.Context(), "p", bytes.NewReader(data))
 		require.NoError(t, err)
 		assert.Equal(t, "p", res.Prompt)
 		assert.Equal(t, []Attachment{{Source: SourceStdin, Type: TypeUnknown, Bytes: int64(len(data))}}, res.Attachments)
@@ -149,7 +149,7 @@ func TestCapture_BinaryStdin(t *testing.T) {
 
 	t.Run("invalid UTF-8 at the end of stdin", func(t *testing.T) {
 		data := []byte("almost text \xe2\x82")
-		res, err := Capture(t.Context(), nil, bytes.NewReader(data))
+		res, err := Capture(t.Context(), "", bytes.NewReader(data))
 		require.NoError(t, err)
 		assert.Equal(t, []Attachment{{Source: SourceStdin, Type: TypeUnknown, Bytes: int64(len(data))}}, res.Attachments)
 	})
@@ -158,7 +158,7 @@ func TestCapture_BinaryStdin(t *testing.T) {
 func TestCapture_UTF8AcrossThePrefixBoundary(t *testing.T) {
 	// "€" (3 bytes) straddles the 8 KiB sniff boundary; the whole stdin is valid text
 	data := append(bytes.Repeat([]byte("a"), SniffLen-1), []byte("€ and more text")...)
-	res, err := Capture(t.Context(), nil, onlyReader{bytes.NewReader(data)})
+	res, err := Capture(t.Context(), "", onlyReader{bytes.NewReader(data)})
 	require.NoError(t, err)
 	assert.Empty(t, res.Attachments)
 	assert.Equal(t, string(data), res.Prompt)
@@ -168,7 +168,7 @@ func TestCapture_LargeBinaryIsAnAttachment(t *testing.T) {
 	data := append(append([]byte{}, pngBytes...), bytes.Repeat([]byte{0xCD}, 200<<10)...)
 
 	t.Run("pipe: size counted", func(t *testing.T) {
-		res, err := Capture(t.Context(), []string{"look"}, onlyReader{bytes.NewReader(data)})
+		res, err := Capture(t.Context(), "look", onlyReader{bytes.NewReader(data)})
 		require.NoError(t, err)
 		require.NoError(t, res.Undecidable)
 		assert.Equal(t, []Attachment{{Source: SourceStdin, Type: "image/png", Bytes: int64(len(data))}}, res.Attachments)
@@ -183,7 +183,7 @@ func TestCapture_LargeBinaryIsAnAttachment(t *testing.T) {
 		require.NoError(t, err)
 		defer f.Close()
 
-		res, err := Capture(t.Context(), []string{"look"}, StdinOf(f))
+		res, err := Capture(t.Context(), "look", StdinOf(f))
 		require.NoError(t, err)
 		require.NoError(t, res.Undecidable)
 		assert.Equal(t, []Attachment{{Source: SourceStdin, Type: "image/png", Bytes: int64(len(data))}}, res.Attachments)
@@ -197,7 +197,7 @@ func TestCapture_NoLimit(t *testing.T) {
 	data := []byte(strings.Repeat("0123456789abcdef\n", 1<<19)) // 8.5 MiB of text
 
 	t.Run("large text captured whole", func(t *testing.T) {
-		res, err := Capture(t.Context(), []string{"summarize"}, onlyReader{bytes.NewReader(data)})
+		res, err := Capture(t.Context(), "summarize", onlyReader{bytes.NewReader(data)})
 		require.NoError(t, err)
 		require.NoError(t, res.Undecidable)
 		assert.Equal(t, "summarize\n\n"+string(data), res.Prompt)
@@ -207,7 +207,7 @@ func TestCapture_NoLimit(t *testing.T) {
 
 	t.Run("large text with a late NUL is an attachment", func(t *testing.T) {
 		bin := append(append([]byte{}, data...), 0)
-		res, err := Capture(t.Context(), nil, bytes.NewReader(bin))
+		res, err := Capture(t.Context(), "", bytes.NewReader(bin))
 		require.NoError(t, err)
 		require.NoError(t, res.Undecidable)
 		assert.Empty(t, res.Prompt)
@@ -222,7 +222,7 @@ func TestCapture_Deadline(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
-	res, err := Capture(ctx, nil, pr)
+	res, err := Capture(ctx, "", pr)
 	require.NoError(t, err)
 	require.ErrorIs(t, res.Undecidable, context.DeadlineExceeded)
 	assert.Empty(t, res.Prompt)
@@ -236,9 +236,30 @@ func TestCapture_Deadline(t *testing.T) {
 	assert.Equal(t, "first part second part", string(replay(t, res)))
 }
 
+func TestCapture_DeadlinePastTheSniffedPrefix(t *testing.T) {
+	head := strings.Repeat("text line\n", SniffLen/5) // twice the sniffed prefix
+	pr, pw := io.Pipe()
+	go func() { _, _ = pw.Write([]byte(head)) }()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	res, err := Capture(ctx, "p", pr)
+	require.NoError(t, err)
+	require.ErrorIs(t, res.Undecidable, context.DeadlineExceeded)
+	assert.Empty(t, res.Prompt)
+	assert.Greater(t, len(res.Stdin.Buffered), SniffLen, "text read past the prefix before the deadline")
+	require.NotNil(t, res.Stdin.Rest)
+
+	go func() {
+		_, _ = pw.Write([]byte("tail"))
+		_ = pw.Close()
+	}()
+	assert.Equal(t, head+"tail", string(replay(t, res)), "every byte replayed once")
+}
+
 func TestCapture_ReadError(t *testing.T) {
 	boom := errors.New("boom")
-	_, err := Capture(t.Context(), []string{"p"}, io.MultiReader(strings.NewReader("abc"), errReader{boom}))
+	_, err := Capture(t.Context(), "p", io.MultiReader(strings.NewReader("abc"), errReader{boom}))
 	require.ErrorIs(t, err, boom)
 }
 

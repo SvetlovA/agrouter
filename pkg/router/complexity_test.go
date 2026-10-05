@@ -138,7 +138,7 @@ func TestComplexitySingleRequest(t *testing.T) {
 	})
 	r := newRouter(t, cfg, cat, client)
 	docs := &prompt.Result{Prompt: "fix the typo", Docs: []string{"# Shop\n\nThree services.\n", "", "Use gofmt.\n"}}
-	require.True(t, docs.DocsFit(r.Budget()))
+	require.True(t, docs.DocsFit(r.budget))
 
 	got, err := r.complexity(context.Background(), docs)
 	require.NoError(t, err)
@@ -154,7 +154,7 @@ func TestComplexitySingleRequest(t *testing.T) {
 func TestComplexityChunked(t *testing.T) {
 	cfg, cat := embedded(t)
 	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
-	b := r.Budget()
+	b := r.budget
 	docs := &prompt.Result{Docs: []string{docsOf("ENTERPRISE", 2*b.Doc), docsOf("STYLE", 3*b.Doc)}}
 	chunks := docs.SplitDocs(b)
 	require.Greater(t, len(chunks), 4)
@@ -205,7 +205,7 @@ func TestComplexityChunked(t *testing.T) {
 
 func TestComplexityFailures(t *testing.T) {
 	cfg, cat := embedded(t)
-	b := newRouter(t, cfg, cat, &mocks.JevClientMock{}).Budget()
+	b := newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget
 	small := &prompt.Result{Docs: []string{"a small CLI"}}
 	big := &prompt.Result{Docs: []string{docsOf("START", 3*b.Doc)}}
 	tail := &prompt.Result{Docs: []string{docsOf("A", b.Doc), "short tail doc"}}
@@ -288,7 +288,7 @@ func TestComplexityWholeDocs422SplitsAtHalfBudget(t *testing.T) {
 		return docAnswers(4, 0.5), nil
 	})
 	r := newRouter(t, cfg, cat, client)
-	b := r.Budget()
+	b := r.budget
 	docs := []string{docsOf("ARCH", b.Doc*2/3), "Use gofmt.\n", docsOf("DEPS", b.Doc/4)}
 	captured := &prompt.Result{Docs: docs}
 	require.True(t, captured.DocsFit(b), "%d > %d", captured.DocsTokens(), b.Doc)
@@ -310,9 +310,35 @@ func TestComplexityWholeDocs422SplitsAtHalfBudget(t *testing.T) {
 	assert.Equal(t, docs, joinDocs(states, len(docs)), "every doc byte kept")
 }
 
+func TestComplexityWholeDocs422HalvesOneSmallDoc(t *testing.T) {
+	cfg, cat := embedded(t)
+	client := docMock(func(_ prompt.DocChunk, whole bool) (map[string]jev.Answer, error) {
+		if whole {
+			return nil, unprocessable()
+		}
+		return docAnswers(4, 0.5), nil
+	})
+	r := newRouter(t, cfg, cat, client)
+	b := r.budget
+	// one doc under half the doc budget: cutting at half the budget would resend it whole
+	doc := docsOf("ONE", b.Doc/4)
+	captured := &prompt.Result{Docs: []string{doc}}
+	require.GreaterOrEqual(t, captured.DocsTokens(), prompt.MinStateTokens)
+
+	_, err := r.complexity(context.Background(), captured)
+	require.NoError(t, err)
+
+	states := docChunkStates(client)
+	require.Greater(t, len(states), 1, "the rejected doc is cut in two or more")
+	for _, c := range states {
+		assert.LessOrEqual(t, docStateTokens(t, c), (captured.DocsTokens()+1)/2, "each piece about half the docs")
+	}
+	assert.Equal(t, []string{doc}, joinDocs(states, 1), "every doc byte kept")
+}
+
 func TestComplexityDocChunk422ResplitsOnce(t *testing.T) {
 	cfg, cat := embedded(t)
-	b := newRouter(t, cfg, cat, &mocks.JevClientMock{}).Budget()
+	b := newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget
 	docs := []string{docsOf("FIRST", 2*b.Doc), docsOf("SECOND", 2*b.Doc)}
 	captured := &prompt.Result{Docs: docs}
 	chunks := captured.SplitDocs(b)
@@ -393,8 +419,8 @@ func testComplexityStopsOnDeadline(t *testing.T) {
 		return nil, ctx.Err()
 	}}
 	r := newRouter(t, cfg, cat, client)
-	captured := &prompt.Result{Docs: []string{docsOf("BIG", 4*r.Budget().Doc)}}
-	chunks := captured.SplitDocs(r.Budget())
+	captured := &prompt.Result{Docs: []string{docsOf("BIG", 4*r.budget.Doc)}}
+	chunks := captured.SplitDocs(r.budget)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 

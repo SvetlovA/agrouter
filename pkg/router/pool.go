@@ -83,7 +83,6 @@ func (r *Router) pooled(ctx context.Context, el *Eligibility, split *prompt.Spli
 		},
 		halve: prompt.Halve,
 		text:  func(c prompt.Chunk) string { return c.Text },
-		pos:   func(c prompt.Chunk) (int, int) { return c.Index, c.Of },
 		number: func(c prompt.Chunk, index, of int) prompt.Chunk {
 			c.Index, c.Of = index, of
 			return c

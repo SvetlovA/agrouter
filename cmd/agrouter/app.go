@@ -167,20 +167,31 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 		}
 		req.FileText = text
 	}
-	// docs are read even when one option will be left, so a bad --doc fails every call alike
-	var docs []string
+	// docs are read even when one option will be left, so a bad --doc fails every call alike; the
+	// deadline passing mid-read is not a bad doc, so Jev cannot decide
+	var (
+		docs        []string
+		undecidable error
+	)
 	for _, path := range req.Docs {
 		text, err := prompt.ReadTextFile(ctx, a.workDir, path)
+		if err != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+			undecidable = fmt.Errorf("--doc: %w", err)
+			continue // the later docs are still checked for being missing or not regular files
+		}
 		if err != nil {
 			return routed{}, fmt.Errorf("--doc: %w", err)
 		}
 		docs = append(docs, text)
 	}
-	captured, err := prompt.Capture(ctx, req.Explicit(), a.stdin)
+	captured, err := prompt.Capture(ctx, req.ArgvPrompt(), a.stdin)
 	if err != nil {
 		return routed{}, err
 	}
 	captured.Docs = docs
+	if undecidable != nil && captured.Undecidable == nil {
+		captured.Undecidable = undecidable
+	}
 
 	el := router.Eligible(cfg, cat, req)
 	for _, s := range el.Skipped {

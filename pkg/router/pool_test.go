@@ -168,7 +168,7 @@ func TestRouteChunked(t *testing.T) {
 	req := &args.Request{CLI: "claude"}
 	el := Eligible(cfg, cat, req)
 	c := captured("HARD: keep the public API stable while fixing the parser\n" + filler(600_000))
-	split, err := c.Split(newRouter(t, cfg, cat, &mocks.JevClientMock{}).Budget())
+	split, err := c.Split(newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget)
 	require.NoError(t, err)
 	require.Greater(t, len(split.Chunks), 4)
 
@@ -308,7 +308,7 @@ func TestRouteSingleRequest422Resplits(t *testing.T) {
 	client := rejecting(t, el.Options, func(prompt.ChunkState) bool { return false })
 	r := newRouter(t, cfg, cat, client)
 	c := captured("HARD: rename the package\n" + filler(40_000))
-	require.True(t, c.Fits(r.Budget()))
+	require.True(t, c.Fits(r.budget))
 
 	d, err := r.Route(context.Background(), el, req, c)
 	require.NoError(t, err)
@@ -325,7 +325,7 @@ func TestRouteSingleRequest422Resplits(t *testing.T) {
 	for _, st := range states {
 		size, err := json.Marshal(st)
 		require.NoError(t, err)
-		assert.LessOrEqual(t, prompt.Tokens(len(size)), r.Budget().Chunk/2, "split at half the budget")
+		assert.LessOrEqual(t, prompt.Tokens(len(size)), r.budget.Chunk/2, "split at half the budget")
 	}
 }
 
@@ -335,7 +335,7 @@ func TestRouteChunk422ResplitsOnce(t *testing.T) {
 	el := Eligible(cfg, cat, req)
 	c := captured("HARD: port the scheduler\n" + filler(200_000))
 	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
-	split, err := c.Split(r.Budget())
+	split, err := c.Split(r.budget)
 	require.NoError(t, err)
 	n := len(split.Chunks)
 
@@ -360,7 +360,7 @@ func TestRouteChunk422ResplitsOnce(t *testing.T) {
 	for _, st := range chunkStates(client) {
 		size, err := json.Marshal(st)
 		require.NoError(t, err)
-		assert.LessOrEqual(t, prompt.Tokens(len(size)), r.Budget().Chunk, "chunk %d of %d over budget", st.Chunk.Index, st.Chunk.Of)
+		assert.LessOrEqual(t, prompt.Tokens(len(size)), r.budget.Chunk, "chunk %d of %d over budget", st.Chunk.Index, st.Chunk.Of)
 	}
 }
 
@@ -372,7 +372,7 @@ func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 	tail := captured(filler(145_000)) // two full chunks and a short last one
 
 	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
-	tailSplit, err := tail.Split(r.Budget())
+	tailSplit, err := tail.Split(r.budget)
 	require.NoError(t, err)
 	last := tailSplit.Chunks[len(tailSplit.Chunks)-1]
 	require.Less(t, prompt.Tokens(len(last.Text)), prompt.MinStateTokens)
@@ -496,7 +496,7 @@ func testRouteChunkedStopsOnDeadline(t *testing.T) {
 	}}
 	r := newRouter(t, cfg, cat, client)
 	c := captured(filler(1_000_000))
-	split, err := c.Split(r.Budget())
+	split, err := c.Split(r.budget)
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
@@ -522,7 +522,7 @@ func testRouteChunkedAnsweredAtDeadlineStands(t *testing.T) {
 	}}
 	r := newRouter(t, cfg, cat, client)
 	c := captured(filler(150_000))
-	split, err := c.Split(r.Budget())
+	split, err := c.Split(r.budget)
 	require.NoError(t, err)
 	require.NotNil(t, split)
 

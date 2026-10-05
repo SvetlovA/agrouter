@@ -92,10 +92,10 @@ func StdinOf(f *os.File) io.Reader {
 }
 
 // Capture reads stdin (nil for none) to EOF under ctx, with no size limit, and builds Jev's prompt
-// from the explicit texts (-p, positional, --prompt-file, in that order) followed by stdin text. It
-// returns ErrNoPrompt when every explicit text is empty and there is no stdin byte, and an error when
+// from given, the explicit texts (-p, positional, --prompt-file) already joined, followed by stdin
+// text. It returns ErrNoPrompt when given is empty and there is no stdin byte, and an error when
 // stdin cannot be read.
-func Capture(ctx context.Context, explicit []string, stdin io.Reader) (*Result, error) {
+func Capture(ctx context.Context, given string, stdin io.Reader) (*Result, error) {
 	res := &Result{}
 	c := &capturer{ctx: ctx, eof: true}
 	if stdin != nil {
@@ -114,7 +114,6 @@ func Capture(ctx context.Context, explicit []string, stdin io.Reader) (*Result, 
 			return res, nil //nolint:nilerr // undecidable is recorded in res, not returned
 		}
 	}
-	given := Join(explicit...)
 	if given == "" && len(c.buf) == 0 {
 		return nil, ErrNoPrompt
 	}

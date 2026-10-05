@@ -42,11 +42,6 @@ func New(cfg *config.Config, cat *catalog.Catalog, client JevClient, enc Encodin
 	return &Router{cfg: cfg, jev: client, enc: enc, budget: b}, nil
 }
 
-// Budget is the state budget the questions leave.
-func (r *Router) Budget() prompt.Budget {
-	return r.budget
-}
-
 // Decision is what runs: the CLI, and the model and effort to emit through its templates.
 type Decision struct {
 	CLI    string

@@ -123,12 +123,13 @@ func TestHalveDoc(t *testing.T) {
 		assert.Equal(t, []DocChunk{{Doc: 1, Text: "\x01"}}, HalveDoc(DocChunk{Doc: 1, Text: "\x01"}))
 		assert.Equal(t, []DocChunk{{}}, HalveDoc(DocChunk{}))
 	})
-	t.Run("every halved piece fits half the doc budget", func(t *testing.T) {
+	t.Run("every halved piece is at most half its chunk and still fits the doc budget", func(t *testing.T) {
 		r := &Result{Docs: []string{lines("d", 400, 120)}}
 		for _, c := range r.DocChunks(2000) {
 			for _, p := range HalveDoc(c) {
+				assert.LessOrEqual(t, jsonLen(p.Text), (jsonLen(c.Text)+1)/2)
 				wide := DocChunkState{Doc: DocChunk{Index: math.MaxInt, Of: math.MaxInt, Text: p.Text}}
-				assert.LessOrEqual(t, Tokens(mustLen(wide)), 2000/2+1)
+				assert.LessOrEqual(t, Tokens(mustLen(wide)), 2000)
 			}
 		}
 	})

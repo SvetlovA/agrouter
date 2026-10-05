@@ -3,6 +3,7 @@ package prompt
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,7 +54,8 @@ func TestReadTextFile(t *testing.T) {
 			got, err := ReadTextFile(t.Context(), cwd, tt.path)
 			if tt.wantErr != nil {
 				require.ErrorIs(t, err, tt.wantErr)
-				assert.Contains(t, err.Error(), tt.path)
+				assert.True(t, strings.HasPrefix(err.Error(), tt.path+": "),
+					"the error names the path as given: %v", err)
 				return
 			}
 			require.NoError(t, err)
@@ -69,6 +71,26 @@ func TestReadTextFile_Deadline(t *testing.T) {
 	_, err := ReadTextFile(ctx, cwd, "a.md")
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Contains(t, err.Error(), "a.md")
+}
+
+// cancelAfterRead cancels its context once the first read returns.
+type cancelAfterRead struct {
+	r      io.Reader
+	cancel context.CancelFunc
+}
+
+func (c cancelAfterRead) Read(p []byte) (int, error) {
+	defer c.cancel()
+	return c.r.Read(p) //nolint:wrapcheck // a test reader
+}
+
+func TestReadUpTo_CanceledMidRead(t *testing.T) {
+	data := bytes.Repeat([]byte("x"), readSize*3)
+	ctx, cancel := context.WithCancel(t.Context())
+	buf, eof, err := readUpTo(ctx, cancelAfterRead{bytes.NewReader(data), cancel}, nil, -1)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.False(t, eof)
+	assert.Equal(t, data[:readSize], buf, "what was read before the cancel is kept")
 }
 
 func TestReadUpTo(t *testing.T) {

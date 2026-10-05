@@ -39,7 +39,7 @@ agrouter      [options] [-p TEXT] [--prompt-file PATH] [--doc PATH]... [prompt] 
 agrouter exec [options] [-p TEXT] [--prompt-file PATH] [--doc PATH]... [prompt] [-- raw args...]    # exec mode
 ```
 
-The prompt can come from four sources, in any combination: `-p TEXT`, the one positional argument, the text of `--prompt-file PATH` and stdin. agrouter joins them in that order with a blank line between them; at least one must be non-empty. `-p` and `--prompt-file` may each be given once, and a `-p` value that looks like a flag (`-p --model`) is rejected. Arguments follow Claude Code's names:
+The prompt can come from four sources, in any combination: `-p TEXT`, the one positional argument, the text of `--prompt-file PATH` and stdin. agrouter joins them in that order with a blank line between them; at least one must be non-empty. `-p` and `--prompt-file` may each be given once, and a `-p` value that looks like a flag (`-p --model`) is rejected. `-p` takes the prompt as its value, like Claude Code's `-p "query"`; it used to be a bare print switch, so a caller passing `-p` with no value should drop it or use `--print`. Arguments follow Claude Code's names:
 
 | Option | Meaning |
 |---|---|
@@ -58,7 +58,9 @@ The prompt can come from four sources, in any combination: `-p TEXT`, the one po
 
 Whenever stdin is not a terminal, agrouter reads it to EOF within `[agrouter] timeout` before routing. A script that passes the prompt only as an argument or a file should close stdin or redirect it from `/dev/null`; an inherited pipe that stays open uses up the timeout, and Jev cannot decide.
 
-`--prompt-file` and `--doc` paths are relative to the working directory and may point anywhere. Each must be a regular text file: a missing, unreadable, directory or binary file is an error naming the flag and path (exit `2`), even when routing would not need it. Neither size nor the number of chunks is limited.
+`--prompt-file` and `--doc` paths are relative to the working directory and may point anywhere. Each must be a regular text file: a missing, unreadable, directory or binary file is an error naming the flag and path (exit `2`), even when routing would not need it. Neither size nor the number of chunks is limited. If the timeout passes while a `--doc` is being read, Jev cannot decide (see below); while the `--prompt-file` is being read, it is an error (exit `2`), since the child needs that text.
+
+The `-p`, positional and `--prompt-file` text reaches the child as one argument, so in exec mode it is bounded by the OS argument limits (128 KiB per argument on Linux, 32,767 characters for the whole command line on Windows); a longer prompt fails to start the child (exit `127`). Pipe a very long prompt on stdin instead: stdin has no such limit.
 
 To route, agrouter also reads the text files the prompt names inside the working directory (quoted, backticked, Markdown-linked or plain paths) and sends their contents, never their paths, to TypeSafe. That includes files such as `.env` when the prompt mentions them. Paths outside the working directory are ignored and URLs are not fetched; binary files are described by type and size only. Nothing is read when only one option is left. The `--prompt-file` text counts as prompt, so the files it mentions are read too; `--doc` text is not scanned for mentions.
 
@@ -97,7 +99,7 @@ On Windows with npm's `claude.cmd`/`codex.cmd` shims, pass a multi-line prompt o
 
 Before starting the child, exec mode logs one JSON line with `cli`, `model` and `effort` to stderr, so tools such as Ralphex can record the selection for each step. Model and effort are `null` when the CLI's defaults apply. This line does not include the prompt or argv.
 
-The child's stdout, stderr and exit code are agrouter's. An argument the chosen CLI does not map is skipped with one `agrouter: warning:` line on stderr, never an error. Set `AGROUTER_DEBUG=1` to see eligibility, Jev's probabilities and the final command on stderr (prompt text and key redacted).
+The child's stdout, stderr and exit code are agrouter's. An argument the chosen CLI does not map is skipped with one `agrouter: warning:` line on stderr, never an error. Set `AGROUTER_DEBUG=1` to see eligibility, each `--doc` chunk's complexity score and evidence with the project complexity, Jev's probabilities and the final command on stderr (prompt text and key redacted; doc text is never printed).
 
 When Jev cannot decide (no key, timeout, API errors) and the CLI is known (`--cli`, implied by `--model`, or the only one left), agrouter runs it with only the caller's fixed `--model`/`--effort`, so the CLI's defaults apply. With more than one CLI left, it exits `2`.
 
@@ -158,7 +160,7 @@ A `--model`/`--effort` (or `-c model=`/`-c model_reasoning_effort=`) that ralphe
 | Code | Meaning |
 |---|---|
 | `0` | decision printed, or `--help`/`--version` |
-| `2` | agrouter error before any child starts: unknown flag, second positional, second `-p` or `--prompt-file`, no prompt, a bad `--prompt-file` or `--doc` file, config error, or Jev cannot decide with more than one CLI left |
+| `2` | agrouter error before any child starts: unknown flag, second positional, second `-p` or `--prompt-file`, no prompt, a bad `--prompt-file` or `--doc` file, the timeout passing while the `--prompt-file` is read, config error, or Jev cannot decide with more than one CLI left |
 | `127` | exec mode: the chosen CLI could not be started |
 | other | exec mode: the child's exit code (`128+signal` on Unix when it was killed) |
 

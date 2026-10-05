@@ -242,7 +242,7 @@ func TestNewQuestionOverBudget(t *testing.T) {
 func TestNewBudgetFromWholeCatalog(t *testing.T) {
 	cfg, cat := embedded(t)
 	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
-	b := r.Budget()
+	b := r.budget
 	assert.Positive(t, b.State)
 	assert.Less(t, b.State, 30_000)
 	assert.Positive(t, b.Chunk)

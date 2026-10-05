@@ -57,14 +57,15 @@ func helper() int {
 
 // fakeJev answers every route Choice with pick (which must be among the options sent), a complexity
 // Choice (criteria without pick) with level, and every Noul with 0.5, and records each request's
-// state.
+// state. With failDocs it rejects every doc request with a 400.
 type fakeJev struct {
-	t      *testing.T
-	mu     sync.Mutex
-	pick   string
-	level  string
-	states []string
-	srv    *httptest.Server
+	t        *testing.T
+	mu       sync.Mutex
+	pick     string
+	level    string
+	failDocs bool
+	states   []string
+	srv      *httptest.Server
 }
 
 func newFakeJev(t *testing.T) *fakeJev {
@@ -90,8 +91,12 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	f.states = append(f.states, string(req.State))
-	pick, level := f.pick, f.level
+	pick, level, failDocs := f.pick, f.level, f.failDocs
 	f.mu.Unlock()
+	if failDocs && strings.HasPrefix(string(req.State), `{"doc`) {
+		http.Error(w, "doc rejected", http.StatusBadRequest)
+		return
+	}
 
 	answers := map[string]any{}
 	for id, q := range req.Questions {
@@ -497,6 +502,66 @@ func TestApp_Errors(t *testing.T) {
 	})
 }
 
+// syntheticCLIs disables the shipped CLIs and defines two made-up ones, both running the helper with
+// -p/--model/--effort mappings: alpha (fast@low|high and deep@low|high, deep aliased "strong") and
+// beta (other@low|high).
+func syntheticCLIs(t *testing.T) string {
+	t.Helper()
+	cfg, err := config.Load(config.Sources{Embedded: defaults.Config})
+	require.NoError(t, err)
+	var disabled strings.Builder
+	for _, cli := range cfg.CLIs {
+		fmt.Fprintf(&disabled, "[cli.%s]\nenabled = false\n", cli.Name)
+	}
+	var clis strings.Builder
+	for _, name := range []string{"alpha", "beta"} {
+		clis.WriteString(strings.NewReplacer("CLI_NAME", name, "COMMAND", helperCommand(t)).Replace(`
+[cli.CLI_NAME]
+command     = COMMAND
+description = A coding agent that exists only in this test.
+
+[cli.CLI_NAME.args]
+print  = ["-p", "{prompt}"]
+model  = ["--model", "{model}"]
+effort = ["--effort", "{effort}"]
+
+[effort.CLI_NAME.low]
+description = Little reasoning.
+
+[effort.CLI_NAME.high]
+description = More reasoning.
+`))
+	}
+	return disabled.String() + clis.String() + `
+[model.fast]
+cli         = alpha
+name        = fast-1
+efforts     = low, high
+description = Small and fast.
+
+[model.deep]
+cli         = alpha
+name        = deep-1
+aliases     = strong
+efforts     = low, high
+description = Large and thorough.
+
+[model.other]
+cli         = beta
+name        = other-1
+efforts     = low, high
+description = The other CLI's model.
+`
+}
+
+// newSyntheticEnv is newEnv with syntheticCLIs as the global config.
+func newSyntheticEnv(t *testing.T) *env {
+	t.Helper()
+	e := newEnv(t)
+	e.globalConfig(syntheticCLIs(t))
+	return e
+}
+
 // jevPrompt is the Jev state for a prompt alone.
 func jevPrompt(t *testing.T, p string) string {
 	t.Helper()
@@ -519,22 +584,22 @@ func TestApp_PromptSources(t *testing.T) {
 			wantJev  string
 			wantArgv []any
 		}{
-			{"-p", []string{"-p", "from flag"}, "", "from flag", strs("claude", "-p", "from flag")},
-			{"positional", []string{"from positional"}, "", "from positional", strs("claude", "-p", "from positional")},
-			{"prompt file", []string{"--prompt-file", "task.md"}, "", "from file\r\n", strs("claude", "-p", "from file\r\n")},
-			{"stdin", nil, "from stdin", "from stdin", strs("claude", "-p")},
-			{"empty -p with stdin", []string{"-p", ""}, "from stdin", "from stdin", strs("claude", "-p")},
+			{"-p", []string{"-p", "from flag"}, "", "from flag", strs(helperCommand(t), "-p", "from flag")},
+			{"positional", []string{"from positional"}, "", "from positional", strs(helperCommand(t), "-p", "from positional")},
+			{"prompt file", []string{"--prompt-file", "task.md"}, "", "from file\r\n", strs(helperCommand(t), "-p", "from file\r\n")},
+			{"stdin", nil, "from stdin", "from stdin", strs(helperCommand(t), "-p")},
+			{"empty -p with stdin", []string{"-p", ""}, "from stdin", "from stdin", strs(helperCommand(t), "-p")},
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
-				e := newEnv(t)
+				e := newSyntheticEnv(t)
 				writeFile(t, e.workDir, "task.md", "from file\r\n")
-				e.jev.pick = "claude-sonnet-5-5@low"
+				e.jev.pick = "fast@low"
 				var stdin io.Reader
 				if tc.stdin != "" {
 					stdin = strings.NewReader(tc.stdin)
 				}
-				r := e.run(append([]string{"--cli=claude"}, tc.argv...), stdin)
+				r := e.run(append([]string{"--cli=alpha"}, tc.argv...), stdin)
 
 				require.Equal(t, 0, r.code, r.stderr)
 				assert.Equal(t, []string{jevPrompt(t, tc.wantJev)}, e.jev.requests())
@@ -545,39 +610,38 @@ func TestApp_PromptSources(t *testing.T) {
 	})
 
 	t.Run("all four in order: Jev sees every source, argv no stdin", func(t *testing.T) {
-		e := newEnv(t)
+		e := newSyntheticEnv(t)
 		writeFile(t, e.workDir, "task.md", "file text\n")
-		e.jev.pick = "claude-sonnet-5-5@low"
-		r := e.run([]string{"--prompt-file=task.md", "positional text", "--cli=claude", "-p", "flag text"},
+		e.jev.pick = "fast@low"
+		r := e.run([]string{"--prompt-file=task.md", "positional text", "--cli=alpha", "-p", "flag text"},
 			strings.NewReader("stdin text"))
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Equal(t, []string{jevPrompt(t, "flag text\n\npositional text\n\nfile text\n\n\nstdin text")}, e.jev.requests())
-		assert.Equal(t, strs("claude", "-p", "flag text\n\npositional text\n\nfile text\n",
-			"--model", "claude-sonnet-5-5", "--effort", "low"), decision(t, r.stdout)["argv"])
+		assert.Equal(t, strs(helperCommand(t), "-p", "flag text\n\npositional text\n\nfile text\n",
+			"--model", "fast-1", "--effort", "low"), decision(t, r.stdout)["argv"])
 	})
 
 	t.Run("a prompt file mentioning a file sends its contents", func(t *testing.T) {
-		e := newEnv(t)
+		e := newSyntheticEnv(t)
 		writeFile(t, e.workDir, "task.md", "follow notes.md")
 		writeFile(t, e.workDir, "notes.md", "use opus\n")
-		e.jev.pick = "claude-sonnet-5-5@low"
-		r := e.run([]string{"--cli=claude", "--prompt-file", "task.md"}, nil)
+		e.jev.pick = "fast@low"
+		r := e.run([]string{"--cli=alpha", "--prompt-file", "task.md"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Equal(t, []string{`{"prompt":"follow notes.md","files":["use opus\n"]}`}, e.jev.requests())
 	})
 
 	t.Run("exec: native child gets the explicit prompt in argv and stdin replayed", func(t *testing.T) {
-		e := newEnv(t)
-		e.fakeCommands()
+		e := newSyntheticEnv(t)
 		writeFile(t, e.workDir, "task.md", "line one\nline two\n")
-		r := e.run([]string{"exec", "--cli=claude", "--model=opus", "--effort=low", "-p", "flag", "--prompt-file", "task.md"},
+		r := e.run([]string{"exec", "--cli=alpha", "--model=strong", "--effort=low", "-p", "flag", "--prompt-file", "task.md"},
 			strings.NewReader("piped\r\n"))
 
 		require.Equal(t, 0, r.code, r.stderr)
 		argv, stdin, _ := e.child()
-		assert.Equal(t, []string{"-p", "flag\n\nline one\nline two\n", "--model", "claude-opus-5-5", "--effort", "low"}, argv)
+		assert.Equal(t, []string{"-p", "flag\n\nline one\nline two\n", "--model", "deep-1", "--effort", "low"}, argv)
 		assert.Equal(t, "piped\r\n", string(stdin))
 	})
 }
@@ -589,62 +653,110 @@ func TestApp_Docs(t *testing.T) {
 	}
 
 	t.Run("decision: docs are scored, then only their complexity reaches the routing state", func(t *testing.T) {
-		e := newEnv(t)
+		e := newSyntheticEnv(t)
 		writeFile(t, e.workDir, "project.md", "DOC TEXT, see notes.md\n")
 		writeFile(t, e.workDir, "notes.md", "NOTES\n")
-		e.jev.pick = "claude-sonnet-5-5@low"
+		e.jev.pick = "fast@low"
 		e.jev.level = "8"
-		r := e.run([]string{"--cli=claude", "--doc", "project.md", "fix it"}, nil)
+		r := e.run([]string{"--cli=alpha", "--doc", "project.md", "fix it"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Equal(t, []string{
 			`{"docs":["DOC TEXT, see notes.md\n"]}`,
 			`{"prompt":"fix it","project":{"complexity":8}}`,
 		}, e.jev.requests(), "the docs are not read for mentions and not resent")
-		assert.Equal(t, "claude-sonnet-5-5", decision(t, r.stdout)["model"])
+		assert.Equal(t, "fast-1", decision(t, r.stdout)["model"])
 		assert.NotContains(t, r.stdout, "DOC TEXT")
 		assert.NotContains(t, r.stdout, "complexity", "the decision JSON is unchanged")
 	})
 
 	t.Run("decision: no docs, no complexity stage and no project", func(t *testing.T) {
-		e := newEnv(t)
-		e.jev.pick = "claude-sonnet-5-5@low"
-		r := e.run([]string{"--cli=claude", "fix it"}, nil)
+		e := newSyntheticEnv(t)
+		e.jev.pick = "fast@low"
+		r := e.run([]string{"--cli=alpha", "fix it"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Equal(t, []string{jevPrompt(t, "fix it")}, e.jev.requests())
 	})
 
 	t.Run("decision: an empty doc has nothing to score", func(t *testing.T) {
-		e := newEnv(t)
+		e := newSyntheticEnv(t)
 		writeFile(t, e.workDir, "empty.md", "")
-		e.jev.pick = "claude-sonnet-5-5@low"
-		r := e.run([]string{"--cli=claude", "--doc", "empty.md", "fix it"}, nil)
+		e.jev.pick = "fast@low"
+		r := e.run([]string{"--cli=alpha", "--doc", "empty.md", "fix it"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Equal(t, []string{jevPrompt(t, "fix it")}, e.jev.requests())
 	})
 
 	t.Run("decision: one eligible option asks Jev nothing, docs or not", func(t *testing.T) {
-		e := newEnv(t)
+		e := newSyntheticEnv(t)
 		writeFile(t, e.workDir, "project.md", "DOC TEXT\n")
-		r := e.run([]string{"--model=claude-opus-5-5", "--effort=high", "--doc", "project.md", "fix it"}, nil)
+		r := e.run([]string{"--model=deep-1", "--effort=high", "--doc", "project.md", "fix it"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Empty(t, e.jev.requests())
 	})
 
-	t.Run("exec: the child gets neither the docs nor their paths", func(t *testing.T) {
+	t.Run("exec: a failed complexity stage runs the known CLI with its defaults", func(t *testing.T) {
+		e := newSyntheticEnv(t)
+		writeFile(t, e.workDir, "project.md", "DOC TEXT\n")
+		e.jev.failDocs = true
+		r := e.run([]string{"exec", "--cli=alpha", "--doc", "project.md", "fix it"}, nil)
+
+		require.Equal(t, 0, r.code, r.stderr)
+		argv, _, _ := e.child()
+		assert.Equal(t, []string{"-p", "fix it"}, argv, "no model or effort chosen")
+		assert.Len(t, e.jev.requests(), 1, "only the doc request")
+		assert.NotContains(t, r.stderr, "DOC TEXT")
+	})
+
+	t.Run("decision: a failed complexity stage with more than one CLI left exits 2", func(t *testing.T) {
+		e := newSyntheticEnv(t)
+		writeFile(t, e.workDir, "project.md", "DOC TEXT\n")
+		e.jev.failDocs = true
+		r := e.run([]string{"--doc", "project.md", "fix it"}, nil)
+
+		assert.Equal(t, 2, r.code)
+		assert.Empty(t, r.stdout)
+		assert.Equal(t, 1, strings.Count(r.stderr, "\n"), r.stderr)
+		assert.True(t, strings.HasPrefix(r.stderr, "agrouter: "), r.stderr)
+		assert.NotContains(t, r.stderr, "DOC TEXT")
+	})
+
+	t.Run("exec: the deadline passing while reading a doc runs the known CLI with its defaults", func(t *testing.T) {
 		e := newEnv(t)
-		e.fakeCommands()
+		e.globalConfig(syntheticCLIs(t) + "\n[agrouter]\ntimeout = 1ns\n")
+		writeFile(t, e.workDir, "project.md", "DOC TEXT\n")
+		r := e.run([]string{"exec", "--cli=alpha", "--doc", "project.md", "fix it"}, nil)
+
+		require.Equal(t, 0, r.code, r.stderr)
+		argv, _, _ := e.child()
+		assert.Equal(t, []string{"-p", "fix it"}, argv)
+		assert.Empty(t, e.jev.requests())
+	})
+
+	t.Run("exec: a missing doc after the deadline passed is still a bad doc", func(t *testing.T) {
+		e := newEnv(t)
+		e.globalConfig(syntheticCLIs(t) + "\n[agrouter]\ntimeout = 1ns\n")
+		writeFile(t, e.workDir, "project.md", "DOC TEXT\n")
+		r := e.run([]string{"exec", "--cli=alpha", "--doc", "project.md", "--doc", "nope.md", "fix it"}, nil)
+
+		assert.Equal(t, 2, r.code)
+		assert.Equal(t, "agrouter: --doc: nope.md: no such file\n", r.stderr)
+		assert.NoFileExists(t, filepath.Join(e.out, "argv.json"), "the child must not run")
+	})
+
+	t.Run("exec: the child gets neither the docs nor their paths", func(t *testing.T) {
+		e := newSyntheticEnv(t)
 		writeFile(t, e.workDir, "a.md", "DOC A\n")
 		writeFile(t, e.workDir, "b.md", "DOC B\n")
-		r := e.run([]string{"exec", "--cli=claude", "--model=opus", "--effort=low", "--doc", "a.md", "--doc=b.md", "-p", "flag"},
+		r := e.run([]string{"exec", "--cli=alpha", "--model=strong", "--effort=low", "--doc", "a.md", "--doc=b.md", "-p", "flag"},
 			strings.NewReader("piped"))
 
 		require.Equal(t, 0, r.code, r.stderr)
 		argv, stdin, _ := e.child()
-		assert.Equal(t, []string{"-p", "flag", "--model", "claude-opus-5-5", "--effort", "low"}, argv)
+		assert.Equal(t, []string{"-p", "flag", "--model", "deep-1", "--effort", "low"}, argv)
 		assert.Equal(t, "piped", string(stdin))
 		assert.NotContains(t, r.stderr, "DOC")
 	})
@@ -659,7 +771,7 @@ func TestApp_PromptSourceErrors(t *testing.T) {
 		assert.True(t, strings.HasPrefix(r.stderr, prefix), r.stderr)
 	}
 	// model and effort fixed leave one eligible option: a bad prompt file still fails, though Jev is not asked
-	pinned := []string{"exec", "--cli=claude", "--model=opus", "--effort=low"}
+	pinned := []string{"exec", "--cli=alpha", "--model=strong", "--effort=low"}
 
 	tests := []struct {
 		name   string
@@ -689,8 +801,7 @@ func TestApp_PromptSourceErrors(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			e := newEnv(t)
-			e.fakeCommands()
+			e := newSyntheticEnv(t)
 			require.NoError(t, os.WriteFile(filepath.Join(e.workDir, "task.md"), []byte("x"), 0o600))
 			require.NoError(t, os.WriteFile(filepath.Join(e.workDir, "blob.bin"), []byte{0x89, 'P', 'N', 'G', 0, 0, 1}, 0o600))
 			require.NoError(t, os.Mkdir(filepath.Join(e.workDir, "sub"), 0o700))

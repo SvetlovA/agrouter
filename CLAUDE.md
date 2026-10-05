@@ -13,7 +13,7 @@ pkg/args/              # request model, argv building from templates, skipped ar
 pkg/prompt/            # prompt sources (-p, positional, --prompt-file, stdin), --doc, strict file reads, mentioned files, budget, chunking, doc splitting
 pkg/jev/               # hand-written TypeSafe HTTP client: types, validation, retry, deadline
 pkg/router/            # eligibility, complexity stage (--doc), Jev questions, chunk fan-out and pooling, cannot-decide policy
-pkg/runner/            # child process, stdin replay, Unix signals / Windows Job Objects, .cmd quoting
+pkg/runner/            # child process, stdin replay, Unix process groups / Windows Job Objects, .cmd quoting
 ```
 
 Dependencies point one way: `config` <- `catalog` <- `router`; `prompt` depends on nothing internal; `cmd/agrouter` wires everything.
@@ -46,7 +46,7 @@ Dependencies point one way: `config` <- `catalog` <- `router`; `prompt` depends 
 ```sh
 make test       # locally without -race (no cgo on the dev machine); CI runs make test RACE=-race
 make lint       # golangci-lint v2.13.0 (CI pin); override with GOLANGCI_LINT=<path>
-make build      # .bin/agrouter
+make build      # .bin/agrouter.<branch> (with .exe for Windows builds)
 make generate   # moq mocks
 make fmt        # needs goimports: go install golang.org/x/tools/cmd/goimports@latest
 ```

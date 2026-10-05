@@ -31,12 +31,12 @@ type fanout[C, A any] struct {
 	ask    func(ctx context.Context, c C) (A, error) // one validated request
 	halve  func(c C) []C                             // the pieces of a rejected chunk
 	text   func(c C) string                          // the chunk text, against the minimum state size
-	pos    func(c C) (index, of int)
 	number func(c C, index, of int) C
 }
 
-// run asks every chunk, re-splitting the ones rejected with a 422 until all are answered. resplit
-// marks chunks that already come from a re-split. A failure other than a 422, a second 422, or a
+// run asks every chunk, re-splitting the ones rejected with a 422 until all are answered. chunks
+// are numbered 1 to len(chunks) in order, so errors name a chunk by its position. resplit marks
+// chunks that already come from a re-split. A failure other than a 422, a second 422, or a
 // 422 on a chunk under the minimum state size ends it with an error.
 func (f fanout[C, A]) run(ctx context.Context, chunks []C, resplit bool) ([]*piece[C, A], error) {
 	ctx, cancel := context.WithCancel(ctx)
@@ -69,7 +69,7 @@ func (f fanout[C, A]) round(ctx context.Context, cancel context.CancelFunc, seq 
 		mu       sync.Mutex
 		firstErr error
 	)
-	for _, p := range seq {
+	for i, p := range seq {
 		if p.done {
 			continue
 		}
@@ -86,8 +86,7 @@ func (f fanout[C, A]) round(ctx context.Context, cancel context.CancelFunc, seq 
 			mu.Lock()
 			defer mu.Unlock()
 			if firstErr == nil {
-				index, of := f.pos(p.chunk)
-				firstErr = fmt.Errorf("%s %d of %d: %w", f.name, index, of, err)
+				firstErr = fmt.Errorf("%s %d of %d: %w", f.name, i+1, len(seq), err)
 				cancel()
 			}
 		})
@@ -105,14 +104,13 @@ func (f fanout[C, A]) round(ctx context.Context, cancel context.CancelFunc, seq 
 // sequence. again is false when nothing was rejected. A chunk that cannot be re-split (a second
 // 422, or text under the minimum state size) is an error.
 func (f fanout[C, A]) resplitRejected(seq []*piece[C, A]) (next []*piece[C, A], again bool, err error) {
-	for _, p := range seq {
+	for i, p := range seq {
 		if p.err == nil {
 			next = append(next, p)
 			continue
 		}
 		if p.resplit || prompt.Tokens(len(f.text(p.chunk))) < prompt.MinStateTokens {
-			index, of := f.pos(p.chunk)
-			return nil, false, fmt.Errorf("%s %d of %d: %w: %w", f.name, index, of, errUnsplittable, p.err)
+			return nil, false, fmt.Errorf("%s %d of %d: %w: %w", f.name, i+1, len(seq), errUnsplittable, p.err)
 		}
 		again = true
 		for _, c := range f.halve(p.chunk) {

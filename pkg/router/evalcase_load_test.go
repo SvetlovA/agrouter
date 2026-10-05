@@ -45,7 +45,7 @@ func evalMock(pick string) *mocks.JevClientMock {
 }
 
 func TestLoadEvalCases_SeedSet(t *testing.T) {
-	_, cat := embedded(t)
+	cfg, cat := embedded(t)
 	cases, err := loadEvalCases(evalDir, cat)
 	require.NoError(t, err)
 
@@ -80,6 +80,8 @@ func TestLoadEvalCases_SeedSet(t *testing.T) {
 	assertMidText(t, midText.FileText, "Action item for the agent")
 	require.Len(t, midText.DocTexts, 1)
 	assertMidText(t, midText.DocTexts[0], "## Outbound calls")
+	b := newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget
+	assert.Greater(t, len((&prompt.Result{Docs: midText.DocTexts}).SplitDocs(b)), 1, "the doc is scored in chunks")
 
 	distant := byName["distant-chunk-dependency"]
 	assert.True(t, strings.HasSuffix(distant.Stdin, "}\n"), "reconcile at the end, after the filler")

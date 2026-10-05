@@ -48,7 +48,7 @@ func TestComplexityGoldenRequest(t *testing.T) {
 	r := newRouter(t, cfg, cat, nil)
 	docs := &prompt.Result{Prompt: "rename the flag", Files: []string{"package flags"},
 		Docs: []string{"# Payments\n\nTwelve services, PCI scope, Kafka between them.\n", "Use gofmt.\n"}}
-	require.True(t, docs.DocsFit(r.Budget()))
+	require.True(t, docs.DocsFit(r.budget))
 
 	// force the docs into chunks: the envelope reserves the widest index and count
 	chunks := docs.DocChunks(40)

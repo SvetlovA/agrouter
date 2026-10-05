@@ -106,11 +106,11 @@ func TestDebug_SingleOption(t *testing.T) {
 }
 
 func TestDebug_Docs(t *testing.T) {
-	e := newEnv(t)
+	e := newSyntheticEnv(t)
 	t.Setenv(envDebug, "1")
 	require.NoError(t, os.WriteFile(filepath.Join(e.workDir, "project.md"), []byte("SECRET DOC TEXT\n"), 0o600))
-	e.jev.pick = "claude-sonnet-5-5@low"
-	r := e.run([]string{"--cli=claude", "--doc", "project.md", "fix it"}, nil)
+	e.jev.pick = "fast@low"
+	r := e.run([]string{"--cli=alpha", "--doc", "project.md", "fix it"}, nil)
 	require.Equal(t, 0, r.code, r.stderr)
 
 	lines := debugLines(r.stderr)

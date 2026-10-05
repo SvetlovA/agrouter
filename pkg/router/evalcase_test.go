@@ -195,7 +195,7 @@ func runEvalCase(ctx context.Context, r *Router, cfg *config.Config, cat *catalo
 	}
 	req := &args.Request{CLI: c.CLI, Prompt: args.Optional{Value: c.Prompt, Set: c.Prompt != ""},
 		PromptFile: args.Optional{Value: c.PromptFile, Set: c.PromptFile != ""}, FileText: c.FileText}
-	captured, err := prompt.Capture(ctx, req.Explicit(), stdin)
+	captured, err := prompt.Capture(ctx, req.ArgvPrompt(), stdin)
 	if err != nil {
 		return fail(fmt.Errorf("capture: %w", err))
 	}

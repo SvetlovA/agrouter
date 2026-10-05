@@ -32,7 +32,7 @@ func tree(t *testing.T, files map[string]string) string {
 // mention captures positional as the prompt and reads the files it mentions inside cwd.
 func mention(t *testing.T, ctx context.Context, cwd, positional string) *Result {
 	t.Helper()
-	res, err := Capture(t.Context(), []string{positional}, nil)
+	res, err := Capture(t.Context(), positional, nil)
 	require.NoError(t, err)
 	require.NoError(t, res.ReadMentions(ctx, cwd))
 	return res
@@ -183,7 +183,7 @@ func TestReadMentions_Binary(t *testing.T) {
 
 func TestReadMentions_BinaryWithStdinAttachment(t *testing.T) {
 	cwd := tree(t, map[string]string{"cwd/shot.png": string(pngBytes)})
-	res, err := Capture(t.Context(), []string{"compare with shot.png"}, strings.NewReader(string(jpegBytes)))
+	res, err := Capture(t.Context(), "compare with shot.png", strings.NewReader(string(jpegBytes)))
 	require.NoError(t, err)
 	require.NoError(t, res.ReadMentions(t.Context(), cwd))
 	assert.Equal(t, []Attachment{
@@ -200,7 +200,7 @@ func TestReadMentions_NoLimit(t *testing.T) {
 		"cwd/late.bin":  big + "\x00",
 	})
 	stdin := strings.Repeat("stdin text\n", 1<<16)
-	res, err := Capture(t.Context(), []string{"big.txt other.txt late.bin"}, strings.NewReader(stdin))
+	res, err := Capture(t.Context(), "big.txt other.txt late.bin", strings.NewReader(stdin))
 	require.NoError(t, err)
 	require.NoError(t, res.ReadMentions(t.Context(), cwd))
 	require.NoError(t, res.Undecidable)
@@ -211,7 +211,7 @@ func TestReadMentions_NoLimit(t *testing.T) {
 
 func TestReadMentions_DocsNotScanned(t *testing.T) {
 	cwd := tree(t, map[string]string{"cwd/notes.md": "notes\n", "cwd/a.go": "package a\n"})
-	res, err := Capture(t.Context(), []string{"fix a.go"}, nil)
+	res, err := Capture(t.Context(), "fix a.go", nil)
 	require.NoError(t, err)
 	res.Docs = []string{"see notes.md"}
 	require.NoError(t, res.ReadMentions(t.Context(), cwd))

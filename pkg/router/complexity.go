@@ -27,8 +27,8 @@ type ComplexityResult struct {
 }
 
 // complexity scores the docs: one request when they all fit, and otherwise one per doc chunk, all
-// at once. A 422 on the whole docs splits them at half the doc budget, once; a 422 on a doc chunk
-// halves it, once. Any other failure, a second 422 or the deadline is an error: supplied docs are
+// at once. A 422 on the whole docs splits them at half their size or of the doc budget, whichever is
+// smaller, once; a 422 on a doc chunk halves it, once. Any other failure, a second 422 or the deadline is an error: supplied docs are
 // never dropped.
 func (r *Router) complexity(ctx context.Context, captured *prompt.Result) (*ComplexityResult, error) {
 	questions := complexityQuestions(r.cfg.Agrouter)
@@ -45,7 +45,8 @@ func (r *Router) complexity(ctx context.Context, captured *prompt.Result) (*Comp
 		if captured.DocsTokens() < prompt.MinStateTokens {
 			return nil, fmt.Errorf("%w: %w", errUnsplittable, err)
 		}
-		chunks, resplit = captured.DocChunks(r.budget.Doc/2), true
+		// half of the docs' own size, so a single doc well under the budget is still cut in two
+		chunks, resplit = captured.DocChunks(min(r.budget.Doc, captured.DocsTokens())/2), true
 	}
 	seq, err := r.docFanout(questions).run(ctx, chunks, resplit)
 	if err != nil {
@@ -69,7 +70,6 @@ func (r *Router) docFanout(questions map[string]jev.Question) fanout[prompt.DocC
 		},
 		halve: prompt.HalveDoc,
 		text:  func(c prompt.DocChunk) string { return c.Text },
-		pos:   func(c prompt.DocChunk) (int, int) { return c.Index, c.Of },
 		number: func(c prompt.DocChunk, index, of int) prompt.DocChunk {
 			c.Index, c.Of = index, of
 			return c
