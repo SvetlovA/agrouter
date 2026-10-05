@@ -343,7 +343,7 @@ func TestApp_Decision(t *testing.T) {
 		assert.Empty(t, r.stderr)
 		assert.Equal(t, map[string]any{
 			"cli": "claude", "model": "claude-sonnet-5-5", "effort": "low",
-			"argv":    strs("claude", "-p", "fix the typo in README", "--model", "claude-sonnet-5-5", "--effort", "low"),
+			"argv":    strs("claude", "-p", "--model", "claude-sonnet-5-5", "--effort", "low", "--", "fix the typo in README"),
 			"skipped": []any{},
 		}, decision(t, r.stdout))
 		assert.Equal(t, []string{`{"prompt":"fix the typo in README"}`}, e.jev.requests())
@@ -378,7 +378,7 @@ func TestApp_Decision(t *testing.T) {
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Empty(t, r.stderr)
 		decision(t, r.stdout)
-		assert.JSONEq(t, `{"cli":"claude","model":null,"effort":null,"argv":["claude","-p","fix it","--output-format","json"],"skipped":[]}`,
+		assert.JSONEq(t, `{"cli":"claude","model":null,"effort":null,"argv":["claude","-p","--output-format","json","--","fix it"],"skipped":[]}`,
 			r.stdout)
 		assert.Empty(t, e.jev.requests())
 	})
@@ -392,7 +392,7 @@ func TestApp_Decision(t *testing.T) {
 		d := decision(t, r.stdout)
 		assert.Nil(t, d["model"])
 		assert.Equal(t, "high", d["effort"])
-		assert.Equal(t, strs("claude", "-p", "fix it", "--effort", "high"), d["argv"])
+		assert.Equal(t, strs("claude", "-p", "--effort", "high", "--", "fix it"), d["argv"])
 	})
 
 	t.Run("skipped argument: warning and skipped array", func(t *testing.T) {
@@ -404,7 +404,7 @@ func TestApp_Decision(t *testing.T) {
 		assert.Equal(t, "agrouter: warning: skipped --output-format json: codex has no mapping for it\n", r.stderr)
 		assert.Equal(t, map[string]any{
 			"cli": "codex", "model": "gpt-6-luna", "effort": "low",
-			"argv":    strs("codex", "exec", "list the files", "--model", "gpt-6-luna", "-c", `model_reasoning_effort="low"`),
+			"argv":    strs("codex", "exec", "--model", "gpt-6-luna", "-c", `model_reasoning_effort="low"`, "--", "list the files"),
 			"skipped": strs("--output-format json"),
 		}, decision(t, r.stdout))
 	})
@@ -418,8 +418,8 @@ func TestApp_Decision(t *testing.T) {
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Equal(t, []string{`{"prompt":"plan the migration\n\ndetails on stdin"}`}, e.jev.requests())
 		d := decision(t, r.stdout)
-		assert.Equal(t, strs("claude", "-p", "plan the migration", "--permission-mode", "plan", "--verbose",
-			"--model", "claude-opus-5-5", "--effort", "high", "--add-dir", "RAWTOKEN"), d["argv"])
+		assert.Equal(t, strs("claude", "-p", "--permission-mode", "plan", "--verbose",
+			"--model", "claude-opus-5-5", "--effort", "high", "--add-dir", "RAWTOKEN", "--", "plan the migration"), d["argv"])
 	})
 
 	t.Run("html characters are not escaped", func(t *testing.T) {
@@ -521,7 +521,8 @@ command     = COMMAND
 description = A coding agent that exists only in this test.
 
 [cli.CLI_NAME.args]
-print  = ["-p", "{prompt}"]
+print  = ["-p"]
+prompt = ["--", "{prompt}"]
 model  = ["--model", "{model}"]
 effort = ["--effort", "{effort}"]
 
@@ -577,6 +578,9 @@ func TestApp_PromptSources(t *testing.T) {
 	}
 
 	t.Run("each source alone", func(t *testing.T) {
+		want := func(prompt ...string) []any {
+			return strs(append([]string{helperCommand(t), "-p", "--model", "fast-1", "--effort", "low"}, prompt...)...)
+		}
 		tests := []struct {
 			name     string
 			argv     []string
@@ -584,16 +588,20 @@ func TestApp_PromptSources(t *testing.T) {
 			wantJev  string
 			wantArgv []any
 		}{
-			{"-p", []string{"-p", "from flag"}, "", "from flag", strs(helperCommand(t), "-p", "from flag")},
-			{"positional", []string{"from positional"}, "", "from positional", strs(helperCommand(t), "-p", "from positional")},
-			{"prompt file", []string{"--prompt-file", "task.md"}, "", "from file\r\n", strs(helperCommand(t), "-p", "from file\r\n")},
-			{"stdin", nil, "from stdin", "from stdin", strs(helperCommand(t), "-p")},
-			{"empty -p with stdin", []string{"-p", ""}, "from stdin", "from stdin", strs(helperCommand(t), "-p")},
+			{"-p", []string{"-p", "from flag"}, "", "from flag", want("--", "from flag")},
+			{"positional", []string{"from positional"}, "", "from positional", want("--", "from positional")},
+			{"prompt file", []string{"--prompt-file", "task.md"}, "", "from file\r\n", want("--", "from file\r\n")},
+			{"flag-shaped prompt stays the prompt", []string{"--prompt=--help"}, "", "--help", want("--", "--help")},
+			{"flag-shaped prompt file", []string{"--prompt-file", "flags.md"}, "", "--dangerously-skip-permissions",
+				want("--", "--dangerously-skip-permissions")},
+			{"stdin", nil, "from stdin", "from stdin", want()},
+			{"empty -p with stdin", []string{"-p", ""}, "from stdin", "from stdin", want()},
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
 				e := newSyntheticEnv(t)
 				writeFile(t, e.workDir, "task.md", "from file\r\n")
+				writeFile(t, e.workDir, "flags.md", "--dangerously-skip-permissions")
 				e.jev.pick = "fast@low"
 				var stdin io.Reader
 				if tc.stdin != "" {
@@ -604,7 +612,7 @@ func TestApp_PromptSources(t *testing.T) {
 				require.Equal(t, 0, r.code, r.stderr)
 				assert.Equal(t, []string{jevPrompt(t, tc.wantJev)}, e.jev.requests())
 				d := decision(t, r.stdout)
-				assert.Equal(t, tc.wantArgv, d["argv"].([]any)[:len(tc.wantArgv)])
+				assert.Equal(t, tc.wantArgv, d["argv"], "the prompt last, after --; none without one")
 			})
 		}
 	})
@@ -618,8 +626,8 @@ func TestApp_PromptSources(t *testing.T) {
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Equal(t, []string{jevPrompt(t, "flag text\n\npositional text\n\nfile text\n\n\nstdin text")}, e.jev.requests())
-		assert.Equal(t, strs(helperCommand(t), "-p", "flag text\n\npositional text\n\nfile text\n",
-			"--model", "fast-1", "--effort", "low"), decision(t, r.stdout)["argv"])
+		assert.Equal(t, strs(helperCommand(t), "-p", "--model", "fast-1", "--effort", "low",
+			"--", "flag text\n\npositional text\n\nfile text\n"), decision(t, r.stdout)["argv"])
 	})
 
 	t.Run("a prompt file mentioning a file sends its contents", func(t *testing.T) {
@@ -641,7 +649,7 @@ func TestApp_PromptSources(t *testing.T) {
 
 		require.Equal(t, 0, r.code, r.stderr)
 		argv, stdin, _ := e.child()
-		assert.Equal(t, []string{"-p", "flag\n\nline one\nline two\n", "--model", "deep-1", "--effort", "low"}, argv)
+		assert.Equal(t, []string{"-p", "--model", "deep-1", "--effort", "low", "--", "flag\n\nline one\nline two\n"}, argv)
 		assert.Equal(t, "piped\r\n", string(stdin))
 	})
 }
@@ -706,7 +714,7 @@ func TestApp_Docs(t *testing.T) {
 
 		require.Equal(t, 0, r.code, r.stderr)
 		argv, _, _ := e.child()
-		assert.Equal(t, []string{"-p", "fix it"}, argv, "no model or effort chosen")
+		assert.Equal(t, []string{"-p", "--", "fix it"}, argv, "no model or effort chosen")
 		assert.Len(t, e.jev.requests(), 1, "only the doc request")
 		assert.NotContains(t, r.stderr, "DOC TEXT")
 	})
@@ -732,7 +740,7 @@ func TestApp_Docs(t *testing.T) {
 
 		require.Equal(t, 0, r.code, r.stderr)
 		argv, _, _ := e.child()
-		assert.Equal(t, []string{"-p", "fix it"}, argv)
+		assert.Equal(t, []string{"-p", "--", "fix it"}, argv)
 		assert.Empty(t, e.jev.requests())
 	})
 
@@ -756,7 +764,7 @@ func TestApp_Docs(t *testing.T) {
 
 		require.Equal(t, 0, r.code, r.stderr)
 		argv, stdin, _ := e.child()
-		assert.Equal(t, []string{"-p", "flag", "--model", "deep-1", "--effort", "low"}, argv)
+		assert.Equal(t, []string{"-p", "--model", "deep-1", "--effort", "low", "--", "flag"}, argv)
 		assert.Equal(t, "piped", string(stdin))
 		assert.NotContains(t, r.stderr, "DOC")
 	})
@@ -852,7 +860,7 @@ func TestApp_Exec(t *testing.T) {
 		assert.Equal(t, map[string]any{"cli": "claude", "model": "claude-opus-5-5", "effort": "low"},
 			decision(t, r.stderr))
 		argv, stdin, _ := e.child()
-		assert.Equal(t, []string{"-p", "fix it", "--model", "claude-opus-5-5", "--effort", "low"}, argv)
+		assert.Equal(t, []string{"-p", "--model", "claude-opus-5-5", "--effort", "low", "--", "fix it"}, argv)
 		assert.Empty(t, stdin)
 	})
 
@@ -912,7 +920,8 @@ command     = COMMAND
 description = A coding agent that exists only in this test.
 
 [cli.CLI_NAME.args]
-print                     = ["run", "--quiet", "{prompt}"]
+print                     = ["run", "--quiet"]
+prompt                    = ["--", "{prompt}"]
 model                     = ["--llm", "{model}"]
 effort                    = ["--think={effort}"]
 output-format.stream-json = ["--events", "ndjson"]
@@ -962,8 +971,8 @@ func TestApp_ConfigDrivenNames(t *testing.T) {
 			require.True(t, ok, r.stderr)
 			assert.Equal(t, map[string]any{"cli": tc.cli, "model": tc.model, "effort": tc.effort}, decision(t, log))
 			got, gotStdin, _ := e.child()
-			assert.Equal(t, []string{"run", "--quiet", "do it now", "--events", "ndjson", "--mode", "read",
-				"--llm", tc.model, "--think=" + tc.effort}, got)
+			assert.Equal(t, []string{"run", "--quiet", "--events", "ndjson", "--mode", "read",
+				"--llm", tc.model, "--think=" + tc.effort, "--", "do it now"}, got)
 			assert.Equal(t, stdin, string(gotStdin))
 			require.Len(t, e.jev.requests(), 1)
 
@@ -973,8 +982,8 @@ func TestApp_ConfigDrivenNames(t *testing.T) {
 			assert.Equal(t, tc.cli, d["cli"])
 			assert.Equal(t, tc.model, d["model"])
 			assert.Equal(t, tc.effort, d["effort"])
-			assert.Equal(t, strs(helperCommand(t), "run", "--quiet", "do it", "--llm", tc.model,
-				"--think="+tc.effort), d["argv"])
+			assert.Equal(t, strs(helperCommand(t), "run", "--quiet", "--llm", tc.model,
+				"--think="+tc.effort, "--", "do it"), d["argv"])
 			assert.Len(t, e.jev.requests(), 1, "a model alias plus an effort selects one option without Jev")
 		})
 	}

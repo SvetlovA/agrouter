@@ -91,15 +91,21 @@ func (r *Router) askDocs(ctx context.Context, state any, questions map[string]je
 	if !ok {
 		return DocScore{}, fmt.Errorf("%w: no %q answer", jev.ErrMalformed, questionEvidence)
 	}
-	var score float64
+	// jev accepts probabilities summing to 1 within a tolerance: dividing by their sum keeps the
+	// score inside the level range
+	var score, total float64
 	for i := range complexityLevels {
 		p, ok := level.Probabilities[strconv.Itoa(i)]
 		if !ok {
 			return DocScore{}, fmt.Errorf("%w: no probability for complexity %d", jev.ErrMalformed, i)
 		}
 		score += float64(i) * p
+		total += p
 	}
-	return DocScore{Score: score, Evidence: evidence.Noul}, nil
+	if total <= 0 {
+		return DocScore{}, fmt.Errorf("%w: complexity probabilities sum to %g", jev.ErrMalformed, total)
+	}
+	return DocScore{Score: score / total, Evidence: evidence.Noul}, nil
 }
 
 // reduce combines the doc scores into the project complexity: the mean weighted by evidence (a

@@ -25,14 +25,17 @@ type Skip struct {
 type Result struct {
 	Argv    []string
 	Skipped []Skip
-	// promptAt is the index of the {prompt} token in Argv, -1 when there is none; rawAt is where raw
-	// passthrough starts, len(Argv) when there is none. Both serve the redacted rendering.
+	// promptAt is the index of the {prompt} token in Argv, -1 when there is none; raw passthrough is
+	// Argv[rawAt:rawAt+rawLen]. They serve the redacted rendering.
 	promptAt int
 	rawAt    int
+	rawLen   int
 }
 
 // Build turns req into the argv for cli: command, print, mapped arguments in the caller's order,
-// model, effort, prompt, then raw passthrough (only when choice.Pinned). An argument the CLI does
+// model, effort, raw passthrough (only when choice.Pinned), then the prompt template, emitted only
+// when there is a prompt. The prompt goes last, after the template's "--", so neither the prompt
+// text nor anything after it is parsed as a child option. An argument the CLI does
 // not map, or maps to [], is skipped with a warning; arguments hitting the same mapping key (and,
 // for config.* keys, the same key=value) are emitted once.
 func Build(cli config.CLI, req *Request, choice Choice) Result {
@@ -62,12 +65,12 @@ func Build(cli config.CLI, req *Request, choice Choice) Result {
 		}
 		b.mapped(config.KeyEffort, "", spelling)
 	}
-	b.emit(config.KeyPrompt, "")
 
 	b.res.rawAt = len(b.res.Argv)
 	if len(req.Raw) > 0 {
 		if choice.Pinned {
 			b.res.Argv = append(b.res.Argv, req.Raw...)
+			b.res.rawLen = len(req.Raw)
 		} else {
 			b.res.Skipped = append(b.res.Skipped, Skip{
 				Spelling: strings.Join(append([]string{"--"}, req.Raw...), " "),
@@ -75,6 +78,10 @@ func Build(cli config.CLI, req *Request, choice Choice) Result {
 					len(req.Raw)),
 			})
 		}
+	}
+
+	if b.prompt != "" {
+		b.emit(config.KeyPrompt, "")
 	}
 	return b.res
 }
@@ -108,14 +115,11 @@ func (b *builder) skip(spelling, reason string) {
 }
 
 // emit appends key's template with placeholders substituted. A missing key emits nothing. The
-// {prompt} token becomes the explicit prompt (Request.ArgvPrompt), or zero tokens when it is empty.
+// {prompt} token becomes the explicit prompt (Request.ArgvPrompt).
 func (b *builder) emit(key, value string) {
 	r := strings.NewReplacer(config.PlaceholderModel, b.model, config.PlaceholderEffort, b.effort, config.PlaceholderValue, value)
 	for _, tok := range b.cli.Args[key] {
 		if tok == config.PlaceholderPrompt {
-			if b.prompt == "" {
-				continue
-			}
 			b.res.promptAt = len(b.res.Argv)
 			b.res.Argv = append(b.res.Argv, b.prompt)
 			continue

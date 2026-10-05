@@ -30,9 +30,11 @@ description  = Claude Code (Anthropic). Agentic coding CLI with file editing, sh
 # how each agrouter argument is spelled for this CLI. A missing key = not supported:
 # a call using it never routes to this CLI. [] = supported, adds nothing.
 [cli.claude.args]
-# required, always emitted first: non-interactive mode. {prompt} = the -p, positional and --prompt-file text, dropped when none;
-# claude -p reads stdin, and appends it after the prompt argument
-print                        = ["-p", "{prompt}"]
+# required, always emitted first: non-interactive mode
+print                        = ["-p"]
+# required, always emitted last and only when there is a prompt: {prompt} = the -p, positional and --prompt-file text,
+# after "--" so text starting with "-" is never parsed as a flag. claude -p reads stdin, and appends it after the prompt argument
+prompt                       = ["--", "{prompt}"]
 model                        = ["--model", "{model}"]
 effort                       = ["--effort", "{effort}"]
 # --dangerously-skip-permissions is agrouter's alias for this key
@@ -52,9 +54,9 @@ command      = codex
 description  = Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.
 
 [cli.codex.args]
-# codex exec reads stdin when no prompt argument is given, and appends it as a <stdin> block when one is.
-# to put the prompt at the end instead: print = ["exec"] and prompt = ["{prompt}"]
-print                        = ["exec", "{prompt}"]
+print                        = ["exec"]
+# codex exec reads stdin when no prompt argument is given, and appends it as a <stdin> block when one is
+prompt                       = ["--", "{prompt}"]
 model                        = ["--model", "{model}"]
 # -c values are TOML; the quotes are part of the token (no shell)
 effort                       = ["-c", "model_reasoning_effort=\"{effort}\""]

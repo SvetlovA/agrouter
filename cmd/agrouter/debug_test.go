@@ -43,7 +43,7 @@ func TestDebug_Redaction(t *testing.T) {
 	assert.Regexp(t, `^eligible: [1-9][0-9]* option\(s\) on claude$`, lines[1])
 	assert.Equal(t, "dropped codex: --cli claude", lines[2])
 	assert.True(t, strings.HasPrefix(lines[3], "jev: choice "+e.jev.pick+", confidence 0.900, top ["+e.jev.pick+" 1.000"))
-	assert.Equal(t, "command: claude -p <prompt> --verbose --model claude-sonnet-5-5 --effort low <2 raw argument(s)>", lines[4])
+	assert.Equal(t, "command: claude -p --verbose --model claude-sonnet-5-5 --effort low <2 raw argument(s)> -- <prompt>", lines[4])
 	assert.NotContains(t, r.stderr, secret)
 	assert.NotContains(t, r.stderr, "raw-two")
 	assert.NotContains(t, r.stderr, testKey)
@@ -79,7 +79,7 @@ func TestDebug_JevFailureEchoingKey(t *testing.T) {
 	assert.Equal(t, "api key: from flag", lines[0])
 	assert.True(t, strings.HasPrefix(lines[3], "jev failed: route request: "), lines[3])
 	assert.Contains(t, lines[3], "running codex with the caller's fixed values")
-	assert.Equal(t, "command: codex exec <prompt>", lines[4])
+	assert.Equal(t, "command: codex exec -- <prompt>", lines[4])
 	assert.NotContains(t, r.stderr, "flag-secret-key")
 	assert.NotContains(t, r.stdout, "flag-secret-key")
 }

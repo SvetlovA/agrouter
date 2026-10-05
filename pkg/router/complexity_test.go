@@ -84,6 +84,9 @@ func TestAskDocsExpectedValue(t *testing.T) {
 		{name: "split between two levels", probs: map[int]float64{3: 0.5, 7: 0.5}, want: 5},
 		{name: "not the argmax", probs: map[int]float64{0: 0.4, 10: 0.3, 9: 0.3}, want: 5.7},
 		{name: "all on zero", probs: map[int]float64{0: 1}, want: 0},
+		{name: "sum above 1 within tolerance stays in range", probs: map[int]float64{10: 1, 9: 0.009},
+			want: (10 + 9*0.009) / 1.009},
+		{name: "sum below 1 within tolerance", probs: map[int]float64{4: 0.5, 6: 0.495}, want: (2 + 6*0.495) / 0.995},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -233,6 +236,11 @@ func TestComplexityFailures(t *testing.T) {
 				a := docAnswers(3, 1)
 				delete(a[questionComplexity].Probabilities, "10")
 				return a, nil
+			}},
+		{name: "probabilities all zero", captured: small, want: jev.ErrMalformed,
+			ask: func(prompt.DocChunk, bool) (map[string]jev.Answer, error) {
+				return map[string]jev.Answer{questionComplexity: levels(nil),
+					questionEvidence: {Type: jev.TypeNoul, Noul: 1}}, nil
 			}},
 		{name: "whole-docs request failing", captured: small, want: jev.ErrOverloaded,
 			ask: func(prompt.DocChunk, bool) (map[string]jev.Answer, error) {

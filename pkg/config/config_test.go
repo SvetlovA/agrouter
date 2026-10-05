@@ -25,7 +25,8 @@ command     = alpha
 description = Alpha agent.
 
 [cli.alpha.args]
-print                  = ["-p", "{prompt}"]
+print                  = ["-p"]
+prompt                 = ["--", "{prompt}"]
 model                  = ["--model", "{model}"]
 effort                 = ["-c", "effort=\"{effort}\""]
 output-format.text     = []
@@ -35,7 +36,8 @@ permission-mode.plan   = ["--mode", "plan"]
 command = beta
 
 [cli.beta.args]
-print = ["run", "{prompt}"]
+print = ["run"]
+prompt = ["--", "{prompt}"]
 model = ["-m", "{model}"]
 
 [model.alpha-big]
@@ -109,7 +111,8 @@ func TestLoad_Embedded(t *testing.T) {
 	assert.Equal(t, "alpha", alpha.Command)
 	assert.Equal(t, "Alpha agent.", alpha.Description)
 	assert.Equal(t, map[string][]string{
-		"print":                {"-p", "{prompt}"},
+		"print":                {"-p"},
+		"prompt":               {"--", "{prompt}"},
 		"model":                {"--model", "{model}"},
 		"effort":               {"-c", `effort="{effort}"`},
 		"output-format.text":   {},
@@ -145,7 +148,7 @@ api_key = global-key
 timeout = 20s
 
 [cli.alpha.args]
-print = ["--print", "{prompt}"]
+print = ["--print"]
 verbose = ["-v"]
 
 [model.alpha-big]
@@ -174,7 +177,7 @@ name = local-new
 	assert.Equal(t, "jev-latest", cfg.Agrouter.JevModel, "untouched keys keep the embedded value")
 
 	alpha, _ := cfg.CLIByName("alpha")
-	assert.Equal(t, []string{"--print", "{prompt}"}, alpha.Args["print"], "global overrides one args key")
+	assert.Equal(t, []string{"--print"}, alpha.Args["print"], "global overrides one args key")
 	assert.Equal(t, []string{"--use-model", "{model}"}, alpha.Args["model"], "local overrides one args key")
 	assert.Equal(t, []string{"-c", `effort="{effort}"`}, alpha.Args["effort"], "other args keys stay embedded")
 	assert.Equal(t, []string{"-v"}, alpha.Args["verbose"], "a layer can add an args key")

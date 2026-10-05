@@ -84,10 +84,10 @@ Decision mode:
 
 ```sh
 agrouter -p "fix the flaky test in pkg/foo" --dangerously-skip-permissions --output-format stream-json
-# {"cli":"codex","model":"gpt-6.1-sol","effort":"medium","argv":["codex","exec","fix the flaky test in pkg/foo","--dangerously-bypass-approvals-and-sandbox","--skip-git-repo-check","--json","--model","gpt-6.1-sol","-c","model_reasoning_effort=\"medium\""],"skipped":[]}
+# {"cli":"codex","model":"gpt-6.1-sol","effort":"medium","argv":["codex","exec","--dangerously-bypass-approvals-and-sandbox","--skip-git-repo-check","--json","--model","gpt-6.1-sol","-c","model_reasoning_effort=\"medium\"","--","fix the flaky test in pkg/foo"],"skipped":[]}
 ```
 
-`argv` holds the `-p`, positional and `--prompt-file` text, joined like the routing prompt, but never stdin: a caller that piped a prompt must send it to the child itself. `--doc` is never in `argv`; the child loads its own `CLAUDE.md`/`AGENTS.md`. `effort` is `null` for a model without efforts; `skipped` lists, as the caller spelled them, the arguments that got a skip warning: an unknown or disabled `--cli`, arguments the chosen CLI does not map or maps to nothing, and raw tokens after `--` without `--cli`.
+`argv` holds the `-p`, positional and `--prompt-file` text, joined like the routing prompt, as its last token after `--`, so text that starts with `-` reaches the child as the prompt and never as one of its flags (each CLI's `prompt` mapping must end with `"--", "{prompt}"`; raw tokens after agrouter's own `--` come before it). It never holds stdin: a caller that piped a prompt must send it to the child itself. `--doc` is never in `argv`; the child loads its own `CLAUDE.md`/`AGENTS.md`. `effort` is `null` for a model without efforts; `skipped` lists, as the caller spelled them, the arguments that got a skip warning: an unknown or disabled `--cli`, arguments the chosen CLI does not map or maps to nothing, and raw tokens after `--` without `--cli`.
 
 Exec mode, with the prompt on stdin and the output format fixed by pinning the CLI:
 

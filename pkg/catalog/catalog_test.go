@@ -22,14 +22,16 @@ complexity_evidence = Is it evidence?
 [cli.alpha]
 command = alpha
 [cli.alpha.args]
-print = ["{prompt}"]
+print = []
+prompt = ["--", "{prompt}"]
 model = ["--model", "{model}"]
 effort = ["--effort", "{effort}"]
 
 [cli.beta]
 command = beta
 [cli.beta.args]
-print = ["{prompt}"]
+print = []
+prompt = ["--", "{prompt}"]
 model = ["--model", "{model}"]
 effort = ["--effort", "{effort}"]
 
