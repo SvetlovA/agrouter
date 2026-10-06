@@ -174,6 +174,12 @@ Ralphex config:
 
 ```ini
 # ~/.config/ralphex/config
+# agrouter environment variables (set before starting ralphex, not as INI keys):
+# AGROUTER_CLI=codex pins external review; --cli=claude below overrides it for implementation.
+# TYPESAFE_API_KEY supplies Jev's key instead of [agrouter] api_key; --jev-api-key wins.
+# AGROUTER_CONFIG_DIR selects the directory containing agrouter's global config file.
+# AGROUTER_DEBUG=1 enables redacted stderr diagnostics; it does not enable --verbose.
+# no environment overrides exist for model, effort, --doc, --verbose, timeout or jev_model.
 claude_command = agrouter
 claude_args    = exec --cli=claude --dangerously-skip-permissions --output-format stream-json --verbose
 ```
@@ -182,6 +188,8 @@ Codex mode (`executor = codex`) and the external Codex review:
 
 ```ini
 # ~/.config/ralphex/config
+# set AGROUTER_CLI=codex in ralphex's environment to force this review to Codex.
+# codex_command accepts only the executable; ralphex adds exec and the other arguments.
 codex_command          = agrouter
 # empty, so Jev chooses; ralphex's defaults would otherwise fix both
 codex_model            =

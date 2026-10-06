@@ -2,10 +2,23 @@
 # Loaded with IgnoreInlineComment, so comments must be on their own lines.
 # Override any key in ~/.config/agrouter/config (AGROUTER_CONFIG_DIR) or .agrouter/config;
 # remove a section with enabled = false.
+# environment variables are set in the process environment, not as keys in this file:
+# TYPESAFE_API_KEY: overrides [agrouter] api_key; --jev-api-key takes precedence,
+# including an explicitly empty --jev-api-key, which clears the key.
+# AGROUTER_CLI: restricts routing like --cli=NAME; an explicit --cli overrides it.
+# with ralphex, AGROUTER_CLI=codex pins external review while --cli=claude in
+# claude_args keeps implementation on its own CLI.
+# AGROUTER_CONFIG_DIR: directory containing the global config file, replacing
+# ~/.config/agrouter; .agrouter/config in the working directory still overrides it.
+# AGROUTER_DEBUG=1: enables redacted diagnostics on stderr; it is separate from
+# --verbose, which controls decision details. other values leave debug disabled.
+# these are the only supported environment variables; model, effort, --doc,
+# --verbose, timeout and jev_model have no environment-variable overrides.
 
 [agrouter]
 # TypeSafe API key for Jev. Empty = no key. Prefer the env var or the global config;
 # never put it in a local .agrouter/config that may be committed.
+# precedence: --jev-api-key > non-empty TYPESAFE_API_KEY > local > global > embedded.
 api_key   =
 # pin a versioned id (e.g. jev-1.13.0) to keep routing stable across Jev releases
 jev_model = jev-latest
@@ -52,7 +65,7 @@ relevance = Does the text in `chunk.text` state the task to perform, its require
 # Score uses ten ordered descriptions (levels 0 to 9); its numeric result is scaled to 0 to 10.
 # Choice and Score confidence is recorded in decision JSON, exec logs and debug output only;
 # it does not affect routing, relevance or the evidence weight below.
-# decision JSON and exec logs also record route_average and complexity_average: simple means
+# decision JSON and exec logs record confidence.model_selection and confidence.project_complexity: simple means
 # across the final chunks in each stage, including zero confidence, without relevance/evidence weights.
 complexity_question = How complex is the project that the docs in `state` describe (`docs`, or `doc.text` when it is one part of longer docs)? Judge the codebase as a whole: its size, architecture, dependencies and constraints, not any single task in it. Rate the project against the ordered complexity descriptions.
 # complexity_evidence: asked beside complexity_question, using the same docs or doc.text fields.
