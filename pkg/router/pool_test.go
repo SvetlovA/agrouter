@@ -369,7 +369,8 @@ func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 	req := &args.Request{CLI: "claude"}
 	el := Eligible(cfg, cat, req)
 	big := captured("START HARD: port the scheduler\n" + filler(200_000))
-	tail := captured(filler(145_000)) // two full chunks and a short last one
+	tail := captured(filler(145_000))
+	tail.Files = []string{"short tail file\n"} // a separate short chunk regardless of question size
 
 	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
 	tailSplit, err := tail.Split(r.budget)
