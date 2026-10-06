@@ -33,9 +33,13 @@ const slashEscape = "\x00"
 
 // helpText is the long description in --help, including the API key cautions.
 const helpText = `agrouter asks TypeSafe's Jev which (cli, model, effort) should run a prompt.
-Without "exec" it prints that decision as one JSON line; with "exec" as the
+Without "exec" it prints that decision as JSON; with "exec" as the
 first token it runs the chosen CLI with the arguments translated through its
 config.
+The default decision includes the selection, project complexity and average
+confidence. --verbose prints indented JSON with every chunk, option probability,
+complexity score, argv, skipped argument and a copyable command;
+it controls agrouter's output only, never the chosen CLI's verbosity.
 
 The prompt is -p TEXT, the positional argument, the --prompt-file text and
 stdin, in that order, joined by blank lines; at least one must be non-empty.
@@ -55,6 +59,7 @@ type command struct {
 	req     *args.Request
 	help    string // the help text when --help was given
 	version bool
+	verbose bool
 }
 
 // parseArgs parses agrouter's command line. getenv supplies AGROUTER_CLI. The error is a usage
@@ -108,7 +113,7 @@ func parseArgs(argv []string, getenv func(string) string) (command, error) {
 		req.CLI = getenv(cliEnv)
 	}
 	applyConfigConstraints(req)
-	return command{req: req}, nil
+	return command{req: req, verbose: opts.Verbose}, nil
 }
 
 // flagSet is agrouter's options. The func fields append to the request as go-flags parses them,
@@ -130,7 +135,7 @@ type flagSet struct {
 	SkipPermissions func()       `long:"dangerously-skip-permissions" description:"alias for --permission-mode bypassPermissions"`
 	BypassApprovals func()       `long:"dangerously-bypass-approvals-and-sandbox" description:"alias for --permission-mode bypassPermissions"`
 	OutputFormat    func(string) `long:"output-format" value-name:"FORMAT" unquote:"false" description:"text, json or stream-json (mapped)"`
-	Verbose         func()       `long:"verbose" description:"verbose output (mapped)"`
+	Verbose         bool         `long:"verbose" description:"include full decision details (agrouter only)"`
 	Sandbox         func(string) `long:"sandbox" value-name:"MODE" unquote:"false" description:"read-only, workspace-write or danger-full-access (mapped)"`
 	Config          func(string) `short:"c" long:"config" value-name:"KEY=VALUE" unquote:"false" description:"config override, repeatable (mapped by key)"`
 }
@@ -178,7 +183,6 @@ func newFlagSet(req *args.Request, seen *flagCounts) *flagSet {
 		SkipPermissions: plain("dangerously-skip-permissions", bypassKey),
 		BypassApprovals: plain("dangerously-bypass-approvals-and-sandbox", bypassKey),
 		OutputFormat:    valueKeyed("output-format"),
-		Verbose:         plain("verbose", "verbose"),
 		Sandbox:         valueKeyed("sandbox"),
 		Config: func(v string) {
 			v = unescape(v)

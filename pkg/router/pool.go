@@ -22,12 +22,14 @@ type Score struct {
 
 // ChunkResult is one chunk request's answers, for recording and debug output.
 type ChunkResult struct {
-	Field      string
-	Index      int // as sent; a re-split renumbers the chunks after it
-	Of         int
-	Relevance  float64 // the Noul as answered: the chunk's weight in the pool
-	Confidence float64 // Jev's Choice confidence, recorded only; never part of the pool weight
-	Top        []Score
+	Field         string
+	Index         int // as sent; a re-split renumbers the chunks after it
+	Of            int
+	Relevance     float64 // the Noul as answered: the chunk's weight in the pool
+	Confidence    float64 // Jev's Choice confidence, recorded only; never part of the pool weight
+	Choice        string
+	Probabilities map[string]float64 // every option, retained for verbose reporting
+	Top           []Score
 }
 
 // Pooled is how a split state was decided: every chunk's answers in sequence order and the pooled
@@ -35,6 +37,7 @@ type ChunkResult struct {
 type Pooled struct {
 	Chunks []ChunkResult
 	Top    []Score
+	Scores []Score // every option in catalog order, retained for verbose reporting
 }
 
 // routeAnswer is one chunk request's validated answers.
@@ -94,8 +97,9 @@ func (r *Router) pooled(ctx context.Context, el *Eligibility, split *prompt.Spli
 		return outcome{}, err
 	}
 
-	o, top := pool(el.Options, seq)
+	o, top, all := pool(el.Options, seq)
 	p := &Pooled{Top: top, Chunks: make([]ChunkResult, len(seq))}
+	p.Scores = all
 	for i, s := range seq {
 		p.Chunks[i] = s.answer.result
 	}
@@ -130,14 +134,29 @@ func (r *Router) askChunk(ctx context.Context, el *Eligibility, anchor prompt.An
 		scores[i] = p
 	}
 	return routeAnswer{probs: route.Probabilities, result: ChunkResult{Field: c.Field, Index: c.Index, Of: c.Of,
-		Relevance: relevance.Noul, Confidence: route.Confidence, Top: ranked(el.Options, scores)}}, nil
+		Relevance: relevance.Noul, Confidence: route.Confidence, Choice: route.Choice,
+		Probabilities: route.Probabilities, Top: ranked(el.Options, scores)}}, nil
 }
 
 // pool combines the chunks' probabilities: each chunk weighs its raw relevance, an option's score is
 // the weighted average of its probabilities (a plain average when every relevance is 0), and the
 // highest score wins with catalog order breaking ties. Zero-relevance chunks have no effect, but
 // enough low-relevance ones still dilute a relevant chunk: a raw weighted mean has no cap.
-func pool(opts []catalog.Option, seq []*slot) (catalog.Option, []Score) {
+func pool(opts []catalog.Option, seq []*slot) (catalog.Option, []Score, []Score) {
+	pooled := pooledScores(opts, seq)
+	best := 0
+	scores := make([]float64, len(pooled))
+	for i, s := range pooled {
+		scores[i] = s.Score
+		if s.Score > pooled[best].Score {
+			best = i
+		}
+	}
+	return opts[best], ranked(opts, scores), pooled
+}
+
+// pooledScores retains the full relevance-weighted result in catalog order.
+func pooledScores(opts []catalog.Option, seq []*slot) []Score {
 	var total float64
 	for _, s := range seq {
 		total += s.answer.result.Relevance
@@ -155,14 +174,12 @@ func pool(opts []catalog.Option, seq []*slot) (catalog.Option, []Score) {
 	if total == 0 {
 		total = float64(len(seq))
 	}
-	best := 0
+	out := make([]Score, len(opts))
 	for i := range scores {
 		scores[i] /= total
-		if scores[i] > scores[best] {
-			best = i
-		}
+		out[i] = Score{ID: opts[i].ID, Score: scores[i]}
 	}
-	return opts[best], ranked(opts, scores)
+	return out
 }
 
 // ranked lists the top options by score, catalog order breaking ties.

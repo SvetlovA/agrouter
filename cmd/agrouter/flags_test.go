@@ -31,7 +31,6 @@ func TestParseArgs_FlagsAroundPositional(t *testing.T) {
 	want := []args.Arg{
 		{Spelling: "--output-format json", Key: "output-format.json"},
 		{Spelling: "--permission-mode plan", Key: "permission-mode.plan"},
-		{Spelling: "--verbose", Key: "verbose"},
 	}
 	tests := []struct {
 		name string
@@ -77,6 +76,16 @@ func TestParseArgs_Mode(t *testing.T) {
 }
 
 func TestParseArgs_OwnFlags(t *testing.T) {
+	t.Run("--verbose belongs only to agrouter", func(t *testing.T) {
+		cmd, err := parseArgs([]string{"--verbose", "x"}, noEnv)
+		require.NoError(t, err)
+		assert.True(t, cmd.verbose)
+		assert.Empty(t, cmd.req.Args)
+		cmd, err = parseArgs([]string{"--cli=alpha", "x", "--", "--verbose"}, noEnv)
+		require.NoError(t, err)
+		assert.False(t, cmd.verbose)
+		assert.Equal(t, []string{"--verbose"}, cmd.req.Raw)
+	})
 	t.Run("--print accepted, never mapped", func(t *testing.T) {
 		req := parseOK(t, []string{"--print", "x"}, noEnv)
 		assert.Empty(t, req.Args)
@@ -152,7 +161,7 @@ func TestParseArgs_PromptSources(t *testing.T) {
 		{name: "--prompt-file alone", argv: []string{"--prompt-file", "task.md"}, wantFile: positional("task.md")},
 		{name: "every source", argv: []string{"--prompt-file=task.md", "positional", "-p", "flag", "--verbose"},
 			wantFlag: positional("flag"), wantPos: positional("positional"), wantFile: positional("task.md"),
-			wantArgs: []args.Arg{{Spelling: "--verbose", Key: "verbose"}}},
+			wantArgs: nil},
 		{name: "slash values survive", argv: []string{"-p", "/review", "--prompt-file", "/tmp/task.md"},
 			wantFlag: positional("/review"), wantFile: positional("/tmp/task.md")},
 	}
@@ -254,7 +263,6 @@ func TestParseArgs_RalphexClaude(t *testing.T) {
 	assert.Equal(t, []args.Arg{
 		{Spelling: "--dangerously-skip-permissions", Key: "permission-mode.bypassPermissions"},
 		{Spelling: "--output-format stream-json", Key: "output-format.stream-json"},
-		{Spelling: "--verbose", Key: "verbose"},
 	}, req.Args)
 }
 

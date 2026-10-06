@@ -4,7 +4,7 @@ agrouter picks the coding-agent CLI, model and reasoning effort for a prompt by 
 
 It has two modes:
 
-- **Decision** (default): print the choice and the argv that would run it as one JSON line; the caller launches the CLI itself.
+- **Decision** (default): print the choice, project complexity and average confidence as one JSON line. Add `--verbose` for the argv and other details when the caller launches the CLI itself.
 - **Exec** (`agrouter exec`): translate agrouter's arguments into the chosen CLI's own arguments through config, and run it.
 
 ## Install
@@ -50,7 +50,8 @@ The prompt can come from four sources, in any combination: `-p TEXT`, the one po
 | `--doc=PATH` | a project doc (`CLAUDE.md`, `AGENTS.md`, ...) for routing only; repeatable, never passed to the child |
 | `--print` | accepted; non-interactive mode is always on |
 | `--permission-mode=MODE`, `--dangerously-skip-permissions` | Claude's permission modes, mapped to the closest Codex setting; Codex's `--dangerously-bypass-approvals-and-sandbox` is an alias |
-| `--output-format=text\|json\|stream-json`, `--verbose` | output options |
+| `--output-format=text\|json\|stream-json` | child output format, mapped through config |
+| `--verbose` | full agrouter decision details; never passed to the child and never affects routing |
 | `--sandbox=MODE`, `-c key=value` (`--config`) | Codex's spellings, so ralphex's Codex executor can call agrouter unchanged |
 | `--jev-api-key=KEY` | Jev API key; an empty value clears it |
 | `-- raw args...` | appended to the child's argv unchanged, only with `--cli` |
@@ -86,22 +87,46 @@ Decision mode:
 
 ```sh
 agrouter -p "fix the flaky test in pkg/foo" --dangerously-skip-permissions --output-format stream-json
-# {"cli":"codex","model":"gpt-6.1-sol","effort":"medium","confidence":{"route":0.8,"route_average":0.8},"argv":["codex","exec","--dangerously-bypass-approvals-and-sandbox","--skip-git-repo-check","--json","--model","gpt-6.1-sol","-c","model_reasoning_effort=\"medium\"","--","fix the flaky test in pkg/foo"],"skipped":[]}
+# {"cli":"codex","model":"gpt-6.1-sol","effort":"medium","confidence":{"model_selection":0.8}}
 ```
 
-`argv` holds the `-p`, positional and `--prompt-file` text, joined like the routing prompt, as its last token after `--`, so text that starts with `-` reaches the child as the prompt and never as one of its flags (each CLI's `prompt` mapping must end with `"--", "{prompt}"`; raw tokens after agrouter's own `--` come before it). It never holds stdin: a caller that piped a prompt must send it to the child itself. `--doc` is never in `argv`; the child loads its own `CLAUDE.md`/`AGENTS.md`. `effort` is `null` for a model without efforts; `skipped` lists, as the caller spelled them, the arguments that got a skip warning: an unknown or disabled `--cli`, arguments the chosen CLI does not map or maps to nothing, and raw tokens after `--` without `--cli`.
+Add `--verbose` for indented JSON with every chunk and option, plus a readable command. The default stays on one JSON line. For example, with project docs the concise result can be:
+
+```json
+{"cli":"codex","model":"gpt-6.1-sol","effort":"medium","project_complexity":6.9,"confidence":{"model_selection":0.8,"project_complexity":0.9}}
+```
+
+`project_complexity` is the final project score from 0 to 10 and is omitted when the complexity stage did not complete. In verbose output, `argv` holds the `-p`, positional and `--prompt-file` text, joined like the routing prompt, as its last token after `--`, so text that starts with `-` reaches the child as the prompt and never as one of its flags (each CLI's `prompt` mapping must end with `"--", "{prompt}"`; raw tokens after agrouter's own `--` come before it). It never holds stdin: a caller that piped a prompt must send it to the child itself. `--doc` is never in `argv`; the child loads its own `CLAUDE.md`/`AGENTS.md`. `effort` is `null` for a model without efforts; `skipped` lists, as the caller spelled them, the arguments that got a skip warning: an unknown or disabled `--cli`, arguments the chosen CLI does not map or maps to nothing, and raw tokens after `--` without `--cli`.
 
 Exec mode, with the prompt on stdin and the output format fixed by pinning the CLI:
 
 ```sh
-agrouter exec --cli=claude --dangerously-skip-permissions --output-format stream-json --verbose < prompt.txt
+agrouter exec --cli=claude --dangerously-skip-permissions --output-format stream-json --verbose -- --verbose < prompt.txt
 ```
+
+The first `--verbose` requests full agrouter selection details; the raw `--verbose` after `--` enables child verbosity.
 
 On Windows with npm's `claude.cmd`/`codex.cmd` shims, pass a multi-line prompt on stdin: cmd.exe cannot carry a line break inside an argument, so a multi-line `-p`, positional or `--prompt-file` prompt fails to start (exit `127`). This includes any prompt combined from two sources, since they are joined with a blank line. Decision mode and native executables are unaffected.
 
-Before starting the child, exec mode logs one JSON line with `cli`, `model`, `effort` and any recorded `confidence` to stderr, so tools such as Ralphex can record the selection for each step. Model and effort are `null` when the CLI's defaults apply. This line does not include the prompt or argv.
+Before starting the child, exec mode logs one JSON line with `cli`, `model`, `effort`, any completed `project_complexity` score and average `confidence` to stderr, so tools such as Ralphex can record the selection for each step. Model and effort are `null` when the CLI's defaults apply. With `--verbose` it also includes whole-request and per-request confidence. This line does not include the prompt or argv.
 
-Decision JSON and the exec selection line include `confidence` when Jev answered. `confidence.route` is Jev's whole-request Choice confidence, or `null` for a pooled decision or unavailable route answer. Split routing adds `routing_chunks`, each with `field`, `index`, `of` and `confidence`; document scoring adds `complexity_chunks`, each with `index`, `of` and Score `confidence`. Values are preserved per request, including zero. `route_average` summarizes model-decision confidence and `complexity_average` summarizes project-complexity confidence. Each is the arithmetic mean of that stage's final chunk confidences, including zeros, without relevance or evidence weights. A single request uses its own confidence as the average; a stage with no recorded answers omits its average. These means describe the answers' confidence and do not measure the probability that the whole result is correct. Confidence changes neither relevance/evidence weighting nor model selection. When no answers were recorded, the `confidence` field is omitted.
+Decision JSON and the exec selection line include `confidence` when Jev answered. By default it contains only `model_selection` (confidence in model selection) and/or `project_complexity` (confidence in project complexity scoring). Each is the arithmetic mean of that stage's final request confidences, including zeros, without relevance or evidence weights. A single request uses its own confidence; an unanswered stage omits its value. These means describe the answers' confidence and do not measure the probability that the whole result is correct. Confidence changes neither weighting nor model selection.
+
+Verbose output includes all available numeric details, without truncating chunks or options:
+
+| Field | Meaning |
+|---|---|
+| `options` | every eligible option's ID, CLI, model and effort, in catalog order; this order breaks pooled-score ties |
+| `confidence.route`, `choice`, `probabilities` | the whole-request Choice confidence, selected option ID and every option probability; `route` is `null` for pooled routing |
+| `confidence.routing_chunks` | every chunk's field, index/count, chosen option, Choice confidence, relevance weight and full probability map |
+| `confidence.pooled_scores` | every option's final routing score in catalog order, using relevance weights or an ordinary mean when all relevance is zero |
+| `confidence.complexity_chunks` | every document request's index/count, project complexity score (0 to 10), Score confidence and evidence weight; scores use evidence weights or an ordinary mean when all evidence is zero |
+| `argv`, `skipped` | exact child arguments and arguments skipped with a warning; decision mode only |
+| `command` | readable command text for copying; adapt quoting to your terminal; decision mode only |
+| `stdin_required` | whether the command needs the original stdin supplied again; stdin contents are not included in the command |
+
+Option probabilities and pooled scores are separate from Jev's Choice confidence. Verbose JSON retains zero values. The exec selection log remains one JSON line on stderr and excludes argv and command; the child's output goes to stdout.
+
 
 The child's stdout, stderr and exit code are agrouter's. An argument the chosen CLI does not map is skipped with one `agrouter: warning:` line on stderr, never an error. Set `AGROUTER_DEBUG=1` to see eligibility, each `--doc` chunk's complexity score, evidence and confidence with the project complexity, routing confidence per request, Jev's probabilities and the final command on stderr (prompt text and key redacted; doc text is never printed).
 
@@ -137,7 +162,15 @@ CLI names, model IDs and aliases, and effort labels come from the merged config.
 
 ## ralphex
 
-Claude mode (`--cli=claude` keeps ralphex's stream-json parser working):
+Claude mode (`--cli=claude` keeps ralphex's stream-json parser working). Since agrouter's `--verbose` now controls only its own output, include child verbosity in the global agrouter config for Ralphex's stream-json requests:
+
+```ini
+# ~/.config/agrouter/config
+[cli.claude.args]
+output-format.stream-json = ["--output-format", "stream-json", "--verbose"]
+```
+
+Ralphex config:
 
 ```ini
 # ~/.config/ralphex/config
