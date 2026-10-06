@@ -18,7 +18,6 @@ import (
 
 	"github.com/SvetlovA/agrouter/pkg/args"
 	"github.com/SvetlovA/agrouter/pkg/catalog"
-	"github.com/SvetlovA/agrouter/pkg/config"
 	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 	"github.com/SvetlovA/agrouter/pkg/router/mocks"
@@ -88,7 +87,8 @@ func chunkStates(client *mocks.JevClientMock) []prompt.ChunkState {
 func slots(answers ...map[string]jev.Answer) []*slot {
 	out := make([]*slot, len(answers))
 	for i, a := range answers {
-		out[i] = &slot{done: true, probs: a[questionRoute].Probabilities, result: ChunkResult{Relevance: a[questionRelevance].Noul}}
+		out[i] = &slot{done: true, answer: routeAnswer{probs: a[questionRoute].Probabilities,
+			result: ChunkResult{Relevance: a[questionRelevance].Noul}}}
 	}
 	return out
 }
@@ -106,25 +106,37 @@ func TestPoolRelevanceWeights(t *testing.T) {
 	opts := Eligible(cfg, cat, &args.Request{CLI: "claude"}).Options
 	hard := chunkAnswers(favoring(opts, optHard, 0.5), 0.95)
 	fill := chunkAnswers(favoring(opts, optEasy, 0.99), 0.01)
-	floor := cfg.Agrouter.RelevanceFloor
+	zero := chunkAnswers(favoring(opts, optEasy, 0.99), 0)
+	other := 0.1 / float64(len(opts)-1)
+	withHard := func(n int, a map[string]jev.Answer) []*slot {
+		return slots(append([]map[string]jev.Answer{hard}, repeatAnswers(n, a)...)...)
+	}
 
 	t.Run("short hard requirement outweighs long filler", func(t *testing.T) {
-		o, top := pool(opts, slots(append([]map[string]jev.Answer{hard}, repeatAnswers(5, fill)...)...), floor)
+		o, top, _ := pool(opts, withHard(5, fill))
 		assert.Equal(t, optHard, o.ID)
 		assert.Equal(t, optHard, top[0].ID)
-		// weights 0.95 and 5 × the 0.05 floor
-		other := 0.1 / float64(len(opts)-1)
-		assert.InDelta(t, (0.95*0.9+0.25*other)/1.2, top[0].Score, 1e-9)
+		// raw weights: 0.95 and 5 Ã— 0.01
+		assert.InDelta(t, (0.95*0.9+0.05*other)/1.0, top[0].Score, 1e-9)
 	})
-	t.Run("floored filler outweighs it at max_chunks (documented limit)", func(t *testing.T) {
-		n := cfg.Agrouter.MaxChunks - 1
-		o, _ := pool(opts, slots(append([]map[string]jev.Answer{hard}, repeatAnswers(n, fill)...)...), floor)
-		assert.Equal(t, optEasy, o.ID, "63 × 0.05 = 3.15 outweighs 0.95")
+	t.Run("zero-relevance filler of any length has no effect", func(t *testing.T) {
+		for _, n := range []int{1, 1000, 100_000} {
+			o, top, _ := pool(opts, withHard(n, zero))
+			assert.Equal(t, optHard, o.ID, "%d filler chunks", n)
+			assert.InDelta(t, 0.9, top[0].Score, 1e-9, "%d filler chunks", n)
+		}
 	})
-	t.Run("all-low relevance gives equal weights and catalog order breaks ties", func(t *testing.T) {
+	t.Run("enough low-relevance filler dilutes it (documented limit)", func(t *testing.T) {
+		// hard wins while 0.95 > n Ã— 0.01: a raw weighted mean has no cap
+		o, _, _ := pool(opts, withHard(94, fill))
+		assert.Equal(t, optHard, o.ID, "94 Ã— 0.01 = 0.94 < 0.95")
+		o, _, _ = pool(opts, withHard(96, fill))
+		assert.Equal(t, optEasy, o.ID, "96 Ã— 0.01 = 0.96 > 0.95")
+	})
+	t.Run("all-zero relevance gives a plain mean and catalog order breaks ties", func(t *testing.T) {
 		a := chunkAnswers(favoring(opts, optEasy, 0.9), 0)
-		b := chunkAnswers(favoring(opts, optHard, 0.1), 0.03)
-		o, top := pool(opts, slots(a, b), floor)
+		b := chunkAnswers(favoring(opts, optHard, 0.1), 0)
+		o, top, _ := pool(opts, slots(a, b))
 		require.Len(t, top, topOptions)
 		assert.InDelta(t, top[0].Score, top[1].Score, 1e-12, "equal weights, mirrored answers")
 		first := optHard // earlier in the catalog than haiku
@@ -134,13 +146,6 @@ func TestPoolRelevanceWeights(t *testing.T) {
 		assert.Equal(t, first, o.ID)
 		assert.Equal(t, first, top[0].ID)
 	})
-}
-
-// withMaxChunks is r's config with another max_chunks, leaving the shared config alone.
-func withMaxChunks(r *Router, n int) *config.Config {
-	cfg := *r.cfg
-	cfg.Agrouter.MaxChunks = n
-	return &cfg
 }
 
 func catalogIndex(opts []catalog.Option, id string) int {
@@ -158,28 +163,51 @@ func TestRankedStableTies(t *testing.T) {
 	assert.Equal(t, []Score{{"b", 0.3}, {"c", 0.3}, {"a", 0.2}}, top)
 }
 
+func TestPoolRetainsEveryOptionInCatalogOrder(t *testing.T) {
+	opts := []catalog.Option{{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "d"}}
+	first := chunkAnswers(jev.Answer{Probabilities: map[string]float64{"a": 0.1, "b": 0.2, "c": 0.3, "d": 0.4}}, 0.25)
+	second := chunkAnswers(jev.Answer{Probabilities: map[string]float64{"a": 0.4, "b": 0.3, "c": 0.2, "d": 0.1}}, 0.75)
+	chosen, top, all := pool(opts, slots(first, second))
+	assert.Equal(t, "a", chosen.ID)
+	assert.Len(t, top, 3)
+	require.Len(t, all, 4)
+	for i, want := range []float64{0.325, 0.275, 0.225, 0.175} {
+		assert.Equal(t, opts[i].ID, all[i].ID)
+		assert.InDelta(t, want, all[i].Score, 1e-9)
+	}
+}
+
 func TestRouteChunked(t *testing.T) {
 	cfg, cat := embedded(t)
 	req := &args.Request{CLI: "claude"}
 	el := Eligible(cfg, cat, req)
+	c := captured("HARD: keep the public API stable while fixing the parser\n" + filler(600_000))
+	split, err := c.Split(newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget)
+	require.NoError(t, err)
+	require.Greater(t, len(split.Chunks), 4)
+
+	// every request waits until all chunks are in flight: none waits for another to finish
 	var inFlight, peak atomic.Int32
+	all := make(chan struct{})
 	answer := byMarker(el.Options)
 	client := chunked(t, func(st prompt.ChunkState) (map[string]jev.Answer, error) {
 		n := inFlight.Add(1)
-		defer inFlight.Add(-1)
 		for p := peak.Load(); n > p; p = peak.Load() {
 			if peak.CompareAndSwap(p, n) {
 				break
 			}
 		}
-		time.Sleep(5 * time.Millisecond)
+		if int(n) == len(split.Chunks) {
+			close(all)
+		}
+		select {
+		case <-all:
+		case <-time.After(5 * time.Second):
+			return nil, fmt.Errorf("only %d of %d chunks in flight", inFlight.Load(), len(split.Chunks))
+		}
 		return answer(st)
 	})
 	r := newRouter(t, cfg, cat, client)
-	c := captured("HARD: keep the public API stable while fixing the parser\n" + filler(600_000))
-	split, err := c.Split(r.Budget(), cfg.Agrouter.MaxChunks)
-	require.NoError(t, err)
-	require.Greater(t, len(split.Chunks), cfg.Agrouter.ChunkParallel)
 
 	d, err := r.Route(context.Background(), el, req, c)
 	require.NoError(t, err)
@@ -197,7 +225,7 @@ func TestRouteChunked(t *testing.T) {
 		assert.LessOrEqual(t, len(ch.Top), topOptions)
 	}
 	assert.InDelta(t, 0.95, d.Pooled.Chunks[0].Relevance, 1e-9)
-	assert.LessOrEqual(t, int(peak.Load()), cfg.Agrouter.ChunkParallel)
+	assert.Equal(t, len(split.Chunks), int(peak.Load()), "every chunk in flight at once")
 
 	calls := client.AskCalls()
 	require.Len(t, calls, len(split.Chunks))
@@ -232,6 +260,11 @@ func TestRouteChunkedConfidenceNotAveraged(t *testing.T) {
 		d, err := newRouter(t, cfg, cat, client).Route(context.Background(), el, req, c)
 		require.NoError(t, err)
 		require.NotNil(t, d.Pooled)
+		require.NotEmpty(t, d.Pooled.Chunks)
+		assert.InDelta(t, 1-conf, d.Pooled.Chunks[0].Confidence, 1e-9)
+		for _, chunk := range d.Pooled.Chunks[1:] {
+			assert.InDelta(t, conf, chunk.Confidence, 1e-9)
+		}
 		tops = append(tops, d.Pooled.Top)
 	}
 	assert.Equal(t, tops[0], tops[1])
@@ -245,7 +278,8 @@ func TestRouteChunkGoldenRequest(t *testing.T) {
 		return chunkAnswers(favoring(el.Options, "fast", 0.9), 0.5), nil
 	})
 	r := newRouter(t, cfg, cat, client)
-	r.budget = prompt.Budget{State: 1, Chunk: 120} // force a small state into two chunks
+	// force a small state into two chunks; 12 of the tokens go to the widest index and count
+	r.budget = prompt.Budget{State: 1, Chunk: 132}
 	c := &prompt.Result{Prompt: "fix the flaky test in pkg/foo/foo_test.go",
 		Files:       []string{"package foo\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {\n\tt.Skip(\"flaky\")\n}\n"},
 		Attachments: []prompt.Attachment{{Source: "mentioned", Type: "image/png", Bytes: 48213}}}
@@ -293,7 +327,7 @@ func TestRouteSingleRequest422Resplits(t *testing.T) {
 	client := rejecting(t, el.Options, func(prompt.ChunkState) bool { return false })
 	r := newRouter(t, cfg, cat, client)
 	c := captured("HARD: rename the package\n" + filler(40_000))
-	require.True(t, c.Fits(r.Budget()))
+	require.True(t, c.Fits(r.budget))
 
 	d, err := r.Route(context.Background(), el, req, c)
 	require.NoError(t, err)
@@ -310,7 +344,7 @@ func TestRouteSingleRequest422Resplits(t *testing.T) {
 	for _, st := range states {
 		size, err := json.Marshal(st)
 		require.NoError(t, err)
-		assert.LessOrEqual(t, prompt.Tokens(len(size)), r.Budget().Chunk/2, "split at half the budget")
+		assert.LessOrEqual(t, prompt.Tokens(len(size)), r.budget.Chunk/2, "split at half the budget")
 	}
 }
 
@@ -320,7 +354,7 @@ func TestRouteChunk422ResplitsOnce(t *testing.T) {
 	el := Eligible(cfg, cat, req)
 	c := captured("HARD: port the scheduler\n" + filler(200_000))
 	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
-	split, err := c.Split(r.Budget(), cfg.Agrouter.MaxChunks)
+	split, err := c.Split(r.budget)
 	require.NoError(t, err)
 	n := len(split.Chunks)
 
@@ -342,6 +376,11 @@ func TestRouteChunk422ResplitsOnce(t *testing.T) {
 		assert.Equal(t, i+1, ch.Index, "the pieces take the rejected chunk's place")
 		assert.Equal(t, n-1+len(pieces), ch.Of)
 	}
+	for _, st := range chunkStates(client) {
+		size, err := json.Marshal(st)
+		require.NoError(t, err)
+		assert.LessOrEqual(t, prompt.Tokens(len(size)), r.budget.Chunk, "chunk %d of %d over budget", st.Chunk.Index, st.Chunk.Of)
+	}
 }
 
 func TestRouteChunkFailuresCannotDecide(t *testing.T) {
@@ -349,24 +388,21 @@ func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 	req := &args.Request{CLI: "claude"}
 	el := Eligible(cfg, cat, req)
 	big := captured("START HARD: port the scheduler\n" + filler(200_000))
-	tail := captured(filler(145_000)) // two full chunks and a short last one
+	tail := captured(filler(145_000))
+	tail.Files = []string{"short tail file\n"} // a separate short chunk regardless of question size
 
 	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
-	split, err := big.Split(r.Budget(), cfg.Agrouter.MaxChunks)
-	require.NoError(t, err)
-	nBig := len(split.Chunks)
-	tailSplit, err := tail.Split(r.Budget(), cfg.Agrouter.MaxChunks)
+	tailSplit, err := tail.Split(r.budget)
 	require.NoError(t, err)
 	last := tailSplit.Chunks[len(tailSplit.Chunks)-1]
 	require.Less(t, prompt.Tokens(len(last.Text)), prompt.MinStateTokens)
 
 	answer := byMarker(el.Options)
 	tests := []struct {
-		name      string
-		captured  *prompt.Result
-		maxChunks int
-		ask       func(jev.Request) (map[string]jev.Answer, error)
-		want      error
+		name     string
+		captured *prompt.Result
+		ask      func(jev.Request) (map[string]jev.Answer, error)
+		want     error
 	}{
 		{name: "second 422 on a re-split piece", captured: big, want: errUnsplittable,
 			ask: func(req jev.Request) (map[string]jev.Answer, error) {
@@ -380,14 +416,6 @@ func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 			ask: func(req jev.Request) (map[string]jev.Answer, error) {
 				st, _ := req.State.(prompt.ChunkState)
 				if st.Chunk.Index == st.Chunk.Of {
-					return nil, &jev.StatusError{Status: 422}
-				}
-				return answer(st)
-			}},
-		{name: "max_chunks rechecked after a re-split", captured: big, maxChunks: nBig, want: prompt.ErrTooManyChunks,
-			ask: func(req jev.Request) (map[string]jev.Answer, error) {
-				st, _ := req.State.(prompt.ChunkState)
-				if st.Chunk.Index == 1 {
 					return nil, &jev.StatusError{Status: 422}
 				}
 				return answer(st)
@@ -449,9 +477,6 @@ func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 				return tc.ask(req)
 			}}
 			r := newRouter(t, cfg, cat, client)
-			if tc.maxChunks > 0 {
-				r.cfg = withMaxChunks(r, tc.maxChunks)
-			}
 			d, err := r.Route(context.Background(), el, req, tc.captured)
 			require.NoError(t, err)
 			require.ErrorIs(t, d.Undecided, tc.want)
@@ -489,14 +514,18 @@ func testRouteChunkedStopsOnDeadline(t *testing.T) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}}
+	r := newRouter(t, cfg, cat, client)
+	c := captured(filler(1_000_000))
+	split, err := c.Split(r.budget)
+	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	d, err := newRouter(t, cfg, cat, client).Route(ctx, el, req, captured(filler(1_000_000)))
+	d, err := r.Route(ctx, el, req, c)
 	require.NoError(t, err)
 	require.ErrorIs(t, d.Undecided, context.DeadlineExceeded)
 	mu.Lock()
 	defer mu.Unlock()
-	assert.Equal(t, cfg.Agrouter.ChunkParallel, started, "only the first batch starts before the deadline")
+	assert.Equal(t, len(split.Chunks), started, "every chunk starts at once")
 }
 
 func TestRouteChunkedAnsweredAtDeadlineStands(t *testing.T) {
@@ -513,10 +542,9 @@ func testRouteChunkedAnsweredAtDeadlineStands(t *testing.T) {
 	}}
 	r := newRouter(t, cfg, cat, client)
 	c := captured(filler(150_000))
-	split, err := c.Split(r.Budget(), cfg.Agrouter.MaxChunks)
+	split, err := c.Split(r.budget)
 	require.NoError(t, err)
 	require.NotNil(t, split)
-	require.LessOrEqual(t, len(split.Chunks), cfg.Agrouter.ChunkParallel, "every chunk starts before the deadline")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()

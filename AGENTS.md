@@ -2,10 +2,6 @@
 
 Go CLI that asks TypeSafe's Jev which `(cli, model, effort)` should run a prompt, then prints the decision or runs the chosen CLI. Module `github.com/SvetlovA/agrouter`, Go 1.27, dependencies vendored.
 
-## Spec
-
-`docs/design.md` is the specification. When an implementation change deviates from it, update the design in the same commit.
-
 ## Layout
 
 ```
@@ -14,9 +10,9 @@ pkg/config/            # INI loading, layering (embedded < global < local < env)
 pkg/config/defaults/   # embedded config: the v1 catalog and argument mappings (the only place catalog names live in production)
 pkg/catalog/           # options (model x effort), option ids, model/alias lookup
 pkg/args/              # request model, argv building from templates, skipped arguments, redaction
-pkg/prompt/            # prompt capture, stdin, binary detection, mentioned files, budget, chunking
+pkg/prompt/            # prompt sources (-p, positional, --prompt-file, stdin), --doc, strict file reads, mentioned files, budget, chunking, doc splitting
 pkg/jev/               # hand-written TypeSafe HTTP client: types, validation, retry, deadline
-pkg/router/            # eligibility, Jev questions, chunk fan-out and pooling, cannot-decide policy
+pkg/router/            # eligibility, complexity stage (--doc), Jev questions, chunk fan-out and pooling, cannot-decide policy
 pkg/runner/            # child process, stdin replay, Unix process groups / Windows Job Objects, .cmd quoting
 ```
 
@@ -25,8 +21,9 @@ Dependencies point one way: `config` <- `catalog` <- `router`; `prompt` depends 
 ## Rules
 
 - **CLI, model, and effort names come only from config.** Production Go code outside `pkg/config/defaults` must not hardcode catalog names, model aliases, or effort levels, including in help text. Per-CLI behavior and argument templates belong in `[cli.*]`/`[cli.*.args]`; models and efforts come from `[model.*]`/`[effort.*]`. `cmd/agrouter/guard_test.go` enforces this; tests, testdata, and mocks may use explicit synthetic names.
-- **stdout carries only the decision JSON** (and `--help`/`--version`) or the child's output in exec mode. Exec logs one JSON line with `cli`, `model` and `effort` to stderr before starting the child, without the prompt or argv. Warnings, one-line `agrouter:` errors and `AGROUTER_DEBUG=1` output also go to stderr, with the prompt and API key redacted.
-- Unmapped arguments are skipped with a warning, never errors; values outside the catalog are passed through. Exit `2` only for the cases in the design's "Still errors" list; `127` when the child can't start.
+- **stdout carries only the decision JSON** (and `--help`/`--version`) or the child's output in exec mode. Exec logs one JSON line with `cli`, `model` and `effort` to stderr before starting the child, without the prompt or argv. Warnings, one-line `agrouter:` errors and `AGROUTER_DEBUG=1` output also go to stderr, with the prompt and API key redacted; debug output never includes `--doc` text.
+- `--doc` is routing-only: never in the child's argv. Routing has no capture, chunk-count or parallelism limits; only `[agrouter] timeout` bounds it.
+- Unmapped arguments are skipped with a warning, never errors; values outside the catalog are passed through. Exit `2` only for the cases in the README's exit code table (usage errors, bad `--prompt-file`/`--doc` files, config errors, no decision with more than one CLI left); `127` when the child can't start.
 
 ## Code style
 

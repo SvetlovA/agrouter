@@ -3,6 +3,8 @@ package prompt
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -19,9 +21,27 @@ func TestTokens(t *testing.T) {
 
 func TestNewBudget(t *testing.T) {
 	t.Run("from the questions", func(t *testing.T) {
-		b, err := NewBudget(Questions{Route: 3000, ChunkRoute: 6000, Relevance: 300})
+		b, err := NewBudget(Questions{Route: 3000, ChunkRoute: 6000, Relevance: 300, Complexity: 1500, Evidence: 900})
 		require.NoError(t, err)
-		assert.Equal(t, Budget{State: 29_000, Chunk: 28_000}, b)
+		assert.Equal(t, Budget{State: 29_000, Chunk: 28_000, Doc: 29_500}, b)
+	})
+	t.Run("longest doc question sets the doc budget", func(t *testing.T) {
+		b, err := NewBudget(Questions{Complexity: 300, Evidence: 9000})
+		require.NoError(t, err)
+		assert.Equal(t, 27_000, b.Doc)
+	})
+	t.Run("doc state plus both doc questions within 64k", func(t *testing.T) {
+		b, err := NewBudget(Questions{Complexity: 60_000, Evidence: 60_000})
+		require.NoError(t, err)
+		assert.LessOrEqual(t, b.Doc+20_000+20_000, totalLimit)
+		assert.LessOrEqual(t, b.Doc+20_000, stateLimit)
+	})
+	t.Run("doc questions over budget", func(t *testing.T) {
+		_, err := NewBudget(Questions{Complexity: 84_003})
+		require.ErrorIs(t, err, ErrQuestionsOverBudget)
+		assert.Contains(t, err.Error(), "complexity_question and complexity_evidence leave 1999 tokens for the doc state")
+		_, err = NewBudget(Questions{Complexity: 84_000})
+		require.NoError(t, err)
 	})
 	t.Run("longest chunk question sets the chunk budget", func(t *testing.T) {
 		b, err := NewBudget(Questions{ChunkRoute: 300, Relevance: 9000})
@@ -48,11 +68,12 @@ func TestNewBudget(t *testing.T) {
 	})
 }
 
-func TestCaptureLimit(t *testing.T) {
+func TestChunkRoom(t *testing.T) {
+	maxIndex := strconv.Itoa(math.MaxInt)
+	assert.Len(t, maxIndex, indexDigits)
 	b := Budget{State: 29_000, Chunk: 28_000}
-	envelope := len(`{"anchor":,"chunk":{"field":"prompt","index":64,"of":64,"text":""}}`)
-	assert.Equal(t, int64(64*(28_000*3-12_000-envelope)), CaptureLimit(b, 64))
-	assert.Equal(t, int64(0), CaptureLimit(Budget{Chunk: 10}, 64))
+	envelope := len(`{"anchor":,"chunk":{"field":"prompt","index":` + maxIndex + `,"of":` + maxIndex + `,"text":""}}`)
+	assert.Equal(t, 28_000*3-12_000-envelope, chunkRoom(b, 12_000))
 }
 
 func TestJSONLen(t *testing.T) {
@@ -86,6 +107,40 @@ func TestState(t *testing.T) {
 	data, err := json.Marshal(r.State())
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"prompt":"p","files":["f"],"attachments":[{"source":"stdin","type":"image/png","bytes":3}]}`, string(data))
+
+	r.Docs = []string{"project doc"}
+	data, err = json.Marshal(r.State())
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "project doc", "docs are not routing state")
+
+	r.Project = &Project{Complexity: 0}
+	data, err = json.Marshal(r.State())
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"project":{"complexity":0}`, "a zero complexity is still sent")
+}
+
+func TestSplitWithProject(t *testing.T) {
+	b := Budget{State: 1_000, Chunk: 4_000 + MinStateTokens}
+	r := &Result{Prompt: lines("p", 10, 80), Files: []string{lines("f", 400, 80)}, Project: &Project{Complexity: 6.9}}
+	s, err := r.Split(b)
+	require.NoError(t, err)
+	checkSplit(t, r, b, s)
+	assert.Equal(t, &Project{Complexity: 6.9}, s.Anchor.Project, "every chunk repeats the project in the anchor")
+
+	// a prompt that overflows the anchor leaves the project in it, within the anchor share
+	r = &Result{Prompt: lines("p", 400, 80), Project: &Project{Complexity: 6.9}}
+	s, err = r.Split(b)
+	require.NoError(t, err)
+	checkSplit(t, r, b, s)
+	assert.Equal(t, &Project{Complexity: 6.9}, s.Anchor.Project)
+	assert.Contains(t, string(mustJSON(t, s.Anchor)), `"project":{"complexity":6.9}`)
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	data, err := json.Marshal(v)
+	require.NoError(t, err)
+	return data
 }
 
 // lines returns n numbered lines, each about width bytes.
@@ -117,6 +172,10 @@ func checkSplit(t *testing.T, r *Result, b Budget, s *Split) {
 		assert.Equal(t, len(s.Chunks), c.Of)
 		assert.True(t, utf8.ValidString(c.Text), "chunk %d cut inside a character", c.Index)
 		assert.LessOrEqual(t, Tokens(mustLen(ChunkState{Anchor: s.Anchor, Chunk: c})), b.Chunk, "chunk %d over budget", c.Index)
+		widest := c
+		widest.Index, widest.Of = math.MaxInt, math.MaxInt
+		assert.LessOrEqual(t, Tokens(mustLen(ChunkState{Anchor: s.Anchor, Chunk: widest})), b.Chunk,
+			"chunk %d over budget once renumbered to the widest index", c.Index)
 		switch c.Field {
 		case FieldPrompt:
 			promptChunked = true
@@ -144,14 +203,33 @@ func TestSplit(t *testing.T) {
 	t.Run("a state under budget is not split", func(t *testing.T) {
 		r := &Result{Prompt: lines("p", 100, 80), Files: []string{lines("f", 100, 80)}}
 		assert.True(t, r.Fits(b))
-		s, err := r.Split(b, 64)
+		s, err := r.Split(b)
 		require.NoError(t, err)
 		assert.Nil(t, s)
 	})
 
+	t.Run("docs never make a short prompt leave the anchor", func(t *testing.T) {
+		huge := []string{lines("doc", 4000, 100), lines("doc2", 4000, 100)}
+		short := &Result{Prompt: "fix the typo", Docs: huge}
+		assert.True(t, short.Fits(b), "docs don't count toward the state")
+		s, err := short.Split(b)
+		require.NoError(t, err)
+		assert.Nil(t, s)
+
+		withFiles := &Result{Prompt: "fix a.go", Files: []string{lines("a", 1000, 100)}, Docs: huge}
+		s, err = withFiles.Split(b)
+		require.NoError(t, err)
+		checkSplit(t, withFiles, b, s)
+		assert.Equal(t, &Excerpt{Whole: true, Head: "fix a.go"}, s.Anchor.Prompt)
+		for _, c := range s.Chunks {
+			assert.Equal(t, FieldFiles, c.Field, "no doc text in the chunks")
+			assert.NotContains(t, c.Text, "doc line")
+		}
+	})
+
 	t.Run("short instruction plus long stdin keeps the instruction in every anchor", func(t *testing.T) {
 		r := &Result{Prompt: "run the next task in the plan\n\n" + lines("stdin", 4000, 100) + "report when done"}
-		s, err := r.Split(b, 64)
+		s, err := r.Split(b)
 		require.NoError(t, err)
 		checkSplit(t, r, b, s)
 		assert.Greater(t, len(s.Chunks), 1)
@@ -163,7 +241,7 @@ func TestSplit(t *testing.T) {
 
 	t.Run("whole prompt and head and tail of files", func(t *testing.T) {
 		r := &Result{Prompt: "fix a.go and b.go", Files: []string{lines("a", 1000, 100), "", lines("b", 1000, 100), "tiny"}}
-		s, err := r.Split(b, 64)
+		s, err := r.Split(b)
 		require.NoError(t, err)
 		checkSplit(t, r, b, s)
 		assert.Equal(t, &Excerpt{Whole: true, Head: "fix a.go and b.go"}, s.Anchor.Prompt)
@@ -177,7 +255,7 @@ func TestSplit(t *testing.T) {
 
 	t.Run("files stop filling the anchor when room runs out", func(t *testing.T) {
 		r := &Result{Prompt: strings.Repeat("p", 11_900), Files: []string{lines("a", 1000, 100), lines("b", 1000, 100)}}
-		s, err := r.Split(b, 64)
+		s, err := r.Split(b)
 		require.NoError(t, err)
 		checkSplit(t, r, b, s)
 		assert.True(t, s.Anchor.Prompt.Whole)
@@ -187,7 +265,7 @@ func TestSplit(t *testing.T) {
 	t.Run("attachments in every anchor even when the prompt overflows", func(t *testing.T) {
 		atts := []Attachment{{Source: SourceStdin, Type: "image/png", Bytes: 48_213}, {Source: SourceMentioned, Type: "application/pdf", Bytes: 7}}
 		r := &Result{Prompt: lines("p", 3000, 100), Attachments: atts}
-		s, err := r.Split(b, 64)
+		s, err := r.Split(b)
 		require.NoError(t, err)
 		checkSplit(t, r, b, s)
 		assert.Equal(t, atts, s.Anchor.Attachments)
@@ -208,7 +286,7 @@ func TestSplit(t *testing.T) {
 		atts = append(atts, Attachment{Source: SourceStdin, Type: "image/png", Bytes: 5})
 		r := &Result{Prompt: "describe these", Attachments: atts}
 		require.False(t, r.Fits(Budget{State: 3000}))
-		s, err := r.Split(Budget{State: 3000, Chunk: b.Chunk}, 64)
+		s, err := r.Split(Budget{State: 3000, Chunk: b.Chunk})
 		require.NoError(t, err)
 		checkSplit(t, r, b, s)
 		assert.Equal(t, []Attachment{
@@ -227,7 +305,7 @@ func TestSplit(t *testing.T) {
 			atts = append(atts, Attachment{Source: SourceStdin, Type: "image/png", Bytes: int64(i)})
 		}
 		r := &Result{Attachments: atts}
-		s, err := r.Split(Budget{State: 1000, Chunk: b.Chunk}, 64)
+		s, err := r.Split(Budget{State: 1000, Chunk: b.Chunk})
 		require.NoError(t, err)
 		assert.Equal(t, []Chunk{{Field: FieldPrompt, Index: 1, Of: 1}}, s.Chunks)
 	})
@@ -238,29 +316,27 @@ func TestSplit(t *testing.T) {
 			atts = append(atts, Attachment{Source: SourceMentioned, Type: fmt.Sprintf("application/x-kind-%d", i), Bytes: 1})
 		}
 		r := &Result{Prompt: "p", Attachments: atts}
-		_, err := r.Split(Budget{State: 1000, Chunk: b.Chunk}, 64)
+		_, err := r.Split(Budget{State: 1000, Chunk: b.Chunk})
 		require.ErrorIs(t, err, ErrAttachmentsOverAnchor)
 	})
 
-	t.Run("more chunks than max_chunks", func(t *testing.T) {
-		r := &Result{Prompt: lines("p", 4000, 100)}
-		s, err := r.Split(b, 64)
+	t.Run("any number of chunks", func(t *testing.T) {
+		r := &Result{Prompt: lines("p", 100_000, 100), Files: []string{lines("f", 20_000, 100)}}
+		s, err := r.Split(b)
 		require.NoError(t, err)
-		n := len(s.Chunks)
-		_, err = r.Split(b, n-1)
-		require.ErrorIs(t, err, ErrTooManyChunks)
-		assert.Contains(t, err.Error(), fmt.Sprintf("%d chunks, max_chunks is %d", n, n-1))
+		assert.Greater(t, len(s.Chunks), 100)
+		checkSplit(t, r, b, s)
 	})
 
 	t.Run("no room for chunk text", func(t *testing.T) {
 		r := &Result{Prompt: lines("p", 4000, 100)}
-		_, err := r.Split(Budget{State: 1000, Chunk: 4000}, 64)
+		_, err := r.Split(Budget{State: 1000, Chunk: 4000})
 		require.ErrorIs(t, err, ErrQuestionsOverBudget)
 	})
 
 	t.Run("multibyte text without newlines", func(t *testing.T) {
 		r := &Result{Prompt: strings.Repeat("é✓🙂<", 30_000)}
-		s, err := r.Split(b, 64)
+		s, err := r.Split(b)
 		require.NoError(t, err)
 		checkSplit(t, r, b, s)
 		assert.True(t, utf8.ValidString(s.Anchor.Prompt.Head))

@@ -23,16 +23,16 @@ type Config struct {
 
 // Agrouter is the [agrouter] section.
 type Agrouter struct {
-	APIKey         string
-	APIKeySource   string // layer that set api_key, one of the Layer* names
-	JevModel       string
-	Timeout        time.Duration // the whole routing budget: capture, queueing, requests and retries
-	MaxChunks      int
-	ChunkParallel  int
-	RelevanceFloor float64
-	Question       string
-	ChunkQuestion  string
-	Relevance      string
+	APIKey        string
+	APIKeySource  string // layer that set api_key, one of the Layer* names
+	JevModel      string
+	Timeout       time.Duration // the whole routing budget: capture, file reading, requests and retries
+	Question      string
+	ChunkQuestion string
+	Relevance     string
+	// ComplexityQuestion and ComplexityEvidence are asked of the --doc text in the complexity stage.
+	ComplexityQuestion string
+	ComplexityEvidence string
 }
 
 // CLI is a [cli.<name>] section together with its [cli.<name>.args] mappings.

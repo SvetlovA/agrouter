@@ -74,11 +74,17 @@ func (l *debugLog) eligibility(el *router.Eligibility) {
 	}
 }
 
-// decision prints how the option was chosen: without Jev, Jev's answer, the pooled chunks, or why
-// Jev could not decide.
+// decision prints how the option was chosen: the doc scores and project complexity when the docs
+// were scored, then without Jev, Jev's answer, the pooled chunks, or why Jev could not decide.
 func (l *debugLog) decision(d router.Decision) {
 	if l == nil {
 		return
+	}
+	if cx := d.Complexity; cx != nil {
+		for _, c := range cx.Chunks {
+			l.printf("doc %d/%d: score %.3f, evidence %.3f, confidence %.3f", c.Index, c.Of, c.Score, c.Evidence, c.Confidence)
+		}
+		l.printf("project complexity: %.1f", cx.Complexity)
 	}
 	switch {
 	case d.Undecided != nil:
@@ -88,7 +94,7 @@ func (l *debugLog) decision(d router.Decision) {
 			topProbabilities(d.Answer.Probabilities))
 	case d.Pooled != nil:
 		for _, c := range d.Pooled.Chunks {
-			l.printf("chunk %s %d/%d: relevance %.3f, top %s", c.Field, c.Index, c.Of, c.Relevance, scores(c.Top))
+			l.printf("chunk %s %d/%d: relevance %.3f, confidence %.3f, top %s", c.Field, c.Index, c.Of, c.Relevance, c.Confidence, scores(c.Top))
 		}
 		l.printf("pooled: choice %s, top %s", d.OptionID, scores(d.Pooled.Top))
 	default:

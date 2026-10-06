@@ -1,7 +1,6 @@
 package args
 
 import (
-	"maps"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -18,7 +17,8 @@ func fixtureCLI(t *testing.T, name string) config.CLI {
 	}}
 	switch name {
 	case "alpha":
-		cli.Args["print"] = []string{"-p", "{prompt}"}
+		cli.Args["print"] = []string{"-p"}
+		cli.Args["prompt"] = []string{"--", "{prompt}"}
 		cli.Args["effort"] = []string{"--effort", "{effort}"}
 		cli.Args["verbose"] = []string{"--verbose"}
 		cli.Args["permission-mode.bypassPermissions"] = []string{"--dangerously-skip-permissions"}
@@ -29,7 +29,8 @@ func fixtureCLI(t *testing.T, name string) config.CLI {
 			cli.Args["output-format."+format] = []string{"--output-format", format}
 		}
 	case "beta":
-		cli.Args["print"] = []string{"exec", "{prompt}"}
+		cli.Args["print"] = []string{"exec"}
+		cli.Args["prompt"] = []string{"--", "{prompt}"}
 		cli.Args["effort"] = []string{"-c", `model_reasoning_effort="{effort}"`}
 		cli.Args["verbose"] = []string{}
 		cli.Args["output-format.text"] = []string{}
@@ -144,7 +145,7 @@ func TestBuildPermissionMode(t *testing.T) {
 	}
 }
 
-func TestBuildDesignExamples(t *testing.T) {
+func TestBuildExamples(t *testing.T) {
 	alpha, beta := fixtureCLI(t, "alpha"), fixtureCLI(t, "beta")
 	req := &Request{Args: []Arg{
 		bypass("dangerously-skip-permissions"), flag("output-format", "stream-json"), flag("verbose", ""),
@@ -165,7 +166,7 @@ func TestBuildDesignExamples(t *testing.T) {
 
 func TestBuildCodexNoPermissionModeNoSkipGitRepoCheck(t *testing.T) {
 	res := Build(fixtureCLI(t, "beta"), &Request{Prompt: Optional{Value: "x", Set: true}}, Choice{Model: "small-model"})
-	assert.Equal(t, []string{"beta", "exec", "x", "--model", "small-model"}, res.Argv)
+	assert.Equal(t, []string{"beta", "exec", "--model", "small-model", "--", "x"}, res.Argv)
 	assert.NotContains(t, res.Argv, "--skip-git-repo-check")
 }
 
@@ -230,21 +231,64 @@ func TestBuildPrompt(t *testing.T) {
 	req := &Request{Prompt: Optional{Value: prompt, Set: true}, Args: []Arg{flag("verbose", "")}}
 
 	res := Build(alpha, req, Choice{Model: "everyday-model", Effort: "low"})
-	assert.Equal(t, []string{"alpha", "-p", prompt, "--verbose", "--model", "everyday-model", "--effort", "low"}, res.Argv)
+	assert.Equal(t, []string{"alpha", "-p", "--verbose", "--model", "everyday-model", "--effort", "low", "--", prompt}, res.Argv)
 
 	res = Build(alpha, &Request{}, Choice{})
-	assert.Equal(t, []string{"alpha", "-p"}, res.Argv, "{prompt} dropped to zero tokens")
+	assert.Equal(t, []string{"alpha", "-p"}, res.Argv, "no prompt: the prompt template is dropped, \"--\" included")
 	res = Build(alpha, &Request{Prompt: Optional{Set: true}}, Choice{})
 	assert.Equal(t, []string{"alpha", "-p"}, res.Argv, "an empty prompt is never an empty token")
+	res = Build(alpha, &Request{PromptFlag: Optional{Set: true}, Prompt: Optional{Set: true}, PromptFile: Optional{Value: "f", Set: true}},
+		Choice{})
+	assert.Equal(t, []string{"alpha", "-p"}, res.Argv, "empty sources and the file path never reach argv")
 
-	// prompt at the end through the prompt key
-	beta.Args = cloneArgs(beta.Args)
-	beta.Args[config.KeyPrint] = []string{"exec"}
-	beta.Args[config.KeyPrompt] = []string{"{prompt}"}
+	// raw passthrough before the prompt, so it stays options
 	res = Build(beta, &Request{Prompt: Optional{Value: prompt, Set: true}, Args: []Arg{flag("output-format", "stream-json")},
 		Raw: []string{"--search"}}, Choice{Model: "worker-model", Effort: "high", Pinned: true})
 	assert.Equal(t, []string{"beta", "exec", "--json", "--model", "worker-model", "-c", `model_reasoning_effort="high"`,
-		prompt, "--search"}, res.Argv)
+		"--search", "--", prompt}, res.Argv)
+}
+
+// TestBuildPromptStaysLiteral pins that prompt text shaped like a flag reaches the child as the last
+// argument, right after the template's "--", from every prompt source and with raw passthrough.
+func TestBuildPromptStaysLiteral(t *testing.T) {
+	alpha := fixtureCLI(t, "alpha")
+	for _, text := range []string{"--help", "--dangerously-skip-permissions", "-", "--", "-p\nsecond line"} {
+		for name, req := range map[string]Request{
+			"-p":            {PromptFlag: Optional{Value: text, Set: true}},
+			"positional":    {Prompt: Optional{Value: text, Set: true}},
+			"--prompt-file": {PromptFile: Optional{Value: "task.md", Set: true}, FileText: text},
+		} {
+			t.Run(name+" "+text, func(t *testing.T) {
+				req.Raw = []string{"--add-dir", "x"}
+				res := Build(alpha, &req, Choice{Model: "m", Effort: "high", Pinned: true})
+				assert.Equal(t, []string{"alpha", "-p", "--model", "m", "--effort", "high", "--add-dir", "x", "--", text},
+					res.Argv)
+			})
+		}
+	}
+}
+
+func TestBuildPromptSources(t *testing.T) {
+	alpha := fixtureCLI(t, "alpha")
+	tests := []struct {
+		name string
+		req  Request
+		want string
+	}{
+		{"-p only", Request{PromptFlag: Optional{Value: "flag", Set: true}}, "flag"},
+		{"file only", Request{PromptFile: Optional{Value: "task.md", Set: true}, FileText: "file\r\n"}, "file\r\n"},
+		{"all three in order", Request{PromptFlag: Optional{Value: "flag", Set: true}, Prompt: Optional{Value: "pos", Set: true},
+			PromptFile: Optional{Value: "task.md", Set: true}, FileText: "file"}, "flag\n\npos\n\nfile"},
+		{"empty -p skipped", Request{PromptFlag: Optional{Set: true}, FileText: "file"}, "file"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			res := Build(alpha, &tc.req, Choice{})
+			assert.Equal(t, []string{"alpha", "-p", "--", tc.want}, res.Argv, "one {prompt} token, without the file path")
+			assert.Equal(t, tc.want, tc.req.ArgvPrompt())
+			assert.Equal(t, "alpha -p -- <prompt>", res.Redacted())
+		})
+	}
 }
 
 func TestBuildModelAndEffort(t *testing.T) {
@@ -257,7 +301,7 @@ func TestBuildModelAndEffort(t *testing.T) {
 	assert.Equal(t, []string{"alpha", "-p", "--effort", "high"}, res.Argv, "caller's effort kept, model left to the CLI")
 
 	noEffort := config.CLI{Name: "mini", Command: "mini", Args: map[string][]string{
-		"print": {"run", "{prompt}"}, "model": {"-m", "{model}"},
+		"print": {"run"}, "prompt": {"--", "{prompt}"}, "model": {"-m", "{model}"},
 	}}
 	req := &Request{Effort: "high", EffortSource: SourceConfig, EffortSpell: "-c model_reasoning_effort=high"}
 	res = Build(noEffort, req, Choice{Model: "m1", Effort: "high"})
@@ -274,11 +318,11 @@ func TestBuildRawPassthrough(t *testing.T) {
 	req := &Request{Raw: []string{"--add-dir", "/tmp/x y"}, Prompt: Optional{Value: "p", Set: true}}
 
 	res := Build(alpha, req, Choice{Pinned: true})
-	assert.Equal(t, []string{"alpha", "-p", "p", "--add-dir", "/tmp/x y"}, res.Argv)
+	assert.Equal(t, []string{"alpha", "-p", "--add-dir", "/tmp/x y", "--", "p"}, res.Argv)
 	assert.Empty(t, res.Skipped)
 
 	res = Build(alpha, req, Choice{})
-	assert.Equal(t, []string{"alpha", "-p", "p"}, res.Argv)
+	assert.Equal(t, []string{"alpha", "-p", "--", "p"}, res.Argv)
 	require.Len(t, res.Skipped, 1)
 	assert.Equal(t, "-- --add-dir /tmp/x y", res.Skipped[0].Spelling)
 	assert.Equal(t, "agrouter: warning: skipped 2 raw argument(s) after --: passed through only with --cli",
@@ -301,19 +345,19 @@ func TestBuildMadeUpCLI(t *testing.T) {
 	const ini = `
 [agrouter]
 timeout         = 10s
-max_chunks      = 8
-chunk_parallel  = 2
-relevance_floor = 0.1
 question        = Which option?
 chunk_question  = Which option for this chunk?
 relevance       = Is this chunk relevant?
+complexity_question = How complex is the project?
+complexity_evidence = Does the text describe the project?
 
 [cli.zeta]
 command     = zeta-agent
 description = A made-up agent.
 
 [cli.zeta.args]
-print                     = ["--headless", "--task", "{prompt}"]
+print                     = ["--headless"]
+prompt                    = ["--task", "--", "{prompt}"]
 model                     = ["--llm={model}"]
 effort                    = ["--think", "{effort}"]
 output-format.stream-json = ["--emit", "ndjson"]
@@ -335,8 +379,8 @@ efforts = low, high
 		flag("output-format", "json"),
 	}}
 	res := Build(zeta, req, Choice{Model: "z1", Effort: "high"})
-	assert.Equal(t, []string{"zeta-agent", "--headless", "--task", "do it", "--emit", "ndjson", "--read-only",
-		"--llm=z1", "--think", "high"}, res.Argv)
+	assert.Equal(t, []string{"zeta-agent", "--headless", "--emit", "ndjson", "--read-only",
+		"--llm=z1", "--think", "high", "--task", "--", "do it"}, res.Argv)
 	assert.Equal(t, []string{
 		"agrouter: warning: skipped --verbose: maps to nothing for zeta",
 		"agrouter: warning: skipped --output-format json: zeta has no mapping for it",
@@ -350,7 +394,7 @@ func TestRedacted(t *testing.T) {
 		Args: []Arg{flag("output-format", "json")}, Raw: []string{"--add-dir", "/private"}},
 		Choice{Model: "large-model", Effort: "high", Pinned: true})
 	got := res.Redacted()
-	assert.Equal(t, "alpha -p <prompt> --output-format json --model large-model --effort high <2 raw argument(s)>", got)
+	assert.Equal(t, "alpha -p --output-format json --model large-model --effort high <2 raw argument(s)> -- <prompt>", got)
 	assert.NotContains(t, got, "secret")
 	assert.NotContains(t, got, "/private")
 
@@ -359,10 +403,4 @@ func TestRedacted(t *testing.T) {
 
 	assert.Empty(t, Result{}.Redacted())
 	assert.Equal(t, `"" "a b" "x\x01"`, Result{Argv: []string{"", "a b", "x\x01"}, promptAt: -1, rawAt: 3}.Redacted())
-}
-
-func cloneArgs(m map[string][]string) map[string][]string {
-	out := make(map[string][]string, len(m))
-	maps.Copy(out, m)
-	return out
 }

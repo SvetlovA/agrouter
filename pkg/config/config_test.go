@@ -16,17 +16,17 @@ const baseConfig = `
 api_key   =
 jev_model = jev-latest
 timeout   = 10s
-max_chunks      = 64
-chunk_parallel  = 4
-relevance_floor = 0.05
 question  = Which option? Look up ` + "`models`" + `; answer "well".
+complexity_question = How complex is the project?
+complexity_evidence = Does the text describe the project?
 
 [cli.alpha]
 command     = alpha
 description = Alpha agent.
 
 [cli.alpha.args]
-print                  = ["-p", "{prompt}"]
+print                  = ["-p"]
+prompt                 = ["--", "{prompt}"]
 model                  = ["--model", "{model}"]
 effort                 = ["-c", "effort=\"{effort}\""]
 output-format.text     = []
@@ -36,7 +36,8 @@ permission-mode.plan   = ["--mode", "plan"]
 command = beta
 
 [cli.beta.args]
-print = ["run", "{prompt}"]
+print = ["run"]
+prompt = ["--", "{prompt}"]
 model = ["-m", "{model}"]
 
 [model.alpha-big]
@@ -96,13 +97,12 @@ func TestLoad_Embedded(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, Agrouter{
-		APIKeySource:   LayerEmbedded,
-		JevModel:       "jev-latest",
-		Timeout:        10 * time.Second,
-		MaxChunks:      64,
-		ChunkParallel:  4,
-		RelevanceFloor: 0.05,
-		Question:       "Which option? Look up `models`; answer \"well\".",
+		APIKeySource:       LayerEmbedded,
+		JevModel:           "jev-latest",
+		Timeout:            10 * time.Second,
+		Question:           "Which option? Look up `models`; answer \"well\".",
+		ComplexityQuestion: "How complex is the project?",
+		ComplexityEvidence: "Does the text describe the project?",
 	}, cfg.Agrouter)
 
 	require.Len(t, cfg.CLIs, 2)
@@ -111,7 +111,8 @@ func TestLoad_Embedded(t *testing.T) {
 	assert.Equal(t, "alpha", alpha.Command)
 	assert.Equal(t, "Alpha agent.", alpha.Description)
 	assert.Equal(t, map[string][]string{
-		"print":                {"-p", "{prompt}"},
+		"print":                {"-p"},
+		"prompt":               {"--", "{prompt}"},
 		"model":                {"--model", "{model}"},
 		"effort":               {"-c", `effort="{effort}"`},
 		"output-format.text":   {},
@@ -147,7 +148,7 @@ api_key = global-key
 timeout = 20s
 
 [cli.alpha.args]
-print = ["--print", "{prompt}"]
+print = ["--print"]
 verbose = ["-v"]
 
 [model.alpha-big]
@@ -173,10 +174,10 @@ name = local-new
 	assert.Equal(t, 30*time.Second, cfg.Agrouter.Timeout, "local overrides global")
 	assert.Equal(t, "global-key", cfg.Agrouter.APIKey)
 	assert.Equal(t, LayerGlobal, cfg.Agrouter.APIKeySource)
-	assert.Equal(t, 64, cfg.Agrouter.MaxChunks, "untouched keys keep the embedded value")
+	assert.Equal(t, "jev-latest", cfg.Agrouter.JevModel, "untouched keys keep the embedded value")
 
 	alpha, _ := cfg.CLIByName("alpha")
-	assert.Equal(t, []string{"--print", "{prompt}"}, alpha.Args["print"], "global overrides one args key")
+	assert.Equal(t, []string{"--print"}, alpha.Args["print"], "global overrides one args key")
 	assert.Equal(t, []string{"--use-model", "{model}"}, alpha.Args["model"], "local overrides one args key")
 	assert.Equal(t, []string{"-c", `effort="{effort}"`}, alpha.Args["effort"], "other args keys stay embedded")
 	assert.Equal(t, []string{"-v"}, alpha.Args["verbose"], "a layer can add an args key")
@@ -245,9 +246,9 @@ func TestLoad_Errors(t *testing.T) {
 		{name: "template of numbers", local: "[cli.alpha.args]\nprint = [1]\n",
 			want: "[cli.alpha.args] print"},
 		{name: "bad duration", local: "[agrouter]\ntimeout = 10\n", want: `[agrouter] timeout = "10" (local `},
-		{name: "bad max_chunks", local: "[agrouter]\nmax_chunks = many\n", want: "[agrouter] max_chunks"},
-		{name: "bad chunk_parallel", local: "[agrouter]\nchunk_parallel = 1.5\n", want: "[agrouter] chunk_parallel"},
-		{name: "bad relevance_floor", local: "[agrouter]\nrelevance_floor = low\n", want: "[agrouter] relevance_floor"},
+		{name: "removed max_chunks", local: "[agrouter]\nmax_chunks = 64\n", want: "[agrouter] max_chunks (local "},
+		{name: "removed chunk_parallel", local: "[agrouter]\nchunk_parallel = 4\n", want: "[agrouter] chunk_parallel (local "},
+		{name: "removed relevance_floor", local: "[agrouter]\nrelevance_floor = 0.05\n", want: "[agrouter] relevance_floor (local "},
 		{name: "bad enabled", local: "[model.alpha-big]\nenabled = nope\n", want: "[model.alpha-big] enabled"},
 		{name: "bad cli enabled", local: "[cli.beta]\nenabled = maybe\n", want: "[cli.beta] enabled"},
 		{name: "unknown agrouter key", local: "[agrouter]\ntimeuot = 1s\n", want: "[agrouter] timeuot"},
@@ -315,9 +316,9 @@ func TestLoad_UnreadableFile(t *testing.T) {
 }
 
 func TestLoad_ErrorNamesEmbeddedLayer(t *testing.T) {
-	_, err := Load(Sources{Embedded: []byte("[agrouter]\nmax_chunks = x\n")})
+	_, err := Load(Sources{Embedded: []byte("[agrouter]\ntimeout = x\n")})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `[agrouter] max_chunks = "x" (embedded)`)
+	assert.Contains(t, err.Error(), `[agrouter] timeout = "x" (embedded)`)
 }
 
 func TestLoad_InlineCommentKeptInValue(t *testing.T) {

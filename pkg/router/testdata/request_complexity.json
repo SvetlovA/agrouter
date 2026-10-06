@@ -1,0 +1,35 @@
+{
+  "model": "test-jev",
+  "state": {
+    "docs": [
+      "# Payments\n\nTwelve services, PCI scope, Kafka between them.\n",
+      "Use gofmt.\n"
+    ]
+  },
+  "questions": {
+    "complexity": {
+      "type": "score",
+      "instructions": "Rate the project the docs describe.",
+      "criteria": [
+        "a snippet, a single file or a small one-off script: no architecture, dependencies or constraints to speak of",
+        "a small single-purpose utility or library of a few files",
+        "a small application with a handful of modules and common dependencies",
+        "a moderate codebase: several packages, a build and test setup, conventions to follow",
+        "a medium application with several components, integrations and documented conventions",
+        "a larger codebase with a layered architecture, many dependencies and cross-cutting rules",
+        "a multi-service or multi-platform system with integration points and compatibility constraints",
+        "a large production system with strict invariants and performance, security or concurrency constraints",
+        "a large enterprise system: many modules and teams, legacy and compliance constraints, a wide blast radius",
+        "a very large, critical system where almost any change needs deep cross-system understanding"
+      ]
+    },
+    "complexity_evidence": {
+      "type": "noul",
+      "instructions": "Does the text describe the project?",
+      "criteria": {
+        "true": "the text describes the project's size, architecture, dependencies or constraints",
+        "false": "the text is only style rules, workflow instructions or other content that says nothing about the project itself"
+      }
+    }
+  }
+}

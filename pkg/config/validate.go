@@ -19,6 +19,10 @@ const (
 // ConfigKeyPrefix prefixes the mapping key of a -c key=value argument: "config.<key>".
 const ConfigKeyPrefix = "config."
 
+// EndOfOptions ends option parsing in the child: the prompt template puts it right before {prompt},
+// so prompt text starting with "-" stays a positional argument instead of becoming a flag.
+const EndOfOptions = "--"
+
 // Placeholders substituted inside template tokens. {prompt} is a whole token only.
 const (
 	PlaceholderPrompt = "{prompt}"
@@ -45,15 +49,13 @@ func (a Agrouter) validate() []error {
 	if a.Timeout <= 0 {
 		errs = append(errs, fmt.Errorf("[agrouter] timeout = %s: must be positive", a.Timeout))
 	}
-	if a.MaxChunks < 1 {
-		errs = append(errs, fmt.Errorf("[agrouter] max_chunks = %d: must be at least 1", a.MaxChunks))
-	}
-	if a.ChunkParallel < 1 {
-		errs = append(errs, fmt.Errorf("[agrouter] chunk_parallel = %d: must be at least 1", a.ChunkParallel))
-	}
-	// written as a negation so NaN fails too
-	if !(a.RelevanceFloor > 0 && a.RelevanceFloor <= 1) {
-		errs = append(errs, fmt.Errorf("[agrouter] relevance_floor = %v: must be in (0, 1]", a.RelevanceFloor))
+	for _, q := range []struct{ key, text string }{
+		{"complexity_question", a.ComplexityQuestion},
+		{"complexity_evidence", a.ComplexityEvidence},
+	} {
+		if strings.TrimSpace(q.text) == "" {
+			errs = append(errs, fmt.Errorf("[agrouter] %s: must not be empty", q.key))
+		}
 	}
 	return errs
 }
@@ -66,7 +68,7 @@ func (cli CLI) validate(models []Model) []error {
 	if strings.TrimSpace(cli.Command) == "" {
 		errs = append(errs, fmt.Errorf("[cli.%s] command: must not be empty", cli.Name))
 	}
-	for _, key := range []string{KeyPrint, KeyModel} {
+	for _, key := range []string{KeyPrint, KeyPrompt, KeyModel} {
 		if _, ok := cli.Args[key]; !ok {
 			errs = append(errs, fmt.Errorf("[%s] %s: required mapping is missing", section, key))
 		}
@@ -84,7 +86,6 @@ func (cli CLI) validate(models []Model) []error {
 	}
 	slices.Sort(keys)
 
-	prompts := 0 // whole {prompt} tokens across print and prompt
 	for _, key := range keys {
 		for _, tok := range cli.Args[key] {
 			for _, ph := range placeholderRe.FindAllString(tok, -1) {
@@ -92,14 +93,14 @@ func (cli CLI) validate(models []Model) []error {
 					errs = append(errs, fmt.Errorf("[%s] %s: %w", section, key, err))
 				}
 			}
-			if tok == PlaceholderPrompt && (key == KeyPrint || key == KeyPrompt) {
-				prompts++
-			}
 		}
 	}
-	if prompts != 1 {
-		errs = append(errs, fmt.Errorf("[%s] %s/%s: %s must appear exactly once across print and prompt, found %d",
-			section, KeyPrint, KeyPrompt, PlaceholderPrompt, prompts))
+	if tmpl, ok := cli.Args[KeyPrompt]; ok {
+		if n := len(tmpl); n < 2 || tmpl[n-1] != PlaceholderPrompt || tmpl[n-2] != EndOfOptions ||
+			slices.Index(tmpl, PlaceholderPrompt) != n-1 {
+			errs = append(errs, fmt.Errorf("[%s] %s: must end with %q, %q and hold %s only there",
+				section, KeyPrompt, EndOfOptions, PlaceholderPrompt, PlaceholderPrompt))
+		}
 	}
 	return errs
 }
@@ -115,8 +116,8 @@ func checkPlaceholder(key, tok, ph string) error {
 		}
 		return nil
 	case PlaceholderPrompt:
-		if key != KeyPrint && key != KeyPrompt {
-			return fmt.Errorf("%s is only allowed in print or prompt", PlaceholderPrompt)
+		if key != KeyPrompt {
+			return fmt.Errorf("%s is only allowed in %s", PlaceholderPrompt, KeyPrompt)
 		}
 		if tok != PlaceholderPrompt {
 			return fmt.Errorf("%s must be a whole token, found in %q", PlaceholderPrompt, tok)

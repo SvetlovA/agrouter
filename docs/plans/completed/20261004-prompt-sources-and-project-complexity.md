@@ -110,24 +110,24 @@ One compiling change: every caller and test of a removed API is updated in this 
 - Modify: `pkg/config/config_test.go`, `pkg/config/validate_test.go`, `pkg/catalog/catalog_test.go`, `pkg/args/build_test.go`, `pkg/prompt/capture_test.go`, `pkg/prompt/mentions_test.go`, `pkg/prompt/chunk_test.go`, `pkg/router/router_test.go`, `pkg/router/pool_test.go`, `pkg/router/evalcase_test.go`, `cmd/agrouter/app_test.go`
 - Modify: `testdata/routing/oversized-buried-requirement-max.json`
 
-- [ ] config: drop the three fields, their key parsing and validation; remove the keys from `defaults/config`; reword the `timeout` comment (covers both stages, cooperative)
-- [ ] `Capture` reads stdin to EOF under ctx with no byte limit; remove `ErrCaptureLimit` and the `limit` parameter (`Undecidable` keeps only the deadline case); `ReadMentions` drops `limit`
-- [ ] remove `CaptureLimit`; `chunkRoom` reserves the decimal width of the largest `int` for each of `index` and `of` (derived from `math.MaxInt`, 19 digits on 64-bit), in addition to the exact JSON envelope and the serialized anchor; `Split(b)` drops `maxChunks` and `ErrTooManyChunks`
-- [ ] `round` starts every pending chunk at once (no semaphore), keeping fail-fast cancel and deadline handling; drop the `MaxChunks` recheck after a re-split; `pool` weight = raw relevance, total 0 -> plain mean
-- [ ] update every caller: `app.route`, the eval harness (`evalcase_test.go`, check it compiles with `-tags eval`), synthetic configs in tests; update the oversized eval case description
-- [ ] write tests: removed keys are unknown-key errors; large stdin captured whole; deadline still undecidable; many chunks with no limit; every serialized chunk state within `Budget.Chunk`, also after `Halve` and renumbering to more digits; all chunks in flight at once (peak = chunk count)
-- [ ] write pooling tests: zero-relevance filler of any length has no effect; all-zero relevance -> plain mean; a finite low-positive-weight example (e.g. 0.95 relevant vs N x 0.01 filler) pinning where dilution flips the result, documenting the raw-mean limit (replaces the "floored filler outweighs it at max_chunks" test)
-- [ ] run `make test` and `go vet -tags eval ./...` - must pass before task 2
+- [x] config: drop the three fields, their key parsing and validation; remove the keys from `defaults/config`; reword the `timeout` comment (covers both stages, cooperative)
+- [x] `Capture` reads stdin to EOF under ctx with no byte limit; remove `ErrCaptureLimit` and the `limit` parameter (`Undecidable` keeps only the deadline case); `ReadMentions` drops `limit`
+- [x] remove `CaptureLimit`; `chunkRoom` reserves the decimal width of the largest `int` for each of `index` and `of` (derived from `math.MaxInt`, 19 digits on 64-bit), in addition to the exact JSON envelope and the serialized anchor; `Split(b)` drops `maxChunks` and `ErrTooManyChunks`
+- [x] `round` starts every pending chunk at once (no semaphore), keeping fail-fast cancel and deadline handling; drop the `MaxChunks` recheck after a re-split; `pool` weight = raw relevance, total 0 -> plain mean
+- [x] update every caller: `app.route`, the eval harness (`evalcase_test.go`, check it compiles with `-tags eval`), synthetic configs in tests; update the oversized eval case description
+- [x] write tests: removed keys are unknown-key errors; large stdin captured whole; deadline still undecidable; many chunks with no limit; every serialized chunk state within `Budget.Chunk`, also after `Halve` and renumbering to more digits; all chunks in flight at once (peak = chunk count)
+- [x] write pooling tests: zero-relevance filler of any length has no effect; all-zero relevance -> plain mean; a finite low-positive-weight example (e.g. 0.95 relevant vs N x 0.01 filler) pinning where dilution flips the result, documenting the raw-mean limit (replaces the "floored filler outweighs it at max_chunks" test)
+- [x] run `make test` and `go vet -tags eval ./...` - must pass before task 2
 
 ### Task 2: Strict reading of explicit files
 
 **Files:**
 - Create: `pkg/prompt/file.go`, `pkg/prompt/file_test.go`
 
-- [ ] `ReadTextFile(ctx, cwd, path string) (string, error)`: resolve relative to cwd, require a regular file, read under ctx, reject binary content (reuse `detect.go`), wrap errors with the path
-- [ ] sentinel errors for missing / not a regular file / binary, so the CLI can say which flag failed
-- [ ] write tests: text file read exactly (bytes unchanged, CRLF kept), relative and absolute paths, missing, directory, binary, unreadable (Unix-only case behind the build tag)
-- [ ] run tests - must pass before task 3
+- [x] `ReadTextFile(ctx, cwd, path string) (string, error)`: resolve relative to cwd, require a regular file, read under ctx, reject binary content (reuse `detect.go`), wrap errors with the path
+- [x] sentinel errors for missing / not a regular file / binary, so the CLI can say which flag failed
+- [x] write tests: text file read exactly (bytes unchanged, CRLF kept), relative and absolute paths, missing, directory, binary, unreadable (Unix-only case behind the build tag)
+- [x] run tests - must pass before task 3
 
 ### Task 3: -p, --prompt-file and positional/stdin prompt sources
 
@@ -135,12 +135,13 @@ One compiling change: every caller and test of a removed API is updated in this 
 - Modify: `cmd/agrouter/flags.go`, `pkg/args/request.go`, `pkg/prompt/capture.go`, `cmd/agrouter/app.go`
 - Modify: `cmd/agrouter/flags_test.go`, `pkg/prompt/capture_test.go`, `cmd/agrouter/app_test.go`
 
-- [ ] replace `-p/--print` with `-p, --prompt TEXT`; add `--prompt-file PATH`; a second `-p` or `--prompt-file` is a usage error; update usage line and help text
-- [ ] `args.Request` carries the `-p` text, positional text and prompt-file path separately; `app` reads the file (Task 2) before capture; usage error names `--prompt-file`
-- [ ] `Capture` takes the explicit texts (in order: `-p`, positional, file) and joins them with stdin text by `"\n\n"`; `ErrNoPrompt` when everything is empty; the error text names all four sources
-- [ ] `{prompt}` gets `-p` + positional + file text only; stdin is replayed, never in argv
-- [ ] write tests: each source alone, all four together (order pinned), empty `-p ""` with stdin, all empty → exit 2, repeated flags → exit 2, `-p --model x` rejected, bad `--prompt-file` → exit 2, argv contents for a native helper, a Windows `.cmd` shim with a prompt file containing a newline → exit 127 (Windows build tag)
-- [ ] run tests - must pass before task 4
+- [x] replace `-p/--print` with `-p, --prompt TEXT`; add `--prompt-file PATH`; a second `-p` or `--prompt-file` is a usage error; update usage line and help text
+- [x] `args.Request` carries the `-p` text, positional text and prompt-file path separately; `app` reads the file (Task 2) before capture; usage error names `--prompt-file`
+- [x] `Capture` takes the explicit texts (in order: `-p`, positional, file) and joins them with stdin text by `"\n\n"`; `ErrNoPrompt` when everything is empty; the error text names all four sources
+- [x] `{prompt}` gets `-p` + positional + file text only; stdin is replayed, never in argv
+- [x] write tests: each source alone, all four together (order pinned), empty `-p ""` with stdin, all empty → exit 2, repeated flags → exit 2, `-p --model x` rejected, bad `--prompt-file` → exit 2, argv contents for a native helper, a Windows `.cmd` shim with a prompt file containing a newline → exit 127 (Windows build tag)
+- [x] run tests - must pass before task 4
+- ➕ `--print` stays as a long-only no-op: ralphex's Claude mode passes it with the prompt on stdin, so only `-p` changes meaning (README update in Task 10)
 
 ### Task 4: --doc flag and docs in the captured result
 
@@ -148,11 +149,11 @@ One compiling change: every caller and test of a removed API is updated in this 
 - Modify: `cmd/agrouter/flags.go`, `pkg/args/request.go`, `pkg/prompt/capture.go`, `pkg/prompt/chunk.go`, `cmd/agrouter/app.go`
 - Modify: `cmd/agrouter/flags_test.go`, `pkg/prompt/chunk_test.go`, `cmd/agrouter/app_test.go`
 
-- [ ] repeatable `--doc PATH`; every doc is read strictly on every call (bad path → usage error naming `--doc`, even with one eligible option)
-- [ ] `prompt.Result.Docs`; docs never reach the child argv or stdin, and are not scanned for mentions
-- [ ] `nonEmpty`-style checks in `Split` stay about prompt/files only (docs aren't stage-2 state); add a test that docs never make a short prompt leave the anchor
-- [ ] write tests: repeated `--doc` order kept, doc not in argv/stdin, bad doc → exit 2, docs ignored by mention scanning
-- [ ] run tests - must pass before task 5
+- [x] repeatable `--doc PATH`; every doc is read strictly on every call (bad path → usage error naming `--doc`, even with one eligible option)
+- [x] `prompt.Result.Docs`; docs never reach the child argv or stdin, and are not scanned for mentions
+- [x] `nonEmpty`-style checks in `Split` stay about prompt/files only (docs aren't stage-2 state); add a test that docs never make a short prompt leave the anchor
+- [x] write tests: repeated `--doc` order kept, doc not in argv/stdin, bad doc → exit 2, docs ignored by mention scanning
+- [x] run tests - must pass before task 5
 
 ### Task 5: Complexity questions, budget and doc splitting
 
@@ -162,12 +163,13 @@ One compiling change: every caller and test of a removed API is updated in this 
 - Modify: `pkg/config/validate_test.go`, `pkg/prompt/chunk_test.go`
 - Create: `pkg/router/question_test.go` (if absent), golden `pkg/router/testdata/request_complexity*.json`
 
-- [ ] config keys `complexity_question` and `complexity_evidence` (non-empty), with default texts in `defaults/config`
-- [ ] `complexityQuestion`: Choice over `"0"`..`"10"` with anchored descriptions as constants in `question.go`; `evidenceQuestion`: Noul with true/false criteria
-- [ ] `Budget.Doc` from both question sizes; over-budget → config error
-- [ ] `SplitDocs(b)`: one state when all docs fit, else doc chunks cut on lines/UTF-8; `HalveDoc` for 422s (or a shared halving helper)
-- [ ] write tests: budget derivation and over-budget error, single vs split doc states, every doc state within `Budget.Doc`, golden requests for a single and a chunked doc request
-- [ ] run tests - must pass before task 6
+- [x] config keys `complexity_question` and `complexity_evidence` (non-empty), with default texts in `defaults/config`
+- [x] `complexityQuestion`: Choice over `"0"`..`"10"` with anchored descriptions as constants in `question.go`; `evidenceQuestion`: Noul with true/false criteria
+- [x] `Budget.Doc` from both question sizes; over-budget → config error
+- [x] `SplitDocs(b)`: one state when all docs fit, else doc chunks cut on lines/UTF-8; `HalveDoc` for 422s (or a shared halving helper)
+- [x] write tests: budget derivation and over-budget error, single vs split doc states, every doc state within `Budget.Doc`, golden requests for a single and a chunked doc request
+- [x] run tests - must pass before task 6
+- ➕ `SplitDocs` returns nil when the docs fit; `DocChunks(tokens)` cuts unconditionally, for the whole-docs 422 split at half of `Budget.Doc` in Task 6; `complexityQuestions(ag)` builds both doc questions; `DocChunk.Doc` (not serialized) keeps the doc index
 
 ### Task 6: Complexity stage: map, reduce and failure policy
 
@@ -175,14 +177,15 @@ One compiling change: every caller and test of a removed API is updated in this 
 - Create: `pkg/router/complexity.go`, `pkg/router/complexity_test.go`
 - Modify: `pkg/router/pool.go` (extract the shared slot/re-split loop)
 
-- [ ] fan out every doc request at once inside the routing deadline; fail-fast cancel on non-422 errors
-- [ ] 422 on a doc chunk → halve that chunk once; second 422 or under `MinStateTokens` → error
-- [ ] 422 on the initial whole-docs request → split at half of `Budget.Doc` into chunks marked as already retried; a 422 on one of those → error
-- [ ] per-chunk score = `Σ i·p(i)`; validate that every criterion has a probability (else `jev.ErrMalformed`)
-- [ ] reduce: evidence-weighted mean, all-zero → plain mean, round to one decimal; return per-chunk results for debug
-- [ ] write tests with the moq mock: expected-value scoring, weighted reduce (a 9 with high evidence beats two 2s with low evidence), all-zero fallback, single-request path, malformed answer, deadline
-- [ ] write re-split tests: whole-docs 422 -> half-budget chunks; completed chunks are not asked again; second 422 after the whole-doc retry fails; doc text is preserved across re-splits; every renumbered doc request fits `Budget.Doc`
-- [ ] run tests - must pass before task 7
+- [x] fan out every doc request at once inside the routing deadline; fail-fast cancel on non-422 errors
+- [x] 422 on a doc chunk → halve that chunk once; second 422 or under `MinStateTokens` → error
+- [x] 422 on the initial whole-docs request → split at half of `Budget.Doc` into chunks marked as already retried; a 422 on one of those → error
+- [x] per-chunk score = `Σ i·p(i)`; validate that every criterion has a probability (else `jev.ErrMalformed`)
+- [x] reduce: evidence-weighted mean, all-zero → plain mean, round to one decimal; return per-chunk results for debug
+- [x] write tests with the moq mock: expected-value scoring, weighted reduce (a 9 with high evidence beats two 2s with low evidence), all-zero fallback, single-request path, malformed answer, deadline
+- [x] write re-split tests: whole-docs 422 -> half-budget chunks; completed chunks are not asked again; second 422 after the whole-doc retry fails; doc text is preserved across re-splits; every renumbered doc request fits `Budget.Doc`
+- [x] run tests - must pass before task 7
+- ➕ the shared lifecycle is a generic `fanout[C, A]` in `pkg/router/fanout.go` (round, fail-fast cancel, `resplitRejected`); `pool.go` keeps route scoring with `slot = piece[prompt.Chunk, routeAnswer]`. `Router.complexity` returns `*ComplexityResult{Chunks []DocScore, Complexity}`; the whole-docs request reports as 1 of 1; `prompt.Result.DocsTokens` added
 
 ### Task 7: Feed project complexity into routing
 
@@ -190,12 +193,13 @@ One compiling change: every caller and test of a removed API is updated in this 
 - Modify: `pkg/prompt/chunk.go`, `pkg/router/router.go`, `pkg/router/pool.go`, `pkg/config/defaults/config`, `cmd/agrouter/debug.go`
 - Modify: `pkg/router/router_test.go`, `pkg/router/pool_test.go`, `cmd/agrouter/debug_test.go`, `cmd/agrouter/app_test.go`, goldens in `pkg/router/testdata`
 
-- [ ] `State.Project` / `Anchor.Project`; `Route` runs stage 1 after the one-option bypass when docs have text, then sets the project on the single state or the anchor; the anchor size includes it
-- [ ] any stage-1 error → `cannotDecide`
-- [ ] reword `question` and `chunk_question` defaults: `project.complexity` (0-10, when present) is context about the codebase, judged against the specific task
-- [ ] debug output: stage-1 per-chunk score/evidence and the final complexity, no doc text
-- [ ] write tests: no `--doc` → requests byte-identical to before (golden), with `--doc` → `project.complexity` in single and chunk states (goldens), one eligible option → no Jev calls at all, stage-1 failure with one CLI left vs several, debug lines, end-to-end decision with `--doc` via `httptest` Jev
-- [ ] run tests - must pass before task 8
+- [x] `State.Project` / `Anchor.Project`; `Route` runs stage 1 after the one-option bypass when docs have text, then sets the project on the single state or the anchor; the anchor size includes it
+- [x] any stage-1 error → `cannotDecide`
+- [x] reword `question` and `chunk_question` defaults: `project.complexity` (0-10, when present) is context about the codebase, judged against the specific task
+- [x] debug output: stage-1 per-chunk score/evidence and the final complexity, no doc text
+- [x] write tests: no `--doc` → requests byte-identical to before (golden), with `--doc` → `project.complexity` in single and chunk states (goldens), one eligible option → no Jev calls at all, stage-1 failure with one CLI left vs several, debug lines, end-to-end decision with `--doc` via `httptest` Jev
+- [x] run tests - must pass before task 8
+- ➕ the project rides on `prompt.Result.Project` (set on a copy of the capture), so `State()` and `anchor()` include it and the anchor size counts it; an undecidable capture goes to `cannotDecide` before stage 1; `Decision.Complexity` is kept when stage 2 fails, for debug; goldens `request_project.json` and `request_chunk_project.json`
 
 ### Task 8: Eval cases for project complexity
 
@@ -203,23 +207,26 @@ One compiling change: every caller and test of a removed API is updated in this 
 - Modify: `pkg/router/evalcase_test.go`, `pkg/router/evalcase_load_test.go`
 - Create: `testdata/routing/complexity-*.json`
 
-- [ ] case format gains `docs` (inline text or files beside the case) and `prompt_file`
-- [ ] cases: same refactor task with a small-script doc vs an enterprise doc (different acceptable sets); a trivial typo fix in an enterprise repo; a style-rules-only doc; task and the relevant doc fact both buried mid-text; a doc describing an unrelated module
-- [ ] write tests for loading the new fields (untagged, against the mock)
-- [ ] run tests - must pass before task 9
+- [x] case format gains `docs` (inline text or files beside the case) and `prompt_file`
+- [x] cases: same refactor task with a small-script doc vs an enterprise doc (different acceptable sets); a trivial typo fix in an enterprise repo; a style-rules-only doc; task and the relevant doc fact both buried mid-text; a doc describing an unrelated module
+- [x] write tests for loading the new fields (untagged, against the mock)
+- [x] run tests - must pass before task 9
+- ➕ `docs` is a list of `{"text"}` or `{"file"}` entries; `prompt_file` and doc files are read with `prompt.ReadTextFile` (strict, like the CLI); results report `project N.N` per case; `evalMock` answers the complexity Choice with its last level
 
 ### Task 9: Verify acceptance criteria
-- [ ] verify all requirements from Overview are implemented
-- [ ] verify edge cases are handled (empty sources, bad files, one-option bypass, all-zero weights, 422 re-splits, deadline)
-- [ ] run full test suite: `make test`
-- [ ] run `make lint` with v2.13.0, also `GOOS=linux`, `GOOS=darwin` and `--build-tags=eval`
-- [ ] verify test coverage is 80%+ per package (mocks excluded)
+- [x] verify all requirements from Overview are implemented
+- [x] verify edge cases are handled (empty sources, bad files, one-option bypass, all-zero weights, 422 re-splits, deadline)
+- [x] run full test suite: `make test`
+- [x] run `make lint` with v2.13.0, also `GOOS=linux`, `GOOS=darwin` and `--build-tags=eval`
+- [x] verify test coverage is 80%+ per package (mocks excluded)
+- ➕ verified: lint clean with v2.13.0 (and local 2.14.0) on windows, linux, darwin and `--build-tags=eval`; coverage cmd/agrouter 97.3%, args 100%, catalog 100%, config 97.7%, jev 96.8%, prompt 92.2%, router 99.2%, runner 89.0%
 
 ### Task 10: [Final] Update documentation
-- [ ] README: prompt sources (`-p`, positional, `--prompt-file`, stdin), `--doc` and the complexity stage, removed keys, the cooperative timeout, the Windows `.cmd` + prompt-file limitation, exit codes (bad `--prompt-file`/`--doc`), the `argv` note (now holds `-p`/positional/file text); remove the `docs/design.md` links
-- [ ] CLAUDE.md and AGENTS.md: remove the "docs/design.md is the specification" rule; update Layout/Rules where the new flags or stage change them
-- [ ] remove the design references in `pkg/router/question.go:48` and `defaults/config` comments
-- [ ] move this plan to `docs/plans/completed/`
+- [x] README: prompt sources (`-p`, positional, `--prompt-file`, stdin), `--doc` and the complexity stage, removed keys, the cooperative timeout, the Windows `.cmd` + prompt-file limitation, exit codes (bad `--prompt-file`/`--doc`), the `argv` note (now holds `-p`/positional/file text); remove the `docs/design.md` links
+- [x] CLAUDE.md and AGENTS.md: remove the "docs/design.md is the specification" rule; update Layout/Rules where the new flags or stage change them
+- [x] remove the design references in `pkg/router/question.go:48` and `defaults/config` comments
+- [x] move this plan to `docs/plans/completed/`
+- ➕ the other stray design references went too (`eligibility.go`, the `flags.go` help comment, `TestBuildDesignExamples` → `TestBuildExamples`); the CLAUDE.md/AGENTS.md exit-2 rule now points to the README's exit code table
 
 ## Post-Completion
 *Items requiring manual intervention or external systems - no checkboxes, informational only*

@@ -31,7 +31,6 @@ func TestParseArgs_FlagsAroundPositional(t *testing.T) {
 	want := []args.Arg{
 		{Spelling: "--output-format json", Key: "output-format.json"},
 		{Spelling: "--permission-mode plan", Key: "permission-mode.plan"},
-		{Spelling: "--verbose", Key: "verbose"},
 	}
 	tests := []struct {
 		name string
@@ -77,12 +76,20 @@ func TestParseArgs_Mode(t *testing.T) {
 }
 
 func TestParseArgs_OwnFlags(t *testing.T) {
-	t.Run("-p and --print accepted, never mapped", func(t *testing.T) {
-		for _, f := range []string{"-p", "--print"} {
-			req := parseOK(t, []string{f, "x"}, noEnv)
-			assert.Empty(t, req.Args)
-			assert.Equal(t, positional("x"), req.Prompt)
-		}
+	t.Run("--verbose belongs only to agrouter", func(t *testing.T) {
+		cmd, err := parseArgs([]string{"--verbose", "x"}, noEnv)
+		require.NoError(t, err)
+		assert.True(t, cmd.verbose)
+		assert.Empty(t, cmd.req.Args)
+		cmd, err = parseArgs([]string{"--cli=alpha", "x", "--", "--verbose"}, noEnv)
+		require.NoError(t, err)
+		assert.False(t, cmd.verbose)
+		assert.Equal(t, []string{"--verbose"}, cmd.req.Raw)
+	})
+	t.Run("--print accepted, never mapped", func(t *testing.T) {
+		req := parseOK(t, []string{"--print", "x"}, noEnv)
+		assert.Empty(t, req.Args)
+		assert.Equal(t, positional("x"), req.Prompt)
 	})
 	t.Run("AGROUTER_CLI used without --cli", func(t *testing.T) {
 		req := parseOK(t, []string{"x"}, envOf(map[string]string{cliEnv: "codex"}))
@@ -126,6 +133,9 @@ func TestParseArgs_OwnFlags(t *testing.T) {
 		assert.Contains(t, cmd.help, "process")
 		assert.Contains(t, cmd.help, "--cli=NAME")
 		assert.Contains(t, cmd.help, "-c, --config=KEY=VALUE")
+		assert.Contains(t, cmd.help, "-p, --prompt=TEXT")
+		assert.Contains(t, cmd.help, "--prompt-file=PATH")
+		assert.Contains(t, cmd.help, "--doc=PATH")
 		assert.NotContains(t, cmd.help, "/cli")
 	})
 	t.Run("--version", func(t *testing.T) {
@@ -134,6 +144,59 @@ func TestParseArgs_OwnFlags(t *testing.T) {
 		assert.True(t, cmd.version)
 		assert.Nil(t, cmd.req)
 	})
+}
+
+func TestParseArgs_PromptSources(t *testing.T) {
+	tests := []struct {
+		name              string
+		argv              []string
+		wantFlag, wantPos args.Optional
+		wantFile          args.Optional
+		wantArgs          []args.Arg
+	}{
+		{name: "-p alone", argv: []string{"-p", "fix it"}, wantFlag: positional("fix it")},
+		{name: "--prompt = form", argv: []string{"--prompt=fix it"}, wantFlag: positional("fix it")},
+		{name: "-p attached", argv: []string{"-pfix"}, wantFlag: positional("fix")},
+		{name: "empty -p is set", argv: []string{"-p", ""}, wantFlag: positional("")},
+		{name: "--prompt-file alone", argv: []string{"--prompt-file", "task.md"}, wantFile: positional("task.md")},
+		{name: "every source", argv: []string{"--prompt-file=task.md", "positional", "-p", "flag", "--verbose"},
+			wantFlag: positional("flag"), wantPos: positional("positional"), wantFile: positional("task.md"),
+			wantArgs: nil},
+		{name: "slash values survive", argv: []string{"-p", "/review", "--prompt-file", "/tmp/task.md"},
+			wantFlag: positional("/review"), wantFile: positional("/tmp/task.md")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := parseOK(t, tc.argv, noEnv)
+			assert.Equal(t, tc.wantFlag, req.PromptFlag)
+			assert.Equal(t, tc.wantPos, req.Prompt)
+			assert.Equal(t, tc.wantFile, req.PromptFile)
+			assert.Equal(t, tc.wantArgs, req.Args)
+			assert.Empty(t, req.FileText, "the file is read by the app, not the parser")
+		})
+	}
+}
+
+func TestParseArgs_Docs(t *testing.T) {
+	tests := []struct {
+		name string
+		argv []string
+		want []string
+	}{
+		{name: "none", argv: []string{"fix it"}},
+		{name: "one", argv: []string{"--doc", "CLAUDE.md", "fix it"}, want: []string{"CLAUDE.md"}},
+		{name: "repeated, order kept", argv: []string{"--doc=b.md", "fix it", "--doc", "a.md", "--doc", "b.md"},
+			want: []string{"b.md", "a.md", "b.md"}},
+		{name: "slash path survives", argv: []string{"--doc", "/repo/AGENTS.md", "fix it"}, want: []string{"/repo/AGENTS.md"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := parseOK(t, tc.argv, noEnv)
+			assert.Equal(t, tc.want, req.Docs)
+			assert.Equal(t, positional("fix it"), req.Prompt)
+			assert.Empty(t, req.Args, "--doc is not a mapped argument")
+		})
+	}
 }
 
 func TestParseArgs_Config(t *testing.T) {
@@ -200,7 +263,6 @@ func TestParseArgs_RalphexClaude(t *testing.T) {
 	assert.Equal(t, []args.Arg{
 		{Spelling: "--dangerously-skip-permissions", Key: "permission-mode.bypassPermissions"},
 		{Spelling: "--output-format stream-json", Key: "output-format.stream-json"},
-		{Spelling: "--verbose", Key: "verbose"},
 	}, req.Args)
 }
 
@@ -275,6 +337,12 @@ func TestParseArgs_Errors(t *testing.T) {
 		{"second positional", []string{"one", "two"}, "more than one positional"},
 		{"second positional around flags", []string{"exec", "one", "--verbose", "two"}, "more than one positional"},
 		{"missing value", []string{"x", "--model"}, "model"},
+		{"second -p", []string{"-p", "a", "--prompt", "b"}, "-p/--prompt given more than once"},
+		{"second --prompt-file", []string{"--prompt-file", "a", "--prompt-file=b"}, "--prompt-file given more than once"},
+		{"-p value looks like a flag", []string{"-p", "--model", "x"}, "expected argument"},
+		{"-p without value", []string{"x", "-p"}, "prompt"},
+		{"--prompt-file without value", []string{"x", "--prompt-file"}, "prompt-file"},
+		{"--doc without value", []string{"x", "--doc"}, "doc"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -318,7 +386,7 @@ func TestPosixHelp(t *testing.T) {
 		name, in, want string
 	}{
 		{"value option", "      /cli:NAME      restrict", "      --cli=NAME     restrict"},
-		{"short and long", "  /p, /print         accepted", "  -p, --print        accepted"},
+		{"short and long", "  /p, /prompt:TEXT        the", "  -p, --prompt=TEXT       the"},
 		{"long flag", "      /verbose       verbose", "      --verbose      verbose"},
 		{"windows-only help line dropped", "x\n  /?                 Show\ny", "x\ny"},
 		{"description continuation kept", "                     CLI (env)", "                     CLI (env)"},

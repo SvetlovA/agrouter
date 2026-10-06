@@ -26,13 +26,24 @@ var evalDir = filepath.Join("..", "..", "testdata", "routing")
 type evalCase struct {
 	Name        string            `json:"-"` // the file name without .json
 	Description string            `json:"description"`
-	Prompt      string            `json:"prompt"`     // the positional prompt
-	Stdin       string            `json:"stdin"`      // stdin text, inline
-	StdinFile   string            `json:"stdin_file"` // stdin text from a file beside the case, after Stdin
-	Filler      *evalFiller       `json:"filler"`     // generated material around the stdin text
-	Files       map[string]string `json:"files"`      // files the prompt mentions, relative path → content
-	CLI         string            `json:"cli"`        // --cli, empty to route across every CLI
-	Acceptable  []string          `json:"acceptable"` // option ids counted as correct
+	Prompt      string            `json:"prompt"`      // the positional prompt
+	PromptFile  string            `json:"prompt_file"` // --prompt-file: a text file beside the case
+	Stdin       string            `json:"stdin"`       // stdin text, inline
+	StdinFile   string            `json:"stdin_file"`  // stdin text from a file beside the case, after Stdin
+	Filler      *evalFiller       `json:"filler"`      // generated material around the stdin text
+	Files       map[string]string `json:"files"`       // files the prompt mentions, relative path → content
+	Docs        []evalDoc         `json:"docs"`        // --doc, in order
+	CLI         string            `json:"cli"`         // --cli, empty to route across every CLI
+	Acceptable  []string          `json:"acceptable"`  // option ids counted as correct
+
+	FileText string   `json:"-"` // the prompt_file contents
+	DocTexts []string `json:"-"` // the docs' contents, in order
+}
+
+// evalDoc is one --doc: inline Text or a File beside the case, exactly one of them.
+type evalDoc struct {
+	Text string `json:"text"`
+	File string `json:"file"`
 }
 
 // evalFiller repeats Text up to Bytes, before or after the stdin text, so an oversized prompt is
@@ -80,9 +91,9 @@ func loadEvalCase(path string, ids map[string]bool) (evalCase, error) {
 	}
 	c.Name = strings.TrimSuffix(filepath.Base(path), ".json")
 	if c.StdinFile != "" {
-		text, err := os.ReadFile(filepath.Join(filepath.Dir(path), c.StdinFile))
-		if err != nil {
-			return c, fmt.Errorf("stdin_file: %w", err)
+		text, readErr := os.ReadFile(filepath.Join(filepath.Dir(path), c.StdinFile))
+		if readErr != nil {
+			return c, fmt.Errorf("stdin_file: %w", readErr)
 		}
 		c.Stdin += string(text)
 	}
@@ -98,8 +109,11 @@ func loadEvalCase(path string, ids map[string]bool) (evalCase, error) {
 			c.Stdin += fill
 		}
 	}
-	if c.Prompt == "" && c.Stdin == "" {
-		return c, errors.New("no prompt and no stdin")
+	if err := c.readExplicit(filepath.Dir(path)); err != nil {
+		return c, err
+	}
+	if c.Prompt == "" && c.FileText == "" && c.Stdin == "" {
+		return c, errors.New("no prompt, no prompt_file and no stdin")
 	}
 	if len(c.Acceptable) == 0 {
 		return c, errors.New("no acceptable options")
@@ -112,6 +126,30 @@ func loadEvalCase(path string, ids map[string]bool) (evalCase, error) {
 	return c, nil
 }
 
+// readExplicit reads the prompt file and the doc files from dir strictly, the way agrouter reads
+// --prompt-file and --doc.
+func (c *evalCase) readExplicit(dir string) error {
+	var err error
+	if c.PromptFile != "" {
+		if c.FileText, err = prompt.ReadTextFile(context.Background(), dir, c.PromptFile); err != nil {
+			return fmt.Errorf("prompt_file: %w", err)
+		}
+	}
+	for i, d := range c.Docs {
+		text := d.Text
+		switch {
+		case (d.Text == "") == (d.File == ""):
+			return fmt.Errorf("doc %d: needs exactly one of text and file", i)
+		case d.File != "":
+			if text, err = prompt.ReadTextFile(context.Background(), dir, d.File); err != nil {
+				return fmt.Errorf("doc %d: %w", i, err)
+			}
+		}
+		c.DocTexts = append(c.DocTexts, text)
+	}
+	return nil
+}
+
 // evalResult is how one case was routed.
 type evalResult struct {
 	Case       string
@@ -119,6 +157,7 @@ type evalResult struct {
 	Correct    bool
 	Split      bool    // pooled over chunks: no confidence
 	Confidence float64 // Jev's, for a state sent whole
+	Project    string  // the project complexity, formatted, when the case has docs
 	Duration   time.Duration
 	Err        error
 }
@@ -150,20 +189,21 @@ func runEvalCase(ctx context.Context, r *Router, cfg *config.Config, cat *catalo
 
 	ctx, cancel := context.WithTimeout(ctx, evalTimeout)
 	defer cancel()
-	limit := prompt.CaptureLimit(r.Budget(), cfg.Agrouter.MaxChunks)
 	var stdin io.Reader // nil: no stdin
 	if c.Stdin != "" {
 		stdin = strings.NewReader(c.Stdin)
 	}
-	captured, err := prompt.Capture(ctx, c.Prompt, stdin, limit)
+	req := &args.Request{CLI: c.CLI, Prompt: args.Optional{Value: c.Prompt, Set: c.Prompt != ""},
+		PromptFile: args.Optional{Value: c.PromptFile, Set: c.PromptFile != ""}, FileText: c.FileText}
+	captured, err := prompt.Capture(ctx, req.ArgvPrompt(), stdin)
 	if err != nil {
 		return fail(fmt.Errorf("capture: %w", err))
 	}
-	if err = captured.ReadMentions(ctx, workDir, limit); err != nil {
+	captured.Docs = c.DocTexts
+	if err = captured.ReadMentions(ctx, workDir); err != nil {
 		return fail(fmt.Errorf("read mentions: %w", err))
 	}
 
-	req := &args.Request{CLI: c.CLI, Prompt: args.Optional{Value: c.Prompt, Set: c.Prompt != ""}}
 	d, err := r.Route(ctx, Eligible(cfg, cat, req), req, captured)
 	if err != nil {
 		return fail(err)
@@ -174,6 +214,9 @@ func runEvalCase(ctx context.Context, r *Router, cfg *config.Config, cat *catalo
 	res.Chosen = d.OptionID
 	res.Correct = slices.Contains(c.Acceptable, d.OptionID)
 	res.Split = d.Pooled != nil
+	if d.Complexity != nil {
+		res.Project = fmt.Sprintf("%.1f", d.Complexity.Complexity)
+	}
 	if d.Answer != nil {
 		res.Confidence = d.Answer.Confidence
 	}
@@ -247,6 +290,9 @@ func resultLines(results []evalResult) []string {
 		default:
 			line = fmt.Sprintf("%-5s %s: %s confidence %.3f in %s", mark(r.Correct), r.Case, r.Chosen, r.Confidence,
 				r.Duration.Round(time.Millisecond))
+		}
+		if r.Err == nil && r.Project != "" {
+			line += ", project " + r.Project
 		}
 		lines = append(lines, line)
 	}

@@ -44,6 +44,9 @@ func finalPath(h windows.Handle) (string, error) {
 	return stripExtendedPrefix(windows.UTF16ToString(buf[:n])), nil
 }
 
+// openReadFlags opens a file for reading; Windows has no FIFOs that block on open.
+const openReadFlags = os.O_RDONLY
+
 // workdir is the working directory mentioned files are read from, by its canonical path.
 type workdir struct {
 	root string

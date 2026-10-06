@@ -1,5 +1,6 @@
-// Package prompt builds the state agrouter sends to Jev from the positional prompt, stdin and the
-// files the prompt mentions, and keeps stdin for the child byte-for-byte.
+// Package prompt builds the state agrouter sends to Jev from the explicit prompt texts (-p, the
+// positional prompt, --prompt-file), stdin and the files the prompt mentions, and keeps stdin for the
+// child byte-for-byte.
 package prompt
 
 import (
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
 
 // Sources of an attachment.
@@ -20,12 +22,22 @@ const (
 // readSize is the size of one read from stdin.
 const readSize = 32 << 10
 
-var (
-	// ErrNoPrompt means neither a positional prompt nor stdin was given; the caller exits 2.
-	ErrNoPrompt = errors.New("no prompt: give a positional prompt or stdin")
-	// ErrCaptureLimit means the prompt text passed the capture limit, so Jev cannot decide.
-	ErrCaptureLimit = errors.New("prompt text over the capture limit")
-)
+// ErrNoPrompt means every prompt source was empty; the caller exits 2.
+var ErrNoPrompt = errors.New("no prompt: give -p, a positional prompt, --prompt-file or stdin")
+
+// sourceSep joins the prompt sources.
+const sourceSep = "\n\n"
+
+// Join joins the non-empty texts, in order, with a blank line. Bytes are kept as they are.
+func Join(texts ...string) string {
+	kept := make([]string, 0, len(texts))
+	for _, t := range texts {
+		if t != "" {
+			kept = append(kept, t)
+		}
+	}
+	return strings.Join(kept, sourceSep)
+}
 
 // Attachment is the metadata of one binary input: never its content or name.
 type Attachment struct {
@@ -51,13 +63,18 @@ func (s *Stdin) Reader() io.Reader {
 
 // Result is the captured prompt.
 type Result struct {
-	Prompt      string       // Jev's prompt: positional, stdin text, or both joined by "\n\n"
+	Prompt      string       // Jev's prompt: the explicit texts, then stdin text, joined by Join
 	Files       []string     // contents of the text files the prompt mentions (ReadMentions)
 	Attachments []Attachment // binary stdin and binary mentioned files, if any
-	TextBytes   int64        // text counted against the capture limit (positional, stdin, mentioned files)
 	Stdin       *Stdin       // nil when there was no stdin
-	// Undecidable is why Jev cannot decide from this capture (ErrCaptureLimit or the routing
-	// context's error); Prompt, Files and Attachments are then empty, and Stdin still replays everything.
+	// Docs are the --doc contents, in order: routing context only, never in the routing state, the
+	// child's argv or stdin, and not scanned for mentions.
+	Docs []string
+	// Project is what the docs say about the codebase, set by the router after the complexity stage;
+	// nil without docs. It goes in the single state and in the anchor of every chunk state.
+	Project *Project
+	// Undecidable is why Jev cannot decide from this capture (the routing context's error); Prompt,
+	// Files and Attachments are then empty, and Stdin still replays everything.
 	Undecidable error
 }
 
@@ -74,17 +91,17 @@ func StdinOf(f *os.File) io.Reader {
 	return f
 }
 
-// Capture reads stdin (nil for none) to EOF under ctx and a text capture limit in bytes, and builds
-// Jev's prompt from it and the positional prompt. The positional prompt and stdin text count against
-// limit; binary stdin does not. It returns ErrNoPrompt when there is neither a positional prompt nor
-// any stdin byte, and an error when stdin cannot be read.
-func Capture(ctx context.Context, positional string, stdin io.Reader, limit int64) (*Result, error) {
-	res := &Result{TextBytes: int64(len(positional))}
+// Capture reads stdin (nil for none) to EOF under ctx, with no size limit, and builds Jev's prompt
+// from given, the explicit texts (-p, positional, --prompt-file) already joined, followed by stdin
+// text. It returns ErrNoPrompt when given is empty and there is no stdin byte, and an error when
+// stdin cannot be read.
+func Capture(ctx context.Context, given string, stdin io.Reader) (*Result, error) {
+	res := &Result{}
 	c := &capturer{ctx: ctx, eof: true}
 	if stdin != nil {
 		c.eof = false
 		c.pump = startPump(stdin)
-		undecidable, err := c.run(stdin, limit-res.TextBytes)
+		undecidable, err := c.run(stdin)
 		res.Stdin = &Stdin{Buffered: c.buf}
 		if !c.eof {
 			res.Stdin.Rest = c.pump
@@ -97,27 +114,16 @@ func Capture(ctx context.Context, positional string, stdin io.Reader, limit int6
 			return res, nil //nolint:nilerr // undecidable is recorded in res, not returned
 		}
 	}
-	if positional == "" && len(c.buf) == 0 {
+	if given == "" && len(c.buf) == 0 {
 		return nil, ErrNoPrompt
 	}
 
-	switch {
-	case c.binary:
-		res.Prompt = positional
+	if c.binary {
+		res.Prompt = given
 		res.Attachments = []Attachment{{Source: SourceStdin, Type: c.mediaType, Bytes: c.size}}
-	case positional == "":
-		res.Prompt = string(c.buf)
-	case len(c.buf) == 0:
-		res.Prompt = positional
-	default:
-		res.Prompt = positional + "\n\n" + string(c.buf)
+		return res, nil
 	}
-	if !c.binary {
-		res.TextBytes += int64(len(c.buf))
-	}
-	if res.TextBytes > limit {
-		return &Result{TextBytes: res.TextBytes, Stdin: res.Stdin, Undecidable: ErrCaptureLimit}, nil
-	}
+	res.Prompt = Join(given, string(c.buf))
 	return res, nil
 }
 
@@ -133,9 +139,8 @@ type capturer struct {
 	size      int64 // binary stdin size
 }
 
-// run captures stdin with textLimit bytes left for its text. It returns why Jev cannot decide, if so,
-// and an error when stdin fails.
-func (c *capturer) run(stdin io.Reader, textLimit int64) (undecidable, err error) {
+// run captures stdin. It returns why Jev cannot decide, if so, and an error when stdin fails.
+func (c *capturer) run(stdin io.Reader) (undecidable, err error) {
 	if err := c.fill(SniffLen); err != nil {
 		return c.split(err)
 	}
@@ -143,13 +148,12 @@ func (c *capturer) run(stdin io.Reader, textLimit int64) (undecidable, err error
 	c.binary, c.mediaType = Detect(prefix, c.eof && len(c.buf) <= SniffLen)
 
 	if !c.binary {
-		return c.readText(stdin, textLimit)
+		return c.readText(stdin)
 	}
 	return c.finishBinary(stdin)
 }
 
-// finishBinary measures binary stdin, which never counts against the text limit: the size comes
-// from stat, or from counting.
+// finishBinary measures binary stdin: the size comes from stat, or from counting.
 func (c *capturer) finishBinary(stdin io.Reader) (undecidable, readErr error) {
 	if size, ok := regularSize(stdin); ok {
 		c.size = size
@@ -162,22 +166,16 @@ func (c *capturer) finishBinary(stdin io.Reader) (undecidable, readErr error) {
 	return nil, nil
 }
 
-// readText reads text stdin one byte past the limit, to tell "at the limit" from "over it", and
-// detects again over everything read: binary anywhere still makes it an attachment, measured by
-// finishBinary.
-func (c *capturer) readText(stdin io.Reader, textLimit int64) (undecidable, readErr error) {
-	if err := c.fill(max(textLimit+1, 0)); err != nil {
+// readText reads text stdin to EOF and detects again over everything read: binary anywhere still
+// makes it an attachment, measured by finishBinary.
+func (c *capturer) readText(stdin io.Reader) (undecidable, readErr error) {
+	if err := c.fill(-1); err != nil {
 		return c.split(err)
 	}
-	over := int64(len(c.buf)) > textLimit
-	c.binary, c.mediaType = Detect(c.buf, !over)
-	if !c.binary {
-		if over {
-			return ErrCaptureLimit, nil
-		}
-		return nil, nil
+	if c.binary, c.mediaType = Detect(c.buf, true); c.binary {
+		return c.finishBinary(stdin)
 	}
-	return c.finishBinary(stdin)
+	return nil, nil
 }
 
 // split sorts a fill error into "cannot decide" (the routing deadline) or a read error.

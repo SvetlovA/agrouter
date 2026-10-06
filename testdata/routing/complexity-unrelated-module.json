@@ -1,0 +1,21 @@
+{
+  "description": "the doc describes a demanding module the task does not touch: a small script edit stays cheap",
+  "prompt": "In tools/release_notes.py, sort the changelog entries by date (newest first) instead of by title.",
+  "files": {
+    "tools/release_notes.py": "import sys\n\n\ndef render(entries):\n    for e in sorted(entries, key=lambda e: e['title']):\n        print(f\"{e['date']} {e['title']}\")\n\n\nif __name__ == '__main__':\n    render([])\n"
+  },
+  "docs": [
+    {
+      "file": "complexity-unrelated-module.md"
+    }
+  ],
+  "acceptable": [
+    "claude-haiku-4-5",
+    "claude-sonnet-5-5@low",
+    "gpt-6-luna@low",
+    "gpt-6-luna@medium",
+    "gpt-6.1-sol@low",
+    "claude-sonnet-5-5@medium",
+    "gpt-6.1-sol@medium"
+  ]
+}

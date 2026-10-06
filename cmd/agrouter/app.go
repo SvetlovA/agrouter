@@ -61,18 +61,31 @@ func stdinReader(r io.Reader) io.Reader {
 	return r
 }
 
-// selectionJSON is the selected CLI, model and effort; unset values are null.
+// selectionJSON records the selection, project complexity and available Jev confidence.
 type selectionJSON struct {
-	CLI    string  `json:"cli"`
-	Model  *string `json:"model"`
-	Effort *string `json:"effort"`
+	CLI               string          `json:"cli"`
+	Model             *string         `json:"model"`
+	Effort            *string         `json:"effort"`
+	ProjectComplexity string          `json:"project_complexity,omitempty"`
+	Confidence        *confidenceJSON `json:"confidence,omitempty"`
+	Options           []optionJSON    `json:"options,omitempty"`
+}
+
+// optionJSON identifies probability keys and preserves catalog order for tie-breaking.
+type optionJSON struct {
+	ID     string `json:"id"`
+	CLI    string `json:"cli"`
+	Model  string `json:"model"`
+	Effort string `json:"effort"`
 }
 
 // decisionJSON adds the argv and skipped arguments for decision mode.
 type decisionJSON struct {
 	selectionJSON
-	Argv    []string `json:"argv"`
-	Skipped []string `json:"skipped"`
+	Argv          []string `json:"argv"`
+	Skipped       []string `json:"skipped"`
+	StdinRequired bool     `json:"stdin_required"`
+	Command       string   `json:"command"`
 }
 
 // run executes the pipeline: parse, config, catalog, then under the routing deadline capture, route
@@ -113,12 +126,12 @@ func (a *app) run(argv []string) int {
 	a.debug.command(res)
 
 	if req.Mode == args.ModeDecision {
-		return a.printDecision(d, res)
+		return a.printDecision(d, res, cmd.verbose)
 	}
 	// selection logging is best effort, like warnings; it never includes the prompt or raw argv
 	enc := json.NewEncoder(a.stderr)
 	enc.SetEscapeHTML(false)
-	_ = enc.Encode(selection(d.Decision))
+	_ = enc.Encode(selectionOutput(d, cmd.verbose))
 	return a.exec(res, d.captured)
 }
 
@@ -152,18 +165,46 @@ type routed struct {
 	router.Decision
 	captured *prompt.Result
 	skipped  []args.Skip
+	options  []optionJSON
 }
 
-// route captures the prompt and decides, all within the routing deadline. Eligibility warnings go to
-// stderr once the prompt is known to be there.
+// route reads --prompt-file and every --doc, captures the prompt and decides, all within the routing
+// deadline. Eligibility warnings go to stderr once the prompt is known to be there.
 func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router, req *args.Request) (routed, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Agrouter.Timeout)
 	defer cancel()
 
-	limit := prompt.CaptureLimit(rt.Budget(), cfg.Agrouter.MaxChunks)
-	captured, err := prompt.Capture(ctx, req.Prompt.Value, a.stdin, limit)
+	if req.PromptFile.Set {
+		text, err := prompt.ReadTextFile(ctx, a.workDir, req.PromptFile.Value)
+		if err != nil {
+			return routed{}, fmt.Errorf("--prompt-file: %w", err)
+		}
+		req.FileText = text
+	}
+	// docs are read even when one option will be left, so a bad --doc fails every call alike; the
+	// deadline passing mid-read is not a bad doc, so Jev cannot decide
+	var (
+		docs        []string
+		undecidable error
+	)
+	for _, path := range req.Docs {
+		text, err := prompt.ReadTextFile(ctx, a.workDir, path)
+		if err != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+			undecidable = fmt.Errorf("--doc: %w", err)
+			continue // the later docs are still checked for being missing or not regular files
+		}
+		if err != nil {
+			return routed{}, fmt.Errorf("--doc: %w", err)
+		}
+		docs = append(docs, text)
+	}
+	captured, err := prompt.Capture(ctx, req.ArgvPrompt(), a.stdin)
 	if err != nil {
 		return routed{}, err
+	}
+	captured.Docs = docs
+	if undecidable != nil && captured.Undecidable == nil {
+		captured.Undecidable = undecidable
 	}
 
 	el := router.Eligible(cfg, cat, req)
@@ -173,7 +214,7 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 	a.debug.eligibility(el)
 	// one option runs without Jev, so the files the prompt mentions are not read for it
 	if len(el.Options) > 1 {
-		if err = captured.ReadMentions(ctx, a.workDir, limit); err != nil {
+		if err = captured.ReadMentions(ctx, a.workDir); err != nil {
 			return routed{}, fmt.Errorf("read mentioned files: %w", err)
 		}
 	}
@@ -182,27 +223,52 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 	if err != nil {
 		return routed{}, err
 	}
-	return routed{Decision: d, captured: captured, skipped: el.Skipped}, nil
+	options := make([]optionJSON, len(el.Options))
+	for i, o := range el.Options {
+		options[i] = optionJSON{ID: o.ID, CLI: o.CLI, Model: o.Name, Effort: el.EffortFor(o)}
+	}
+	return routed{Decision: d, captured: captured, skipped: el.Skipped, options: options}, nil
 }
 
-// printDecision writes the decision-mode JSON line to stdout; skipped lists what eligibility skipped,
-// then what the argv left out.
-func (a *app) printDecision(d routed, res args.Result) int {
-	out := decisionJSON{selectionJSON: selection(d.Decision), Argv: res.Argv, Skipped: []string{}}
-	for _, s := range slices.Concat(d.skipped, res.Skipped) {
-		out.Skipped = append(out.Skipped, s.Spelling)
+// printDecision writes concise or indented verbose JSON to stdout; skipped lists what eligibility
+// skipped, then what the argv left out.
+func (a *app) printDecision(d routed, res args.Result, verbose bool) int {
+	summary := selectionOutput(d, verbose)
+	var out any = summary
+	if verbose {
+		details := decisionJSON{selectionJSON: summary, Argv: res.Argv, Skipped: []string{}}
+		details.Command = commandText(res.Argv)
+		details.StdinRequired = d.captured.Stdin != nil && (len(d.captured.Stdin.Buffered) > 0 || d.captured.Stdin.Rest != nil)
+		for _, s := range slices.Concat(d.skipped, res.Skipped) {
+			details.Skipped = append(details.Skipped, s.Spelling)
+		}
+		out = details
 	}
 	enc := json.NewEncoder(a.stdout)
 	enc.SetEscapeHTML(false)
+	if verbose {
+		enc.SetIndent("", "  ")
+	}
 	if err := enc.Encode(out); err != nil {
 		return a.fail(fmt.Errorf("write decision: %w", err))
 	}
 	return exitOK
 }
 
+func selectionOutput(d routed, verbose bool) selectionJSON {
+	out := selection(d.Decision, verbose)
+	if verbose {
+		out.Options = d.options
+	}
+	return out
+}
+
 // selection shares the selected values between decision output and exec logging.
-func selection(d router.Decision) selectionJSON {
-	out := selectionJSON{CLI: d.CLI}
+func selection(d router.Decision, verbose bool) selectionJSON {
+	out := selectionJSON{CLI: d.CLI, Confidence: recordedConfidence(d, verbose)}
+	if d.Complexity != nil {
+		out.ProjectComplexity = formatComplexity(d.Complexity.Complexity)
+	}
 	if d.Model != "" {
 		out.Model = &d.Model
 	}
@@ -210,6 +276,10 @@ func selection(d router.Decision) selectionJSON {
 		out.Effort = &d.Effort
 	}
 	return out
+}
+
+func formatComplexity(score float64) string {
+	return fmt.Sprintf("%.1f/10", score)
 }
 
 // exec runs the child with the caller's stdin replayed, and returns its exit code.

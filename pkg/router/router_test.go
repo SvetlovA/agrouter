@@ -29,9 +29,11 @@ var update = goflag.Bool("update", false, "rewrite golden files")
 func requestFixture(t *testing.T) (*config.Config, *catalog.Catalog) {
 	t.Helper()
 	cfg := &config.Config{
-		Agrouter: config.Agrouter{JevModel: "test-jev", Timeout: time.Second, MaxChunks: 4, ChunkParallel: 2,
-			RelevanceFloor: 0.1, Question: "Choose an option for state.", ChunkQuestion: "Choose an option for anchor and chunk.",
-			Relevance: "Does chunk add requirements beyond anchor?"},
+		Agrouter: config.Agrouter{JevModel: "test-jev", Timeout: time.Second,
+			Question: "Choose an option for state.", ChunkQuestion: "Choose an option for anchor and chunk.",
+			Relevance:          "Does chunk add requirements beyond anchor?",
+			ComplexityQuestion: "Rate the project the docs describe.",
+			ComplexityEvidence: "Does the text describe the project?"},
 		CLIs: []config.CLI{
 			{Name: "alpha", Command: "alpha", Description: "Alpha agent."},
 			{Name: "beta", Command: "beta", Description: "Beta agent."},
@@ -221,7 +223,7 @@ func TestFullEncodingCriteria(t *testing.T) {
 
 func TestNewQuestionOverBudget(t *testing.T) {
 	long := strings.Repeat("x", 100_000)
-	for _, key := range []string{"question", "chunk_question", "relevance"} {
+	for _, key := range []string{"question", "chunk_question", "relevance", "complexity_question", "complexity_evidence"} {
 		t.Run(key, func(t *testing.T) {
 			local := filepath.Join(t.TempDir(), "config")
 			require.NoError(t, os.WriteFile(local, fmt.Appendf(nil, "[agrouter]\n%s = %s\n", key, long), 0o600))
@@ -240,10 +242,12 @@ func TestNewQuestionOverBudget(t *testing.T) {
 func TestNewBudgetFromWholeCatalog(t *testing.T) {
 	cfg, cat := embedded(t)
 	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
-	b := r.Budget()
+	b := r.budget
 	assert.Positive(t, b.State)
 	assert.Less(t, b.State, 30_000)
 	assert.Positive(t, b.Chunk)
+	assert.GreaterOrEqual(t, b.Doc, prompt.MinStateTokens)
+	assert.Less(t, b.Doc, 30_000)
 }
 
 func TestRouteCannotDecide(t *testing.T) {
@@ -317,16 +321,14 @@ func TestRouteCannotDecideWithoutRequest(t *testing.T) {
 		captured *prompt.Result
 		want     error
 	}{
-		{name: "capture over the limit", captured: &prompt.Result{Undecidable: prompt.ErrCaptureLimit},
-			want: prompt.ErrCaptureLimit},
-		{name: "state over max_chunks",
-			captured: captured(strings.Repeat("line of text\n", 20_000)), want: prompt.ErrTooManyChunks},
+		{name: "capture past the deadline", captured: &prompt.Result{Undecidable: context.DeadlineExceeded},
+			want: context.DeadlineExceeded},
+		{name: "attachments over the anchor", captured: overAnchor(), want: prompt.ErrAttachmentsOverAnchor},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			client := &mocks.JevClientMock{}
 			r := newRouter(t, cfg, cat, client)
-			r.cfg = withMaxChunks(r, 1)
 			req := &args.Request{CLI: "codex"}
 			d, err := r.Route(context.Background(), Eligible(cfg, cat, req), req, tc.captured)
 			require.NoError(t, err)
@@ -367,4 +369,15 @@ func mustCLI(t *testing.T, cfg *config.Config, name string) config.CLI {
 	cli, ok := cfg.CLIByName(name)
 	require.True(t, ok)
 	return cli
+}
+
+// overAnchor is a state too large for one request whose attachments exceed their anchor share even
+// summarized.
+func overAnchor() *prompt.Result {
+	c := captured(strings.Repeat("line of text\n", 20_000))
+	for i := range 200 {
+		c.Attachments = append(c.Attachments, prompt.Attachment{Source: prompt.SourceMentioned,
+			Type: fmt.Sprintf("application/x-kind-%d", i), Bytes: 1})
+	}
+	return c
 }

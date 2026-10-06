@@ -30,11 +30,11 @@ func tree(t *testing.T, files map[string]string) string {
 }
 
 // mention captures positional as the prompt and reads the files it mentions inside cwd.
-func mention(t *testing.T, ctx context.Context, cwd, positional string, limit int64) *Result {
+func mention(t *testing.T, ctx context.Context, cwd, positional string) *Result {
 	t.Helper()
-	res, err := Capture(t.Context(), positional, nil, limit)
+	res, err := Capture(t.Context(), positional, nil)
 	require.NoError(t, err)
-	require.NoError(t, res.ReadMentions(ctx, cwd, limit))
+	require.NoError(t, res.ReadMentions(ctx, cwd))
 	return res
 }
 
@@ -125,7 +125,7 @@ func TestReadMentions_Found(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			res := mention(t, t.Context(), cwd, tc.prompt, testLimit)
+			res := mention(t, t.Context(), cwd, tc.prompt)
 			require.NoError(t, res.Undecidable)
 			assert.Equal(t, tc.want, res.Files)
 			assert.Empty(t, res.Attachments)
@@ -147,7 +147,7 @@ func TestReadMentions_CaseInsensitiveOnWindows(t *testing.T) {
 		t.Skip("case-insensitive paths are a Windows property")
 	}
 	cwd := tree(t, map[string]string{"cwd/a.go": "a"})
-	res := mention(t, t.Context(), cwd, "A.GO and a.go", testLimit)
+	res := mention(t, t.Context(), cwd, "A.GO and a.go")
 	assert.Equal(t, []string{"a"}, res.Files)
 }
 
@@ -157,7 +157,7 @@ func TestReadMentions_NoRecursionAndURLs(t *testing.T) {
 		"cwd/b.md":             "not read",
 		"cwd/example.com/x.go": "not read either",
 	})
-	res := mention(t, t.Context(), cwd, "run a.md and https://example.com/x.go", testLimit)
+	res := mention(t, t.Context(), cwd, "run a.md and https://example.com/x.go")
 	require.NoError(t, res.Undecidable)
 	assert.Equal(t, []string{"see b.md"}, res.Files)
 }
@@ -170,7 +170,7 @@ func TestReadMentions_Binary(t *testing.T) {
 		"cwd/big.bin":  strings.Repeat("a", SniffLen+10) + "\x00",
 		"cwd/note.txt": "text",
 	})
-	res := mention(t, t.Context(), cwd, "look at shot.png, note.txt, doc.pdf nul.bin big.bin", testLimit)
+	res := mention(t, t.Context(), cwd, "look at shot.png, note.txt, doc.pdf nul.bin big.bin")
 	require.NoError(t, res.Undecidable)
 	assert.Equal(t, []string{"text"}, res.Files)
 	assert.Equal(t, []Attachment{
@@ -179,71 +179,64 @@ func TestReadMentions_Binary(t *testing.T) {
 		{Source: SourceMentioned, Type: TypeUnknown, Bytes: 9},
 		{Source: SourceMentioned, Type: TypeUnknown, Bytes: SniffLen + 11},
 	}, res.Attachments)
-	assert.Equal(t, int64(len(res.Prompt)+len("text")), res.TextBytes, "binary never counts as text")
 }
 
 func TestReadMentions_BinaryWithStdinAttachment(t *testing.T) {
 	cwd := tree(t, map[string]string{"cwd/shot.png": string(pngBytes)})
-	res, err := Capture(t.Context(), "compare with shot.png", strings.NewReader(string(jpegBytes)), testLimit)
+	res, err := Capture(t.Context(), "compare with shot.png", strings.NewReader(string(jpegBytes)))
 	require.NoError(t, err)
-	require.NoError(t, res.ReadMentions(t.Context(), cwd, testLimit))
+	require.NoError(t, res.ReadMentions(t.Context(), cwd))
 	assert.Equal(t, []Attachment{
 		{Source: SourceStdin, Type: "image/jpeg", Bytes: int64(len(jpegBytes))},
 		{Source: SourceMentioned, Type: "image/png", Bytes: int64(len(pngBytes))},
 	}, res.Attachments)
 }
 
-func TestReadMentions_Limit(t *testing.T) {
-	cwd := tree(t, map[string]string{"cwd/a.txt": "12345", "cwd/b.txt": "67890", "cwd/p.png": string(pngBytes)})
-	prompt := "a.txt b.txt p.png"
-	base := int64(len(prompt))
+func TestReadMentions_NoLimit(t *testing.T) {
+	big := strings.Repeat("0123456789abcdef\n", 1<<18) // 4.25 MiB of text
+	cwd := tree(t, map[string]string{
+		"cwd/big.txt":   big,
+		"cwd/other.txt": big,
+		"cwd/late.bin":  big + "\x00",
+	})
+	stdin := strings.Repeat("stdin text\n", 1<<16)
+	res, err := Capture(t.Context(), "big.txt other.txt late.bin", strings.NewReader(stdin))
+	require.NoError(t, err)
+	require.NoError(t, res.ReadMentions(t.Context(), cwd))
+	require.NoError(t, res.Undecidable)
+	assert.Equal(t, []string{big, big}, res.Files, "every text file read whole, however large")
+	assert.Equal(t, []Attachment{{Source: SourceMentioned, Type: TypeUnknown, Bytes: int64(len(big) + 1)}}, res.Attachments,
+		"a NUL past the sniffed prefix still makes it binary")
+}
 
-	t.Run("exactly at the limit", func(t *testing.T) {
-		res := mention(t, t.Context(), cwd, prompt, base+10)
-		require.NoError(t, res.Undecidable)
-		assert.Equal(t, []string{"12345", "67890"}, res.Files)
-		assert.Len(t, res.Attachments, 1, "binary never counts against the limit")
-		assert.Equal(t, base+10, res.TextBytes)
-	})
-	t.Run("one byte over", func(t *testing.T) {
-		res := mention(t, t.Context(), cwd, prompt, base+9)
-		require.ErrorIs(t, res.Undecidable, ErrCaptureLimit)
-		assert.Empty(t, res.Prompt)
-		assert.Empty(t, res.Files)
-		assert.Empty(t, res.Attachments)
-		assert.Equal(t, base+10, res.TextBytes, "reads the remaining capacity plus one byte")
-	})
-	t.Run("the prompt already filled it", func(t *testing.T) {
-		res := mention(t, t.Context(), cwd, prompt, base)
-		require.ErrorIs(t, res.Undecidable, ErrCaptureLimit)
-	})
-	t.Run("stdin text shares the limit", func(t *testing.T) {
-		res, err := Capture(t.Context(), prompt, strings.NewReader("xx"), base+11)
-		require.NoError(t, err)
-		require.NoError(t, res.Undecidable)
-		require.NoError(t, res.ReadMentions(t.Context(), cwd, base+11))
-		require.ErrorIs(t, res.Undecidable, ErrCaptureLimit)
-	})
+func TestReadMentions_DocsNotScanned(t *testing.T) {
+	cwd := tree(t, map[string]string{"cwd/notes.md": "notes\n", "cwd/a.go": "package a\n"})
+	res, err := Capture(t.Context(), "fix a.go", nil)
+	require.NoError(t, err)
+	res.Docs = []string{"see notes.md"}
+	require.NoError(t, res.ReadMentions(t.Context(), cwd))
+	assert.Equal(t, []string{"package a\n"}, res.Files, "only the prompt's mentions are read")
+	assert.Equal(t, []string{"see notes.md"}, res.Docs)
 }
 
 func TestReadMentions_Deadline(t *testing.T) {
 	cwd := tree(t, map[string]string{"cwd/a.txt": "a"})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	res := mention(t, ctx, cwd, "a.txt", testLimit)
+	res := mention(t, ctx, cwd, "a.txt")
 	require.ErrorIs(t, res.Undecidable, context.Canceled)
 	assert.Empty(t, res.Prompt)
 	assert.Empty(t, res.Files)
 
 	t.Run("mid-file", func(t *testing.T) {
-		m := &mentions{ctx: ctx, remaining: testLimit}
+		m := &mentions{ctx: ctx}
 		err := m.readFile(strings.NewReader("text"), 4)
 		require.ErrorIs(t, err, context.Canceled)
 	})
 }
 
 func TestReadMentions_UnreadableFileIgnored(t *testing.T) {
-	m := &mentions{ctx: t.Context(), remaining: testLimit}
+	m := &mentions{ctx: t.Context()}
 	require.NoError(t, m.readFile(failingReader{}, 4))
 	assert.Empty(t, m.files)
 }
@@ -253,14 +246,14 @@ type failingReader struct{}
 func (failingReader) Read([]byte) (int, error) { return 0, os.ErrPermission }
 
 func TestReadMentions_AlreadyUndecidable(t *testing.T) {
-	res := &Result{Prompt: "", Undecidable: ErrCaptureLimit}
-	require.NoError(t, res.ReadMentions(t.Context(), filepath.Join(t.TempDir(), "missing"), testLimit))
-	assert.Equal(t, ErrCaptureLimit, res.Undecidable)
+	res := &Result{Prompt: "", Undecidable: context.DeadlineExceeded}
+	require.NoError(t, res.ReadMentions(t.Context(), filepath.Join(t.TempDir(), "missing")))
+	assert.Equal(t, context.DeadlineExceeded, res.Undecidable)
 }
 
 func TestReadMentions_BadCwd(t *testing.T) {
 	res := &Result{Prompt: "a.txt"}
-	require.Error(t, res.ReadMentions(t.Context(), filepath.Join(t.TempDir(), "missing"), testLimit))
+	require.Error(t, res.ReadMentions(t.Context(), filepath.Join(t.TempDir(), "missing")))
 }
 
 func TestReadMentions_Escapes(t *testing.T) {
@@ -284,7 +277,7 @@ func TestReadMentions_Escapes(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			res := mention(t, t.Context(), cwd, tc.prompt, testLimit)
+			res := mention(t, t.Context(), cwd, tc.prompt)
 			require.NoError(t, res.Undecidable)
 			assert.Empty(t, res.Files)
 			assert.Empty(t, res.Attachments)
@@ -298,7 +291,7 @@ func TestReadMentions_LinkEscapingTree(t *testing.T) {
 	link(t, filepath.Join(tmp, "cwd2"), filepath.Join(cwd, "out"))
 	link(t, filepath.Join(cwd, "dir"), filepath.Join(cwd, "in"))
 
-	res := mention(t, t.Context(), cwd, "out/secret.txt in/in.txt dir/in.txt", testLimit)
+	res := mention(t, t.Context(), cwd, "out/secret.txt in/in.txt dir/in.txt")
 	require.NoError(t, res.Undecidable)
 	assert.Equal(t, []string{"inside"}, res.Files, "a link inside the tree is followed and deduped")
 }

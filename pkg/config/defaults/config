@@ -2,28 +2,76 @@
 # Loaded with IgnoreInlineComment, so comments must be on their own lines.
 # Override any key in ~/.config/agrouter/config (AGROUTER_CONFIG_DIR) or .agrouter/config;
 # remove a section with enabled = false.
+# environment variables are set in the process environment, not as keys in this file:
+# TYPESAFE_API_KEY: overrides [agrouter] api_key; --jev-api-key takes precedence,
+# including an explicitly empty --jev-api-key, which clears the key.
+# AGROUTER_CLI: restricts routing like --cli=NAME; an explicit --cli overrides it.
+# with ralphex, AGROUTER_CLI=codex pins external review while --cli=claude in
+# claude_args keeps implementation on its own CLI.
+# AGROUTER_CONFIG_DIR: directory containing the global config file, replacing
+# ~/.config/agrouter; .agrouter/config in the working directory still overrides it.
+# AGROUTER_DEBUG=1: enables redacted diagnostics on stderr; it is separate from
+# --verbose, which controls decision details. other values leave debug disabled.
+# these are the only supported environment variables; model, effort, --doc,
+# --verbose, timeout and jev_model have no environment-variable overrides.
 
 [agrouter]
 # TypeSafe API key for Jev. Empty = no key. Prefer the env var or the global config;
 # never put it in a local .agrouter/config that may be committed.
+# precedence: --jev-api-key > non-empty TYPESAFE_API_KEY > local > global > embedded.
 api_key   =
 # pin a versioned id (e.g. jev-1.13.0) to keep routing stable across Jev releases
 jev_model = jev-latest
-# total budget for all Jev calls, chunk requests and retries included; raise it for very long inputs
+# total routing budget: reading stdin and files, every Jev request (all chunks at once) and retries.
+# cooperative: reading and network stop at it, splitting and encoding do not. raise it for very long inputs
 timeout   = 10s
-# a state over the Jev budget is split into chunks, one Jev request each (see "Splitting large state").
-# more chunks than this = cannot decide; also bounds how much prompt (positional + stdin) and mentioned-file text is read. >= 1
-max_chunks      = 64
-# chunk requests in flight at once. >= 1
-chunk_parallel  = 4
-# lower bound for a chunk's relevance weight; a tunable coefficient, not a probability. 0 < x <= 1
-relevance_floor = 0.05
-# the routing question for a state sent whole; tune the cost/quality preference here
-question  = Which coding-agent CLI, model and reasoning effort should run the task described in `state` (its `prompt`, the `files` the prompt mentions, and `attachments`, where `attachments` lists images, PDFs and other non-text inputs the task includes, by type and size only)? Judge each option as a whole: the model and effort together must be strong enough to complete the task well, at the lowest cost and time that achieves that. Look up each option's `model` in `models` and its `cli` and `effort` in `efforts`.
-# the routing question for one chunk of a split state: same options, same preference
-chunk_question = Which coding-agent CLI, model and reasoning effort should run the task described by `anchor` and `chunk.text` together (`anchor.attachments` lists images, PDFs and other non-text inputs the task includes, by type and size only), where `chunk.text` is one part of a longer input? Judge each option as a whole: the model and effort together must be strong enough to complete the task well, at the lowest cost and time that achieves that. Look up each option's `model` in `models` and its `cli` and `effort` in `efforts`.
-# the relevance question asked beside chunk_question
+
+# question texts refer to JSON fields sent to Jev; these names are not substituted into the text.
+# backticks mark field references for Jev. {prompt}, {model} and {value} substitutions belong
+# to [cli.*.args] templates, not these questions.
+# both routing questions receive eligible options as criteria, each with cli, model and effort.
+# clis maps CLI names to descriptions; models maps model names to descriptions and prices;
+# efforts maps each CLI name to its effort descriptions. these describe only eligible options.
+# an option's model is the model to run the task; jev_model above is the model answering the questions.
+# full encoding (used by routing evaluation) puts those descriptions directly in each criterion.
+
+# question: the routing question for a state sent whole; tune the cost/quality preference here.
+# state is the request's complete routing input:
+# state.prompt is the joined -p, positional and --prompt-file text, followed by text stdin.
+# state.files is an array of contents of readable text files mentioned in the prompt.
+# state.attachments lists binary stdin and non-text mentioned files by source, media type and byte size;
+# it contains neither their contents nor their names.
+# state.project.complexity, when present, is the --doc stage's reduced codebase score from 0 to 10.
+question  = Which coding-agent CLI, model and reasoning effort should run the task described in `state` (its `prompt`, the `files` the prompt mentions, and `attachments`, where `attachments` lists images, PDFs and other non-text inputs the task includes, by type and size only)? `project.complexity`, when present, rates the codebase the task runs in from 0 (a tiny script) to 10 (a large, constrained enterprise system): use it as context for how hard this specific task is there, not as a substitute for judging the task (a typo fix stays trivial in any codebase). Choose the option with the lowest cost that can reliably satisfy this task's requirements. Compare the supplied model prices and the effort descriptions, including their effect on token usage. Prefer cheaper options when their capabilities are sufficient. Choose a more expensive model or higher effort when it materially improves the likelihood of completing this specific task correctly. Prefer less time when cost and capability are comparable. Look up each option's `model` in `models`, its `cli` in `clis`, and its `effort` under that CLI in `efforts`.
+# chunk_question: the routing question for one chunk of a split state: same options, same preference.
+# state now contains anchor and chunk instead of the whole prompt and files.
+# anchor is shared context repeated in every chunk request: prompt and file excerpts, attachment
+# metadata and, when present, project.complexity. excerpts are whole strings or objects with head/tail.
+# anchor.attachments may merge entries of the same source/type: count is their number, bytes their total.
+# anchor.project.complexity is the same --doc score as state.project.complexity in a whole request.
+# chunk.text is this chunk's text from the prompt or one mentioned file.
+# chunk.field identifies its source as "prompt" or "files"; chunk.index is its 1-based position,
+# and chunk.of is the total number of routing chunks. Jev sees only this chunk and the shared anchor.
+chunk_question = Which coding-agent CLI, model and reasoning effort should run the task described by `anchor` and `chunk.text` together (`anchor.attachments` lists images, PDFs and other non-text inputs the task includes, by type and size only), where `chunk.text` is one part of a longer input? `anchor.project.complexity`, when present, rates the codebase the task runs in from 0 (a tiny script) to 10 (a large, constrained enterprise system): use it as context for how hard this specific task is there, not as a substitute for judging the task (a typo fix stays trivial in any codebase). Choose the option with the lowest cost that can reliably satisfy this task's requirements. Compare the supplied model prices and the effort descriptions, including their effect on token usage. Prefer cheaper options when their capabilities are sufficient. Choose a more expensive model or higher effort when it materially improves the likelihood of completing this specific task correctly. Prefer less time when cost and capability are comparable. Look up each option's `model` in `models`, its `cli` in `clis`, and its `effort` under that CLI in `efforts`.
+# relevance: asked beside chunk_question, using the same anchor and chunk.text fields.
+# its 0-to-1 answer measures how much this chunk adds task requirements beyond the anchor;
+# that answer weights this chunk's routing probabilities when all chunk answers are pooled.
 relevance = Does the text in `chunk.text` state the task to perform, its requirements, or what makes it hard, beyond what `anchor` already says?
+# complexity_question: asked of --doc text before routing when at least one doc has text.
+# state here contains only docs or doc, not the routing prompt, files, attachments or catalog.
+# state.docs is an array of all non-empty --doc file contents, in supplied order, when they fit whole.
+# state.doc.text is one chunk of one --doc file when the docs need splitting.
+# state.doc.index is its 1-based position across all doc chunks; state.doc.of is their total count.
+# Score uses ten ordered descriptions (levels 0 to 9); its numeric result is scaled to 0 to 10.
+# Choice and Score confidence is recorded in decision JSON, exec logs and debug output only;
+# it does not affect routing, relevance or the evidence weight below.
+# decision JSON and exec logs record confidence.model_selection and confidence.project_complexity: simple means
+# across the final chunks in each stage, including zero confidence, without relevance/evidence weights.
+complexity_question = How complex is the project that the docs in `state` describe (`docs`, or `doc.text` when it is one part of longer docs)? Judge the codebase as a whole: its size, architecture, dependencies and constraints, not any single task in it. Rate the project against the ordered complexity descriptions.
+# complexity_evidence: asked beside complexity_question, using the same docs or doc.text fields.
+# its 0-to-1 answer measures whether this text describes the codebase rather than only workflow/style;
+# it weights this doc chunk's score when reducing the answers to project.complexity for routing.
+complexity_evidence = Does the text in `state` (`docs` or `doc.text`) say anything about the project's size, architecture, dependencies or constraints?
 
 [cli.claude]
 command      = claude
@@ -32,9 +80,11 @@ description  = Claude Code (Anthropic). Agentic coding CLI with file editing, sh
 # how each agrouter argument is spelled for this CLI. A missing key = not supported:
 # a call using it never routes to this CLI. [] = supported, adds nothing.
 [cli.claude.args]
-# required, always emitted first: non-interactive mode. {prompt} = the positional prompt, dropped when none;
-# claude -p reads stdin, and appends it after a positional prompt
-print                        = ["-p", "{prompt}"]
+# required, always emitted first: non-interactive mode
+print                        = ["-p"]
+# required, always emitted last and only when there is a prompt: {prompt} = the -p, positional and --prompt-file text,
+# after "--" so text starting with "-" is never parsed as a flag. claude -p reads stdin, and appends it after the prompt argument
+prompt                       = ["--", "{prompt}"]
 model                        = ["--model", "{model}"]
 effort                       = ["--effort", "{effort}"]
 # --dangerously-skip-permissions is agrouter's alias for this key
@@ -54,9 +104,9 @@ command      = codex
 description  = Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.
 
 [cli.codex.args]
-# codex exec reads stdin when no positional prompt is given, and appends it as a <stdin> block when one is.
-# to put the prompt at the end instead: print = ["exec"] and prompt = ["{prompt}"]
-print                        = ["exec", "{prompt}"]
+print                        = ["exec"]
+# codex exec reads stdin when no prompt argument is given, and appends it as a <stdin> block when one is
+prompt                       = ["--", "{prompt}"]
 model                        = ["--model", "{model}"]
 # -c values are TOML; the quotes are part of the token (no shell)
 effort                       = ["-c", "model_reasoning_effort=\"{effort}\""]
@@ -93,7 +143,7 @@ cli         = claude
 # value substituted into {model}
 name        = claude-fable-5-1
 efforts     = low, medium, high, xhigh, max
-description = Most capable model open to all customers. For demanding reasoning and long-horizon agentic work: multi-hour agent sessions, multistep deep research, analysis carried through to a finished document, spreadsheet or deck. Use when Opus 5.5 at higher effort still falls short. Slower; $10 / $50 per MTok.
+description = Most capable model open to all customers. For demanding reasoning and long-horizon agentic work: multi-hour agent sessions, multistep deep research, analysis carried through to a finished document, spreadsheet or deck. Use when Opus 5.5 at higher effort still falls short. Slower; input USD 10 / output USD 50 per million tokens.
 source      = https://platform.claude.com/docs/en/models/fable-5-1/overview
 
 [model.claude-opus-5-5]
@@ -102,14 +152,14 @@ name        = claude-opus-5-5
 # other values --model accepts for this model; unique across the catalog
 aliases     = opus
 efforts     = low, medium, high, xhigh, max
-description = For long-running agentic coding and knowledge work: multi-hour autonomous coding, large-scale refactoring, complex systems engineering, vision-heavy workflows. Recommended starting point for most workloads. Moderate latency; $4 / $20 per MTok.
+description = For long-running agentic coding and knowledge work: multi-hour autonomous coding, large-scale refactoring, complex systems engineering, vision-heavy workflows. Recommended starting point for most workloads. Moderate latency; input USD 4 / output USD 20 per million tokens.
 source      = https://platform.claude.com/docs/en/models/opus-5-5/overview
 
 [model.claude-sonnet-5-5]
 cli         = claude
 name        = claude-sonnet-5-5
 efforts     = low, medium, high, xhigh, max
-description = Best combination of speed and intelligence. Everyday coding, code generation, data analysis, agentic tool use. Fast; $2 / $10 per MTok.
+description = Best combination of speed and intelligence. Everyday coding, code generation, data analysis, agentic tool use. Fast; input USD 2 / output USD 10 per million tokens.
 source      = https://platform.claude.com/docs/en/models/sonnet-5-5/overview
 
 [model.claude-haiku-4-5]
@@ -117,7 +167,7 @@ cli         = claude
 name        = claude-haiku-4-5
 # effort is not supported: one option, no effort flag
 efforts     =
-description = Fastest model with near-frontier intelligence. Real-time and high-volume processing, cost-sensitive work, subagent tasks. 200K context. Fastest; $1 / $5 per MTok.
+description = Fastest model with near-frontier intelligence. Real-time and high-volume processing, cost-sensitive work, subagent tasks. 200K context. Fastest; input USD 1 / output USD 5 per million tokens.
 source      = https://platform.claude.com/docs/en/models/haiku-4-5/overview
 
 # Claude effort levels. Source for all: https://platform.claude.com/docs/en/build-with-claude/effort
@@ -150,21 +200,21 @@ source      = https://platform.claude.com/docs/en/build-with-claude/effort
 cli         = codex
 name        = gpt-6-astra
 efforts     = low, medium, high, xhigh, max, ultra
-description = Frontier intelligence for the most demanding end-to-end reasoning, coding, computer use, research and documents, where quality and judgment dominate. $10 / $50 per MTok.
+description = Frontier intelligence for the most demanding end-to-end reasoning, coding, computer use, research and documents, where quality and judgment dominate. Input USD 10 / output USD 50 per million tokens.
 source      = https://developers.openai.com/api/docs/models/gpt-6-astra
 
 [model.gpt-6.1-sol]
 cli         = codex
 name        = gpt-6.1-sol
 efforts     = low, medium, high, xhigh, max, ultra
-description = Workhorse for complex coding and agent workflows; better factual reliability than 5.6 Sol. The capable everyday choice. $2 / $10 per MTok.
+description = Workhorse for complex coding and agent workflows; better factual reliability than 5.6 Sol. The capable everyday choice. Input USD 2 / output USD 10 per million tokens.
 source      = https://developers.openai.com/api/docs/models/gpt-6.1-sol
 
 [model.gpt-6-luna]
 cli         = codex
 name        = gpt-6-luna
 efforts     = low, medium, high, xhigh, max
-description = Fast and affordable: focused, high-volume extraction, classification, transformations, structured summaries and focused coding. $0.10 / $0.50 per MTok.
+description = Fast and affordable: focused, high-volume extraction, classification, transformations, structured summaries and focused coding. Input USD 0.10 / output USD 0.50 per million tokens.
 source      = https://developers.openai.com/api/docs/models/gpt-6-luna
 
 # Codex effort levels. Source for all: https://developers.openai.com/api/docs/guides/reasoning

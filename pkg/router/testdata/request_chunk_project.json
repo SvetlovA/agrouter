@@ -1,0 +1,75 @@
+{
+  "model": "test-jev",
+  "state": {
+    "anchor": {
+      "attachments": [
+        {
+          "source": "mentioned",
+          "type": "image/png",
+          "bytes": 48213
+        }
+      ],
+      "prompt": "fix the flaky test in pkg/foo/foo_test.go",
+      "files": [
+        {
+          "head": "package foo\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {\n\tt.Skip(\"flaky\")\n}\n"
+        }
+      ],
+      "project": {
+        "complexity": 6.9
+      }
+    },
+    "chunk": {
+      "field": "files",
+      "index": 1,
+      "of": 2,
+      "text": "package foo\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {\n"
+    }
+  },
+  "questions": {
+    "relevance": {
+      "type": "noul",
+      "instructions": "Does chunk add requirements beyond anchor?",
+      "criteria": {
+        "true": "`chunk.text` adds to what the task is, what it requires, or what makes it hard",
+        "false": "`chunk.text` is only material the task works on, or repeats `anchor`"
+      }
+    },
+    "route": {
+      "type": "choice",
+      "instructions": {
+        "question": "Choose an option for anchor and chunk.",
+        "clis": {
+          "alpha": "Alpha agent."
+        },
+        "models": {
+          "strong-model": "Strong model.",
+          "fast-model": "Fast model."
+        },
+        "efforts": {
+          "alpha": {
+            "low": "Quick reasoning.",
+            "high": "Deep reasoning."
+          }
+        }
+      },
+      "criteria": {
+        "strong@low": {
+          "cli": "alpha",
+          "model": "strong-model",
+          "effort": "low"
+        },
+        "strong@high": {
+          "cli": "alpha",
+          "model": "strong-model",
+          "effort": "high"
+        },
+        "fast": {
+          "cli": "alpha",
+          "model": "fast-model",
+          "effort": "none (not supported)"
+        }
+      }
+    }
+  }
+}

@@ -477,7 +477,7 @@ func TestAskMalformedNoul(t *testing.T) {
 
 func TestAskUnsupportedQuestionType(t *testing.T) {
 	c := newTestClient(t, reply(http.StatusOK, `{"answers":{"route":{}}}`))
-	req := Request{Questions: map[string]Question{"route": {Type: "score"}}}
+	req := Request{Questions: map[string]Question{"route": {Type: "unsupported"}}}
 	_, err := c.Ask(t.Context(), req)
 	require.ErrorIs(t, err, ErrMalformed)
 }

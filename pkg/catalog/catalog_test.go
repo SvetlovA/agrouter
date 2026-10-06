@@ -16,21 +16,22 @@ import (
 const catalogConfig = `
 [agrouter]
 timeout = 10s
-max_chunks = 2
-chunk_parallel = 1
-relevance_floor = 0.1
+complexity_question = How complex?
+complexity_evidence = Is it evidence?
 
 [cli.alpha]
 command = alpha
 [cli.alpha.args]
-print = ["{prompt}"]
+print = []
+prompt = ["--", "{prompt}"]
 model = ["--model", "{model}"]
 effort = ["--effort", "{effort}"]
 
 [cli.beta]
 command = beta
 [cli.beta.args]
-print = ["{prompt}"]
+print = []
+prompt = ["--", "{prompt}"]
 model = ["--model", "{model}"]
 effort = ["--effort", "{effort}"]
 

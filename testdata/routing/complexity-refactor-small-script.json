@@ -1,0 +1,18 @@
+{
+  "description": "the shared retry refactor in a 200-line personal script: the doc keeps it a small change (contrast with complexity-refactor-enterprise)",
+  "prompt": "Replace the hand-written retry loops around the outbound HTTP calls with one shared retry helper (exponential backoff with jitter, honoring Retry-After) and use it in every place that retries today.",
+  "docs": [
+    {
+      "file": "complexity-small-script.md"
+    }
+  ],
+  "acceptable": [
+    "claude-haiku-4-5",
+    "claude-sonnet-5-5@low",
+    "claude-sonnet-5-5@medium",
+    "gpt-6-luna@low",
+    "gpt-6-luna@medium",
+    "gpt-6.1-sol@low",
+    "gpt-6.1-sol@medium"
+  ]
+}

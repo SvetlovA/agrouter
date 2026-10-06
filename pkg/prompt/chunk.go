@@ -13,27 +13,29 @@ const (
 	FieldFiles  = "files"
 )
 
-var (
-	// ErrAttachmentsOverAnchor means the attachments exceed their anchor share even summarized, so
-	// Jev cannot decide.
-	ErrAttachmentsOverAnchor = errors.New("attachments over their anchor share")
-	// ErrTooManyChunks means the state needs more than max_chunks chunks, so Jev cannot decide.
-	ErrTooManyChunks = errors.New("state needs more chunks than max_chunks")
-)
+// ErrAttachmentsOverAnchor means the attachments exceed their anchor share even summarized, so Jev
+// cannot decide.
+var ErrAttachmentsOverAnchor = errors.New("attachments over their anchor share")
 
 // minFileShare is the least anchor room, in bytes, worth giving one file's head and tail.
 const minFileShare = 64
+
+// Project is context about the codebase the task runs in.
+type Project struct {
+	Complexity float64 `json:"complexity"` // 0 to 10, from the docs
+}
 
 // State is the state of a single Jev request.
 type State struct {
 	Prompt      string       `json:"prompt"`
 	Files       []string     `json:"files,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
+	Project     *Project     `json:"project,omitempty"`
 }
 
 // State returns the captured prompt as a single request's state.
 func (r *Result) State() State {
-	return State{Prompt: r.Prompt, Files: r.Files, Attachments: r.Attachments}
+	return State{Prompt: r.Prompt, Files: r.Files, Attachments: r.Attachments, Project: r.Project}
 }
 
 // Excerpt is text in the anchor: a whole field (Whole), or the head and tail of a longer one.
@@ -59,6 +61,7 @@ type Anchor struct {
 	Attachments []Attachment `json:"attachments,omitempty"`
 	Prompt      *Excerpt     `json:"prompt,omitempty"`
 	Files       []Excerpt    `json:"files,omitempty"`
+	Project     *Project     `json:"project,omitempty"`
 }
 
 // Chunk is one part of the text not kept whole in the anchor.
@@ -93,9 +96,10 @@ func (r *Result) StateTokens() int {
 }
 
 // Split returns nil when the state fits in one request, and otherwise the anchor and the chunks
-// that together carry every captured byte. It returns ErrAttachmentsOverAnchor or ErrTooManyChunks
-// when Jev cannot decide, and ErrQuestionsOverBudget when the budget leaves no room for chunk text.
-func (r *Result) Split(b Budget, maxChunks int) (*Split, error) {
+// that together carry every captured byte, with no limit on their number. It returns
+// ErrAttachmentsOverAnchor when Jev cannot decide, and ErrQuestionsOverBudget when the budget leaves
+// no room for chunk text.
+func (r *Result) Split(b Budget) (*Split, error) {
 	if r.Fits(b) {
 		return nil, nil //nolint:nilnil // nil split: send the state whole
 	}
@@ -108,7 +112,7 @@ func (r *Result) Split(b Budget, maxChunks int) (*Split, error) {
 		// there is always a chunk to ask about
 		anchor.Prompt, promptWhole = nil, false
 	}
-	room := chunkRoom(b, mustLen(anchor), maxChunks)
+	room := chunkRoom(b, mustLen(anchor))
 	if room < len(`\u0000`) { // the widest escaped rune, so cut advances
 		return nil, fmt.Errorf("%w: no room for chunk text", ErrQuestionsOverBudget)
 	}
@@ -127,9 +131,6 @@ func (r *Result) Split(b Budget, maxChunks int) (*Split, error) {
 			chunks = append(chunks, Chunk{Field: FieldFiles, File: i, Text: text})
 		}
 	}
-	if len(chunks) > maxChunks {
-		return nil, fmt.Errorf("%w: %d chunks, max_chunks is %d", ErrTooManyChunks, len(chunks), maxChunks)
-	}
 	for i := range chunks {
 		chunks[i].Index, chunks[i].Of = i+1, len(chunks)
 	}
@@ -140,11 +141,7 @@ func (r *Result) Split(b Budget, maxChunks int) (*Split, error) {
 // as Split, for a chunk Jev rejected with a 422. The pieces keep c's field and file; numbering them
 // is the caller's, since the whole sequence changes.
 func Halve(c Chunk) []Chunk {
-	room := max((jsonLen(c.Text)+1)/2, len(`\u0000`)) // at least the widest escaped rune, so cut advances
-	pieces := cut(c.Text, room)
-	if len(pieces) == 0 {
-		pieces = []string{""}
-	}
+	pieces := halveText(c.Text)
 	out := make([]Chunk, len(pieces))
 	for i, text := range pieces {
 		out[i] = Chunk{Field: c.Field, File: c.File, Text: text}
@@ -152,12 +149,23 @@ func Halve(c Chunk) []Chunk {
 	return out
 }
 
+// halveText cuts text into pieces of at most half its escaped length, on line and UTF-8 boundaries;
+// empty text is one empty piece.
+func halveText(text string) []string {
+	room := max((jsonLen(text)+1)/2, len(`\u0000`)) // at least the widest escaped rune, so cut advances
+	pieces := cut(text, room)
+	if len(pieces) == 0 {
+		pieces = []string{""}
+	}
+	return pieces
+}
+
 // anchor builds the anchor within AnchorTokens: attachments (summarized when over their share),
 // then the prompt, whole or head and tail, then head and tail of the files while room lasts. It
 // reports whether the prompt is whole in it.
 func (r *Result) anchor() (Anchor, bool, error) {
 	limit := AnchorTokens * bytesPerToken
-	var a Anchor
+	a := Anchor{Project: r.Project}
 	if len(r.Attachments) > 0 {
 		a.Attachments = r.Attachments
 		if Tokens(mustLen(a.Attachments)) > attachmentShare {

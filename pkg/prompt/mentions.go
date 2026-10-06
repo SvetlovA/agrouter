@@ -12,12 +12,11 @@ import (
 )
 
 // ReadMentions reads the files r.Prompt mentions inside the working directory cwd: text files go into
-// r.Files, binary ones into r.Attachments (SourceMentioned). Mentioned text counts against limit, the
-// same text capture limit passed to Capture, and reading stops at ctx's deadline; either sets
-// r.Undecidable and empties the prompt, files and attachments. Missing, unreadable and out-of-tree
+// r.Files, binary ones into r.Attachments (SourceMentioned), with no size limit. Reading stops at
+// ctx's deadline, which sets r.Undecidable and empties the prompt, files and attachments. Missing, unreadable and out-of-tree
 // candidates, and directories, are ignored. It does nothing when r is already undecidable, and returns
 // an error only when cwd cannot be resolved.
-func (r *Result) ReadMentions(ctx context.Context, cwd string, limit int64) error {
+func (r *Result) ReadMentions(ctx context.Context, cwd string) error {
 	if r.Undecidable != nil {
 		return nil // Undecidable is a routing outcome, not a failure of this call
 	}
@@ -30,10 +29,8 @@ func (r *Result) ReadMentions(ctx context.Context, cwd string, limit int64) erro
 		return err
 	}
 	defer wd.Close()
-	m := &mentions{ctx: ctx, wd: wd, cwd: abs, remaining: limit - r.TextBytes,
-		tried: map[string]bool{}, seen: map[string]bool{}}
+	m := &mentions{ctx: ctx, wd: wd, cwd: abs, tried: map[string]bool{}, seen: map[string]bool{}}
 	undecidable := m.read(r.Prompt)
-	r.TextBytes += m.textBytes
 	if undecidable != nil {
 		r.Prompt, r.Files, r.Attachments, r.Undecidable = "", nil, nil, undecidable
 		return nil // undecidable is recorded in r, not returned
@@ -45,16 +42,14 @@ func (r *Result) ReadMentions(ctx context.Context, cwd string, limit int64) erro
 
 // mentions reads the files one prompt mentions.
 type mentions struct {
-	ctx       context.Context
-	wd        *workdir        // working directory files are opened through
-	cwd       string          // working directory as given, made absolute
-	remaining int64           // text bytes left under the capture limit
-	tried     map[string]bool // candidate spellings already tried
-	seen      map[string]bool // canonical paths already read (case-folded on Windows)
+	ctx   context.Context
+	wd    *workdir        // working directory files are opened through
+	cwd   string          // working directory as given, made absolute
+	tried map[string]bool // candidate spellings already tried
+	seen  map[string]bool // canonical paths already read (case-folded on Windows)
 
 	files       []string
 	attachments []Attachment
-	textBytes   int64
 }
 
 // read reads every file text mentions, in textual order, and returns why Jev cannot decide, if so.
@@ -110,9 +105,9 @@ func (m *mentions) try(name string) (bool, error) {
 }
 
 // readFile sniffs one mentioned file and adds it as text or as an attachment. Only text is read past
-// the sniffed prefix, up to the remaining capacity plus one byte to detect overflow.
+// the sniffed prefix, to EOF.
 func (m *mentions) readFile(f io.Reader, size int64) error {
-	buf, eof, err := m.readUpTo(f, nil, SniffLen)
+	buf, eof, err := readUpTo(m.ctx, f, nil, SniffLen)
 	if err != nil {
 		return m.split(err)
 	}
@@ -121,22 +116,15 @@ func (m *mentions) readFile(f io.Reader, size int64) error {
 		return nil
 	}
 	if !eof {
-		if buf, eof, err = m.readUpTo(f, buf, max(m.remaining+1, 0)); err != nil {
+		if buf, _, err = readUpTo(m.ctx, f, buf, -1); err != nil {
 			return m.split(err)
 		}
 	}
-	binary, mediaType := Detect(buf, eof)
-	switch {
-	case binary:
+	if binary, mediaType := Detect(buf, true); binary {
 		m.attach(mediaType, size)
-	case int64(len(buf)) > m.remaining:
-		m.textBytes += int64(len(buf))
-		return ErrCaptureLimit
-	default:
-		m.files = append(m.files, string(buf))
-		m.textBytes += int64(len(buf))
-		m.remaining -= int64(len(buf))
+		return nil
 	}
+	m.files = append(m.files, string(buf))
 	return nil
 }
 
@@ -153,14 +141,18 @@ func (m *mentions) split(err error) error {
 	return nil
 }
 
-// readUpTo appends reads from f to buf until it holds n bytes or f ends, checking the routing
-// context between reads. It reports whether f ended.
-func (m *mentions) readUpTo(f io.Reader, buf []byte, n int64) ([]byte, bool, error) {
-	for int64(len(buf)) < n {
-		if err := m.ctx.Err(); err != nil {
-			return buf, false, err //nolint:wrapcheck // sorted and wrapped by mentions.split
+// readUpTo appends reads from f to buf until it holds n bytes (n < 0: to EOF) or f ends, checking
+// ctx between reads. It reports whether f ended.
+func readUpTo(ctx context.Context, f io.Reader, buf []byte, n int64) ([]byte, bool, error) {
+	for n < 0 || int64(len(buf)) < n {
+		if err := ctx.Err(); err != nil {
+			return buf, false, err //nolint:wrapcheck // wrapped by the caller
 		}
-		chunk := make([]byte, min(n-int64(len(buf)), readSize))
+		size := int64(readSize)
+		if n >= 0 {
+			size = min(n-int64(len(buf)), size)
+		}
+		chunk := make([]byte, size)
 		k, err := f.Read(chunk)
 		buf = append(buf, chunk[:k]...)
 		if errors.Is(err, io.EOF) {
