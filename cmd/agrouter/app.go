@@ -66,7 +66,7 @@ type selectionJSON struct {
 	CLI               string          `json:"cli"`
 	Model             *string         `json:"model"`
 	Effort            *string         `json:"effort"`
-	ProjectComplexity *float64        `json:"project_complexity,omitempty"`
+	ProjectComplexity string          `json:"project_complexity,omitempty"`
 	Confidence        *confidenceJSON `json:"confidence,omitempty"`
 	Options           []optionJSON    `json:"options,omitempty"`
 }
@@ -267,7 +267,7 @@ func selectionOutput(d routed, verbose bool) selectionJSON {
 func selection(d router.Decision, verbose bool) selectionJSON {
 	out := selectionJSON{CLI: d.CLI, Confidence: recordedConfidence(d, verbose)}
 	if d.Complexity != nil {
-		out.ProjectComplexity = &d.Complexity.Complexity
+		out.ProjectComplexity = formatComplexity(d.Complexity.Complexity)
 	}
 	if d.Model != "" {
 		out.Model = &d.Model
@@ -276,6 +276,10 @@ func selection(d router.Decision, verbose bool) selectionJSON {
 		out.Effort = &d.Effort
 	}
 	return out
+}
+
+func formatComplexity(score float64) string {
+	return fmt.Sprintf("%.1f/10", score)
 }
 
 // exec runs the child with the caller's stdin replayed, and returns its exit code.

@@ -479,6 +479,7 @@ func TestApp_VerboseOutput(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			e := newSyntheticEnv(t)
 			e.jev.pick = "fast@low"
+			e.jev.level = "5.1"
 			require.NoError(t, os.WriteFile(filepath.Join(e.workDir, "project.md"), []byte("project doc"), 0o600))
 			var states []string
 			for _, verbose := range []bool{false, true} {
@@ -504,7 +505,7 @@ func TestApp_VerboseOutput(t *testing.T) {
 				assert.Equal(t, "alpha", d["cli"])
 				assert.Equal(t, "fast-1", d["model"])
 				assert.Equal(t, "low", d["effort"])
-				assert.InDelta(t, 7, d["project_complexity"], 1e-9)
+				assert.Equal(t, "5.1/10", d["project_complexity"])
 				assert.NotContains(t, output, "project doc")
 				confidence := d["confidence"].(map[string]any)
 				assert.InDelta(t, 0.9, confidence["model_selection"], 1e-9)
@@ -516,8 +517,10 @@ func TestApp_VerboseOutput(t *testing.T) {
 					probabilities := confidence["probabilities"].(map[string]any)
 					assert.InDelta(t, 1, probabilities["fast@low"], 1e-9)
 					chunks := confidence["complexity_chunks"].([]any)
-					assert.Equal(t, []any{map[string]any{"index": float64(1), "of": float64(1),
-						"project_complexity": float64(7), "evidence": 0.5, "confidence": 0.9}}, chunks)
+					require.Len(t, chunks, 1)
+					assert.Subset(t, chunks[0], map[string]any{"index": float64(1), "of": float64(1),
+						"project_complexity": "5.1/10", "evidence": 0.5, "confidence": 0.9})
+					assert.InDelta(t, 5.1, chunks[0].(map[string]any)["score"], 1e-9)
 					assert.Contains(t, d, "options")
 					if mode == "decision" {
 						assert.Contains(t, d, "argv")
@@ -789,7 +792,7 @@ func TestApp_Docs(t *testing.T) {
 		}, e.jev.requests(), "the docs are not read for mentions and not resent")
 		assert.Equal(t, "fast-1", decision(t, r.stdout)["model"])
 		assert.NotContains(t, r.stdout, "DOC TEXT")
-		assert.InDelta(t, 8, decision(t, r.stdout)["project_complexity"], 1e-9)
+		assert.Equal(t, "8.0/10", decision(t, r.stdout)["project_complexity"])
 		assert.Equal(t, map[string]any{"model_selection": 0.9, "project_complexity": 0.9}, decision(t, r.stdout)["confidence"])
 	})
 

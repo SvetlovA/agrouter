@@ -38,7 +38,8 @@ type complexityConfidenceJSON struct {
 	Index             int     `json:"index"`
 	Of                int     `json:"of"`
 	Confidence        float64 `json:"confidence"`
-	ProjectComplexity float64 `json:"project_complexity"`
+	ProjectComplexity string  `json:"project_complexity"`
+	Score             float64 `json:"score"`
 	Evidence          float64 `json:"evidence"`
 }
 
@@ -86,7 +87,7 @@ func recordedConfidence(d router.Decision, verbose bool) *confidenceJSON {
 			if verbose {
 				out.ComplexityChunks = append(out.ComplexityChunks, complexityConfidenceJSON{
 					Index: c.Index, Of: c.Of, Confidence: c.Confidence,
-					ProjectComplexity: c.Score, Evidence: c.Evidence,
+					ProjectComplexity: formatComplexity(c.Score), Score: c.Score, Evidence: c.Evidence,
 				})
 			}
 		}

@@ -93,10 +93,10 @@ agrouter -p "fix the flaky test in pkg/foo" --dangerously-skip-permissions --out
 Add `--verbose` for indented JSON with every chunk and option, plus a readable command. The default stays on one JSON line. For example, with project docs the concise result can be:
 
 ```json
-{"cli":"codex","model":"gpt-6.1-sol","effort":"medium","project_complexity":6.9,"confidence":{"model_selection":0.8,"project_complexity":0.9}}
+{"cli":"codex","model":"gpt-6.1-sol","effort":"medium","project_complexity":"6.9/10","confidence":{"model_selection":0.8,"project_complexity":0.9}}
 ```
 
-`project_complexity` is the final project score from 0 to 10 and is omitted when the complexity stage did not complete. In verbose output, `argv` holds the `-p`, positional and `--prompt-file` text, joined like the routing prompt, as its last token after `--`, so text that starts with `-` reaches the child as the prompt and never as one of its flags (each CLI's `prompt` mapping must end with `"--", "{prompt}"`; raw tokens after agrouter's own `--` come before it). It never holds stdin: a caller that piped a prompt must send it to the child itself. `--doc` is never in `argv`; the child loads its own `CLAUDE.md`/`AGENTS.md`. `effort` is `null` for a model without efforts; `skipped` lists, as the caller spelled them, the arguments that got a skip warning: an unknown or disabled `--cli`, arguments the chosen CLI does not map or maps to nothing, and raw tokens after `--` without `--cli`.
+`project_complexity` is the final project score formatted as `score/10` with one decimal, for example `5.1/10` and is omitted when the complexity stage did not complete. In verbose output, `argv` holds the `-p`, positional and `--prompt-file` text, joined like the routing prompt, as its last token after `--`, so text that starts with `-` reaches the child as the prompt and never as one of its flags (each CLI's `prompt` mapping must end with `"--", "{prompt}"`; raw tokens after agrouter's own `--` come before it). It never holds stdin: a caller that piped a prompt must send it to the child itself. `--doc` is never in `argv`; the child loads its own `CLAUDE.md`/`AGENTS.md`. `effort` is `null` for a model without efforts; `skipped` lists, as the caller spelled them, the arguments that got a skip warning: an unknown or disabled `--cli`, arguments the chosen CLI does not map or maps to nothing, and raw tokens after `--` without `--cli`.
 
 Exec mode, with the prompt on stdin and the output format fixed by pinning the CLI:
 
@@ -120,7 +120,7 @@ Verbose output includes all available numeric details, without truncating chunks
 | `confidence.route`, `choice`, `probabilities` | the whole-request Choice confidence, selected option ID and every option probability; `route` is `null` for pooled routing |
 | `confidence.routing_chunks` | every chunk's field, index/count, chosen option, Choice confidence, relevance weight and full probability map |
 | `confidence.pooled_scores` | every option's final routing score in catalog order, using relevance weights or an ordinary mean when all relevance is zero |
-| `confidence.complexity_chunks` | every document request's index/count, project complexity score (0 to 10), Score confidence and evidence weight; scores use evidence weights or an ordinary mean when all evidence is zero |
+| `confidence.complexity_chunks` | every document request's index/count, formatted project complexity (`5.1/10`), raw numeric `score` for precise calculations, Score confidence and evidence weight; scores use evidence weights or an ordinary mean when all evidence is zero |
 | `argv`, `skipped` | exact child arguments and arguments skipped with a warning; decision mode only |
 | `command` | readable command text for copying; adapt quoting to your terminal; decision mode only |
 | `stdin_required` | whether the command needs the original stdin supplied again; stdin contents are not included in the command |
