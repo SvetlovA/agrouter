@@ -61,11 +61,12 @@ func stdinReader(r io.Reader) io.Reader {
 	return r
 }
 
-// selectionJSON is the selected CLI, model and effort; unset values are null.
+// selectionJSON records the selected CLI, model, effort and available Jev confidence.
 type selectionJSON struct {
-	CLI    string  `json:"cli"`
-	Model  *string `json:"model"`
-	Effort *string `json:"effort"`
+	CLI        string          `json:"cli"`
+	Model      *string         `json:"model"`
+	Effort     *string         `json:"effort"`
+	Confidence *confidenceJSON `json:"confidence,omitempty"`
 }
 
 // decisionJSON adds the argv and skipped arguments for decision mode.
@@ -229,7 +230,7 @@ func (a *app) printDecision(d routed, res args.Result) int {
 
 // selection shares the selected values between decision output and exec logging.
 func selection(d router.Decision) selectionJSON {
-	out := selectionJSON{CLI: d.CLI}
+	out := selectionJSON{CLI: d.CLI, Confidence: recordedConfidence(d)}
 	if d.Model != "" {
 		out.Model = &d.Model
 	}

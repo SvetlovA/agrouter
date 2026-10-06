@@ -114,7 +114,7 @@ func TestDebug_Docs(t *testing.T) {
 	require.Equal(t, 0, r.code, r.stderr)
 
 	lines := debugLines(r.stderr)
-	assert.Contains(t, lines, "doc 1/1: score 7.000, evidence 0.500")
+	assert.Contains(t, lines, "doc 1/1: score 7.000, evidence 0.500, confidence 0.900")
 	assert.Contains(t, lines, "project complexity: 7.0")
 	assert.NotContains(t, r.stderr, "SECRET DOC TEXT")
 }
@@ -143,14 +143,14 @@ func TestDebugLog(t *testing.T) {
 		l.eligibility(&router.Eligibility{Options: []catalog.Option{{ID: "x", CLI: "made-up"}},
 			ModelPassthrough: true, EffortPassthrough: true})
 		l.decision(router.Decision{OptionID: "b", Pooled: &router.Pooled{
-			Chunks: []router.ChunkResult{{Field: "prompt", Index: 1, Of: 2, Relevance: 0.8,
+			Chunks: []router.ChunkResult{{Field: "prompt", Index: 1, Of: 2, Relevance: 0.8, Confidence: 0.6,
 				Top: []router.Score{{ID: "b", Score: 0.6}, {ID: "a", Score: 0.4}}}},
 			Top: []router.Score{{ID: "b", Score: 0.55}},
 		}})
 		assert.Equal(t, `agrouter debug: eligible: 1 option(s) on made-up
 agrouter debug: model: passed through
 agrouter debug: effort: passed through
-agrouter debug: chunk prompt 1/2: relevance 0.800, top [b 0.600, a 0.400]
+agrouter debug: chunk prompt 1/2: relevance 0.800, confidence 0.600, top [b 0.600, a 0.400]
 agrouter debug: pooled: choice b, top [b 0.550]
 `, buf.String())
 	})
@@ -159,10 +159,10 @@ agrouter debug: pooled: choice b, top [b 0.550]
 		var buf bytes.Buffer
 		newDebugLog("1", &buf).decision(router.Decision{CLI: "made-up", Undecided: errors.New("boom"),
 			Complexity: &router.ComplexityResult{Complexity: 6.9, Chunks: []router.DocScore{
-				{Index: 1, Of: 2, Score: 8.25, Evidence: 0.9}, {Index: 2, Of: 2, Score: 1, Evidence: 0.1},
+				{Index: 1, Of: 2, Score: 8.25, Evidence: 0.9, Confidence: 0.8}, {Index: 2, Of: 2, Score: 1, Evidence: 0.1, Confidence: 0.2},
 			}}})
-		assert.Equal(t, `agrouter debug: doc 1/2: score 8.250, evidence 0.900
-agrouter debug: doc 2/2: score 1.000, evidence 0.100
+		assert.Equal(t, `agrouter debug: doc 1/2: score 8.250, evidence 0.900, confidence 0.800
+agrouter debug: doc 2/2: score 1.000, evidence 0.100, confidence 0.200
 agrouter debug: project complexity: 6.9
 agrouter debug: jev failed: boom; running made-up with the caller's fixed values
 `, buf.String())

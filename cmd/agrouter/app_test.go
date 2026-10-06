@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -56,7 +57,7 @@ func helper() int {
 }
 
 // fakeJev answers every route Choice with pick (which must be among the options sent), a complexity
-// Choice (criteria without pick) with level, and every Noul with 0.5, and records each request's
+// Score with level normalized to 0 to 10, and every Noul with 0.5, and records each request's
 // state. With failDocs it rejects every doc request with a 400.
 type fakeJev struct {
 	t        *testing.T
@@ -80,8 +81,8 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 		Model     string          `json:"model"`
 		State     json.RawMessage `json:"state"`
 		Questions map[string]struct {
-			Type     string                     `json:"type"`
-			Criteria map[string]json.RawMessage `json:"criteria"`
+			Type     string          `json:"type"`
+			Criteria json.RawMessage `json:"criteria"`
 		} `json:"questions"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -104,8 +105,24 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 			answers[id] = map[string]any{"type": q.Type, "noul": 0.5}
 			continue
 		}
+		if q.Type == jev.TypeScore {
+			answer, err := fakeScoreAnswer(q.Criteria, level)
+			if err != nil {
+				f.t.Errorf("fake jev: %v", err)
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			answers[id] = answer
+			continue
+		}
+		var criteria map[string]json.RawMessage
+		if err := json.Unmarshal(q.Criteria, &criteria); err != nil {
+			f.t.Errorf("fake jev: decode criteria: %v", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		probs := map[string]float64{}
-		for name := range q.Criteria {
+		for name := range criteria {
 			probs[name] = 0
 		}
 		choice := pick
@@ -119,6 +136,32 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 		answers[id] = map[string]any{"type": q.Type, "choice": choice, "probabilities": probs, "confidence": 0.9}
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"model": req.Model, "answers": answers})
+}
+
+func fakeScoreAnswer(criteria json.RawMessage, level string) (map[string]any, error) {
+	var levels []string
+	if err := json.Unmarshal(criteria, &levels); err != nil {
+		return nil, fmt.Errorf("decode score levels: %w", err)
+	}
+	rating, err := strconv.ParseFloat(level, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parse score level: %w", err)
+	}
+	score := rating * float64(len(levels)-1) / 10
+	low := int(math.Floor(score))
+	probs, legend := map[string]float64{}, map[string]string{}
+	for i, description := range levels {
+		key := strconv.Itoa(i)
+		legend[key] = description
+		probs[key] = 0
+		switch i {
+		case low:
+			probs[key] = 1 - (score - float64(low))
+		case low + 1:
+			probs[key] = score - float64(low)
+		}
+	}
+	return map[string]any{"type": jev.TypeScore, "score": score, "legend": legend, "probabilities": probs, "confidence": 0.9}, nil
 }
 
 func (f *fakeJev) requests() []string {
@@ -257,7 +300,7 @@ func TestApp_RalphexClaudeMode(t *testing.T) {
 			"--verbose", "--print"}, strings.NewReader(task))
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, map[string]any{"cli": "claude", "model": "claude-sonnet-5-5", "effort": "medium"}, decision(t, r.stderr))
+		assert.Equal(t, map[string]any{"cli": "claude", "model": "claude-sonnet-5-5", "effort": "medium", "confidence": map[string]any{"route": 0.9, "route_average": 0.9}}, decision(t, r.stderr))
 		argv, stdin, environ := e.child()
 		assert.Equal(t, []string{"-p", "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose",
 			"--model", "claude-sonnet-5-5", "--effort", "medium"}, argv)
@@ -288,7 +331,7 @@ func TestApp_RalphexCodexMode(t *testing.T) {
 		}, strings.NewReader(task))
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, map[string]any{"cli": "codex", "model": "gpt-6.1-sol", "effort": "medium"}, decision(t, r.stderr))
+		assert.Equal(t, map[string]any{"cli": "codex", "model": "gpt-6.1-sol", "effort": "medium", "confidence": map[string]any{"route": 0.9, "route_average": 0.9}}, decision(t, r.stderr))
 		argv, stdin, _ := e.child()
 		assert.Equal(t, []string{"exec",
 			"-c", "features.multi_agent=true",
@@ -325,7 +368,7 @@ func TestApp_RalphexCodexMode(t *testing.T) {
 			strings.NewReader(task))
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, map[string]any{"cli": "codex", "model": "gpt-6-astra", "effort": "high"}, decision(t, r.stderr))
+		assert.Equal(t, map[string]any{"cli": "codex", "model": "gpt-6-astra", "effort": "high", "confidence": map[string]any{"route": 0.9, "route_average": 0.9}}, decision(t, r.stderr))
 		argv, stdin, _ := e.child()
 		assert.Equal(t, []string{"exec", "-c", "stream_idle_timeout_ms=3600000", "--sandbox", "read-only",
 			"--model", "gpt-6-astra", "-c", `model_reasoning_effort="high"`}, argv)
@@ -343,8 +386,9 @@ func TestApp_Decision(t *testing.T) {
 		assert.Empty(t, r.stderr)
 		assert.Equal(t, map[string]any{
 			"cli": "claude", "model": "claude-sonnet-5-5", "effort": "low",
-			"argv":    strs("claude", "-p", "--model", "claude-sonnet-5-5", "--effort", "low", "--", "fix the typo in README"),
-			"skipped": []any{},
+			"confidence": map[string]any{"route": 0.9, "route_average": 0.9},
+			"argv":       strs("claude", "-p", "--model", "claude-sonnet-5-5", "--effort", "low", "--", "fix the typo in README"),
+			"skipped":    []any{},
 		}, decision(t, r.stdout))
 		assert.Equal(t, []string{`{"prompt":"fix the typo in README"}`}, e.jev.requests())
 	})
@@ -404,8 +448,9 @@ func TestApp_Decision(t *testing.T) {
 		assert.Equal(t, "agrouter: warning: skipped --output-format json: codex has no mapping for it\n", r.stderr)
 		assert.Equal(t, map[string]any{
 			"cli": "codex", "model": "gpt-6-luna", "effort": "low",
-			"argv":    strs("codex", "exec", "--model", "gpt-6-luna", "-c", `model_reasoning_effort="low"`, "--", "list the files"),
-			"skipped": strs("--output-format json"),
+			"confidence": map[string]any{"route": 0.9, "route_average": 0.9},
+			"argv":       strs("codex", "exec", "--model", "gpt-6-luna", "-c", `model_reasoning_effort="low"`, "--", "list the files"),
+			"skipped":    strs("--output-format json"),
 		}, decision(t, r.stdout))
 	})
 
@@ -675,7 +720,9 @@ func TestApp_Docs(t *testing.T) {
 		}, e.jev.requests(), "the docs are not read for mentions and not resent")
 		assert.Equal(t, "fast-1", decision(t, r.stdout)["model"])
 		assert.NotContains(t, r.stdout, "DOC TEXT")
-		assert.NotContains(t, r.stdout, "complexity", "the decision JSON is unchanged")
+		assert.Equal(t, map[string]any{"route": 0.9, "route_average": 0.9, "complexity_average": 0.9, "complexity_chunks": []any{
+			map[string]any{"index": float64(1), "of": float64(1), "confidence": 0.9},
+		}}, decision(t, r.stdout)["confidence"])
 	})
 
 	t.Run("decision: no docs, no complexity stage and no project", func(t *testing.T) {
@@ -889,7 +936,20 @@ func TestApp_Exec(t *testing.T) {
 		_, stdin, _ := e.child()
 		assert.Equal(t, input, string(stdin))
 		assert.Greater(t, len(e.jev.requests()), 1, "one request per chunk")
-		assert.Equal(t, map[string]any{"cli": "claude", "model": "claude-sonnet-5-5", "effort": "low"}, decision(t, r.stderr))
+		log := decision(t, r.stderr)
+		confidence, ok := log["confidence"].(map[string]any)
+		require.True(t, ok)
+		assert.Nil(t, confidence["route"], "a pooled decision has no whole-request Jev confidence")
+		assert.InDelta(t, 0.9, confidence["route_average"], 1e-9)
+		assert.NotContains(t, confidence, "complexity_average", "no document answers were recorded")
+		chunks, ok := confidence["routing_chunks"].([]any)
+		require.True(t, ok)
+		require.Len(t, chunks, len(e.jev.requests()))
+		for i, chunk := range chunks {
+			assert.Equal(t, map[string]any{"field": "prompt", "index": float64(i + 1),
+				"of": float64(len(chunks)), "confidence": 0.9}, chunk)
+		}
+		assert.Equal(t, map[string]any{"cli": "claude", "model": "claude-sonnet-5-5", "effort": "low", "confidence": confidence}, log)
 	})
 
 	t.Run("skip warnings in exec mode", func(t *testing.T) {
@@ -969,7 +1029,8 @@ func TestApp_ConfigDrivenNames(t *testing.T) {
 			require.Equal(t, 0, r.code, r.stderr)
 			log, ok := strings.CutPrefix(r.stderr, "agrouter: warning: skipped --verbose: maps to nothing for "+tc.cli+"\n")
 			require.True(t, ok, r.stderr)
-			assert.Equal(t, map[string]any{"cli": tc.cli, "model": tc.model, "effort": tc.effort}, decision(t, log))
+			assert.Equal(t, map[string]any{"cli": tc.cli, "model": tc.model, "effort": tc.effort,
+				"confidence": map[string]any{"route": 0.9, "route_average": 0.9}}, decision(t, log))
 			got, gotStdin, _ := e.child()
 			assert.Equal(t, []string{"run", "--quiet", "--events", "ndjson", "--mode", "read",
 				"--llm", tc.model, "--think=" + tc.effort, "--", "do it now"}, got)

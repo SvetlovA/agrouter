@@ -17,8 +17,8 @@ import (
 	"github.com/SvetlovA/agrouter/pkg/router/mocks"
 )
 
-// evalMock answers the route question with pick (probability 1, confidence 0.8), any other Choice
-// (the complexity) with its last criterion, and the Nouls (relevance, evidence) with 0.5, over
+// evalMock answers the route question with pick (probability 1, confidence 0.8), the complexity
+// Score with its last level, and the Nouls (relevance, evidence) with 0.5, over
 // whatever options each request sends.
 func evalMock(pick string) *mocks.JevClientMock {
 	return &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
@@ -26,6 +26,10 @@ func evalMock(pick string) *mocks.JevClientMock {
 		for id, q := range req.Questions {
 			if q.Type == jev.TypeNoul {
 				out[id] = jev.Answer{Type: jev.TypeNoul, Noul: 0.5}
+				continue
+			}
+			if q.Type == jev.TypeScore {
+				out[id] = levels(map[int]float64{len(q.Levels) - 1: 1})
 				continue
 			}
 			names := q.Criteria.Names()

@@ -74,6 +74,8 @@ agrouter --doc CLAUDE.md --doc docs/architecture.md -p "refactor the retry logic
 
 This stage runs only when `--doc` is given and more than one option is left. If it fails (a Jev error, or the timeout), the cannot-decide policy below applies; docs are never silently dropped. Without `--doc` there is no complexity stage and routing is unchanged.
 
+Complexity uses Jev's Score question with ten ordered descriptions. Jev returns a numeric score from 0 to 9, which agrouter scales to 0 to 10 before combining document chunks. Evidence remains a separate Noul weight; confidence is recorded only.
+
 ### Long inputs
 
 A prompt with its files that is too large for one request is split into chunks, all sent at once. Each chunk also rates how relevant its text is to the task, and the chunks' answers are averaged with that relevance as weight, so filler with zero relevance has no effect. Low but non-zero relevance still dilutes the result when there is a lot of it.
@@ -84,7 +86,7 @@ Decision mode:
 
 ```sh
 agrouter -p "fix the flaky test in pkg/foo" --dangerously-skip-permissions --output-format stream-json
-# {"cli":"codex","model":"gpt-6.1-sol","effort":"medium","argv":["codex","exec","--dangerously-bypass-approvals-and-sandbox","--skip-git-repo-check","--json","--model","gpt-6.1-sol","-c","model_reasoning_effort=\"medium\"","--","fix the flaky test in pkg/foo"],"skipped":[]}
+# {"cli":"codex","model":"gpt-6.1-sol","effort":"medium","confidence":{"route":0.8,"route_average":0.8},"argv":["codex","exec","--dangerously-bypass-approvals-and-sandbox","--skip-git-repo-check","--json","--model","gpt-6.1-sol","-c","model_reasoning_effort=\"medium\"","--","fix the flaky test in pkg/foo"],"skipped":[]}
 ```
 
 `argv` holds the `-p`, positional and `--prompt-file` text, joined like the routing prompt, as its last token after `--`, so text that starts with `-` reaches the child as the prompt and never as one of its flags (each CLI's `prompt` mapping must end with `"--", "{prompt}"`; raw tokens after agrouter's own `--` come before it). It never holds stdin: a caller that piped a prompt must send it to the child itself. `--doc` is never in `argv`; the child loads its own `CLAUDE.md`/`AGENTS.md`. `effort` is `null` for a model without efforts; `skipped` lists, as the caller spelled them, the arguments that got a skip warning: an unknown or disabled `--cli`, arguments the chosen CLI does not map or maps to nothing, and raw tokens after `--` without `--cli`.
@@ -97,9 +99,11 @@ agrouter exec --cli=claude --dangerously-skip-permissions --output-format stream
 
 On Windows with npm's `claude.cmd`/`codex.cmd` shims, pass a multi-line prompt on stdin: cmd.exe cannot carry a line break inside an argument, so a multi-line `-p`, positional or `--prompt-file` prompt fails to start (exit `127`). This includes any prompt combined from two sources, since they are joined with a blank line. Decision mode and native executables are unaffected.
 
-Before starting the child, exec mode logs one JSON line with `cli`, `model` and `effort` to stderr, so tools such as Ralphex can record the selection for each step. Model and effort are `null` when the CLI's defaults apply. This line does not include the prompt or argv.
+Before starting the child, exec mode logs one JSON line with `cli`, `model`, `effort` and any recorded `confidence` to stderr, so tools such as Ralphex can record the selection for each step. Model and effort are `null` when the CLI's defaults apply. This line does not include the prompt or argv.
 
-The child's stdout, stderr and exit code are agrouter's. An argument the chosen CLI does not map is skipped with one `agrouter: warning:` line on stderr, never an error. Set `AGROUTER_DEBUG=1` to see eligibility, each `--doc` chunk's complexity score and evidence with the project complexity, Jev's probabilities and the final command on stderr (prompt text and key redacted; doc text is never printed).
+Decision JSON and the exec selection line include `confidence` when Jev answered. `confidence.route` is Jev's whole-request Choice confidence, or `null` for a pooled decision or unavailable route answer. Split routing adds `routing_chunks`, each with `field`, `index`, `of` and `confidence`; document scoring adds `complexity_chunks`, each with `index`, `of` and Score `confidence`. Values are preserved per request, including zero. `route_average` summarizes model-decision confidence and `complexity_average` summarizes project-complexity confidence. Each is the arithmetic mean of that stage's final chunk confidences, including zeros, without relevance or evidence weights. A single request uses its own confidence as the average; a stage with no recorded answers omits its average. These means describe the answers' confidence and do not measure the probability that the whole result is correct. Confidence changes neither relevance/evidence weighting nor model selection. When no answers were recorded, the `confidence` field is omitted.
+
+The child's stdout, stderr and exit code are agrouter's. An argument the chosen CLI does not map is skipped with one `agrouter: warning:` line on stderr, never an error. Set `AGROUTER_DEBUG=1` to see eligibility, each `--doc` chunk's complexity score, evidence and confidence with the project complexity, routing confidence per request, Jev's probabilities and the final command on stderr (prompt text and key redacted; doc text is never printed).
 
 When Jev cannot decide (no key, timeout, API errors) and the CLI is known (`--cli`, implied by `--model`, or the only one left), agrouter runs it with only the caller's fixed `--model`/`--effort`, so the CLI's defaults apply. With more than one CLI left, it exits `2`.
 

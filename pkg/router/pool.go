@@ -20,13 +20,14 @@ type Score struct {
 	Score float64
 }
 
-// ChunkResult is one chunk request's answers, for debug output.
+// ChunkResult is one chunk request's answers, for recording and debug output.
 type ChunkResult struct {
-	Field     string
-	Index     int // as sent; a re-split renumbers the chunks after it
-	Of        int
-	Relevance float64 // the Noul as answered: the chunk's weight in the pool
-	Top       []Score
+	Field      string
+	Index      int // as sent; a re-split renumbers the chunks after it
+	Of         int
+	Relevance  float64 // the Noul as answered: the chunk's weight in the pool
+	Confidence float64 // Jev's Choice confidence, recorded only; never part of the pool weight
+	Top        []Score
 }
 
 // Pooled is how a split state was decided: every chunk's answers in sequence order and the pooled
@@ -129,7 +130,7 @@ func (r *Router) askChunk(ctx context.Context, el *Eligibility, anchor prompt.An
 		scores[i] = p
 	}
 	return routeAnswer{probs: route.Probabilities, result: ChunkResult{Field: c.Field, Index: c.Index, Of: c.Of,
-		Relevance: relevance.Noul, Top: ranked(el.Options, scores)}}, nil
+		Relevance: relevance.Noul, Confidence: route.Confidence, Top: ranked(el.Options, scores)}}, nil
 }
 
 // pool combines the chunks' probabilities: each chunk weighs its raw relevance, an option's score is

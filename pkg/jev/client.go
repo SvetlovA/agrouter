@@ -397,6 +397,8 @@ func validate(q Question, w wireAnswer) (Answer, error) {
 	switch q.Type {
 	case TypeChoice:
 		return validateChoice(q.Criteria.Names(), w)
+	case TypeScore:
+		return validateScore(q.Levels, w)
 	case TypeNoul:
 		if w.Noul == nil || !unit(*w.Noul) {
 			return Answer{}, errors.New("noul missing or outside [0, 1]")
@@ -408,33 +410,69 @@ func validate(q Question, w wireAnswer) (Answer, error) {
 }
 
 func validateChoice(options []string, w wireAnswer) (Answer, error) {
+	if !slices.Contains(options, w.Choice) {
+		return Answer{}, fmt.Errorf("choice %q is not an option sent", w.Choice)
+	}
+	if err := validateDistribution(options, w); err != nil {
+		return Answer{}, err
+	}
+	return Answer{Type: TypeChoice, Choice: w.Choice, Probabilities: w.Probabilities, Confidence: *w.Confidence}, nil
+}
+
+// validateDistribution checks the probabilities and confidence shared by Choice and Score.
+func validateDistribution(options []string, w wireAnswer) error {
 	known := make(map[string]bool, len(options))
 	for _, o := range options {
 		known[o] = true
 	}
-	if !known[w.Choice] {
-		return Answer{}, fmt.Errorf("choice %q is not an option sent", w.Choice)
-	}
 	if w.Confidence == nil || !unit(*w.Confidence) {
-		return Answer{}, errors.New("confidence missing or outside [0, 1]")
+		return errors.New("confidence missing or outside [0, 1]")
 	}
 	if len(w.Probabilities) != len(known) {
-		return Answer{}, fmt.Errorf("%d probabilities for %d options", len(w.Probabilities), len(known))
+		return fmt.Errorf("%d probabilities for %d options", len(w.Probabilities), len(known))
 	}
 	var sum float64
 	for o, p := range w.Probabilities {
 		if !known[o] {
-			return Answer{}, fmt.Errorf("probability for unknown option %q", o)
+			return fmt.Errorf("probability for unknown option %q", o)
 		}
 		if !unit(p) {
-			return Answer{}, fmt.Errorf("probability of %q outside [0, 1]", o)
+			return fmt.Errorf("probability of %q outside [0, 1]", o)
 		}
 		sum += p
 	}
 	if math.Abs(sum-1) > probabilitySlack+probabilityRoundoff {
-		return Answer{}, fmt.Errorf("probabilities sum to %g", sum)
+		return fmt.Errorf("probabilities sum to %g", sum)
 	}
-	return Answer{Type: TypeChoice, Choice: w.Choice, Probabilities: w.Probabilities, Confidence: *w.Confidence}, nil
+	return nil
+}
+
+// validateScore checks the reported score, ordered level probabilities and legend.
+func validateScore(levels []string, w wireAnswer) (Answer, error) {
+	if len(levels) < 2 || len(levels) > 10 {
+		return Answer{}, errors.New("score needs 2 to 10 levels")
+	}
+	if w.Score == nil || math.IsNaN(*w.Score) || math.IsInf(*w.Score, 0) ||
+		*w.Score < 0 || *w.Score > float64(len(levels)-1) {
+		return Answer{}, errors.New("score missing or outside the level range")
+	}
+	options := make([]string, len(levels))
+	for i := range levels {
+		options[i] = strconv.Itoa(i)
+	}
+	if err := validateDistribution(options, w); err != nil {
+		return Answer{}, err
+	}
+	if len(w.Legend) != len(levels) {
+		return Answer{}, errors.New("score legend does not match the levels")
+	}
+	for i, description := range levels {
+		if got, ok := w.Legend[options[i]]; !ok || got != description {
+			return Answer{}, fmt.Errorf("score legend does not match level %d", i)
+		}
+	}
+	return Answer{Type: TypeScore, Score: *w.Score, Legend: w.Legend,
+		Probabilities: w.Probabilities, Confidence: *w.Confidence}, nil
 }
 
 // unit reports whether v is finite and in [0, 1].

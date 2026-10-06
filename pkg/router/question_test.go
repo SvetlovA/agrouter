@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,16 +15,13 @@ import (
 
 func TestComplexityQuestion(t *testing.T) {
 	q := complexityQuestion("How complex?")
-	assert.Equal(t, jev.TypeChoice, q.Type)
+	assert.Equal(t, jev.TypeScore, q.Type)
 	assert.Equal(t, "How complex?", q.Instructions)
-	names := q.Criteria.Names()
-	require.Len(t, names, 11)
-	for i, name := range names {
-		assert.Equal(t, strconv.Itoa(i), name, "levels 0 to 10 in order")
+	require.Len(t, q.Levels, 10)
+	for i, description := range q.Levels {
+		assert.NotEmpty(t, description, "level %d is anchored", i)
 	}
-	for _, c := range q.Criteria {
-		assert.NotEmpty(t, c.Value, "level %s is anchored", c.Name)
-	}
+	assert.Empty(t, q.Criteria)
 }
 
 func TestEvidenceQuestion(t *testing.T) {

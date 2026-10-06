@@ -11,12 +11,13 @@ import (
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 )
 
-// DocScore is one doc request's answers, for debug output.
+// DocScore is one doc request's answers, for recording and debug output.
 type DocScore struct {
-	Index    int // as sent; the whole-docs request is 1 of 1
-	Of       int
-	Score    float64 // the expected complexity level, Σ i·p(i)
-	Evidence float64 // the Noul as answered: the request's weight in the reduce
+	Index      int // as sent; the whole-docs request is 1 of 1
+	Of         int
+	Score      float64 // Jev's Score normalized from its level range to 0 to 10
+	Confidence float64 // recorded only; never part of the reduce weight
+	Evidence   float64 // the Noul as answered: the request's weight in the reduce
 }
 
 // ComplexityResult is how the docs were scored: every doc request's answers in order and the
@@ -91,21 +92,23 @@ func (r *Router) askDocs(ctx context.Context, state any, questions map[string]je
 	if !ok {
 		return DocScore{}, fmt.Errorf("%w: no %q answer", jev.ErrMalformed, questionEvidence)
 	}
-	// jev accepts probabilities summing to 1 within a tolerance: dividing by their sum keeps the
-	// score inside the level range
-	var score, total float64
+	// the client validates Score answers; also check completeness for alternate JevClient implementations
+	var total float64
 	for i := range complexityLevels {
 		p, ok := level.Probabilities[strconv.Itoa(i)]
 		if !ok {
 			return DocScore{}, fmt.Errorf("%w: no probability for complexity %d", jev.ErrMalformed, i)
 		}
-		score += float64(i) * p
 		total += p
 	}
 	if total <= 0 {
 		return DocScore{}, fmt.Errorf("%w: complexity probabilities sum to %g", jev.ErrMalformed, total)
 	}
-	return DocScore{Score: score / total, Evidence: evidence.Noul}, nil
+	maxLevel := float64(len(complexityLevels) - 1)
+	if math.IsNaN(level.Score) || math.IsInf(level.Score, 0) || level.Score < 0 || level.Score > maxLevel {
+		return DocScore{}, fmt.Errorf("%w: complexity score outside the level range", jev.ErrMalformed)
+	}
+	return DocScore{Score: level.Score * 10 / maxLevel, Confidence: level.Confidence, Evidence: evidence.Noul}, nil
 }
 
 // reduce combines the doc scores into the project complexity: the mean weighted by evidence (a

@@ -33,7 +33,7 @@ func staged(docs func() (map[string]jev.Answer, error), route func(state any) (m
 // scored answers every doc request with an expected complexity of 6.9 and full evidence.
 func scored() (map[string]jev.Answer, error) {
 	return map[string]jev.Answer{
-		questionComplexity: levels(map[int]float64{6: 0.1, 7: 0.9}),
+		questionComplexity: complexityAnswer(6.9),
 		questionEvidence:   {Type: jev.TypeNoul, Noul: 1},
 	}, nil
 }

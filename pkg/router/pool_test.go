@@ -246,6 +246,11 @@ func TestRouteChunkedConfidenceNotAveraged(t *testing.T) {
 		d, err := newRouter(t, cfg, cat, client).Route(context.Background(), el, req, c)
 		require.NoError(t, err)
 		require.NotNil(t, d.Pooled)
+		require.NotEmpty(t, d.Pooled.Chunks)
+		assert.InDelta(t, 1-conf, d.Pooled.Chunks[0].Confidence, 1e-9)
+		for _, chunk := range d.Pooled.Chunks[1:] {
+			assert.InDelta(t, conf, chunk.Confidence, 1e-9)
+		}
 		tops = append(tops, d.Pooled.Top)
 	}
 	assert.Equal(t, tops[0], tops[1])

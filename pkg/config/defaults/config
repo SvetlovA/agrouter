@@ -49,8 +49,12 @@ relevance = Does the text in `chunk.text` state the task to perform, its require
 # state.docs is an array of all non-empty --doc file contents, in supplied order, when they fit whole.
 # state.doc.text is one chunk of one --doc file when the docs need splitting.
 # state.doc.index is its 1-based position across all doc chunks; state.doc.of is their total count.
-# the answer selects a project-complexity level from 0 to 10; its probabilities yield a numeric score.
-complexity_question = How complex is the project that the docs in `state` describe (`docs`, or `doc.text` when it is one part of longer docs)? Judge the codebase as a whole: its size, architecture, dependencies and constraints, not any single task in it. Pick the level whose description fits the project best.
+# Score uses ten ordered descriptions (levels 0 to 9); its numeric result is scaled to 0 to 10.
+# Choice and Score confidence is recorded in decision JSON, exec logs and debug output only;
+# it does not affect routing, relevance or the evidence weight below.
+# decision JSON and exec logs also record route_average and complexity_average: simple means
+# across the final chunks in each stage, including zero confidence, without relevance/evidence weights.
+complexity_question = How complex is the project that the docs in `state` describe (`docs`, or `doc.text` when it is one part of longer docs)? Judge the codebase as a whole: its size, architecture, dependencies and constraints, not any single task in it. Rate the project against the ordered complexity descriptions.
 # complexity_evidence: asked beside complexity_question, using the same docs or doc.text fields.
 # its 0-to-1 answer measures whether this text describes the codebase rather than only workflow/style;
 # it weights this doc chunk's score when reducing the answers to project.complexity for routing.

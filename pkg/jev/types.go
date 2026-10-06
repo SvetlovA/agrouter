@@ -11,6 +11,7 @@ import (
 // Question types.
 const (
 	TypeChoice = "choice"
+	TypeScore  = "score"
 	TypeNoul   = "noul"
 )
 
@@ -21,12 +22,29 @@ type Request struct {
 	Questions map[string]Question `json:"questions"`
 }
 
-// Question is one typed question. For a Choice the criteria names are the options; for a Noul
-// they are "true" and "false".
+// Question is one typed question. Choice and Noul use named Criteria; Score uses ordered Levels.
 type Question struct {
 	Type         string   `json:"type"`
 	Instructions any      `json:"instructions"`
 	Criteria     Criteria `json:"criteria"`
+	Levels       []string `json:"-"`
+}
+
+// MarshalJSON encodes Score criteria as an array and Choice/Noul criteria as named objects.
+func (q Question) MarshalJSON() ([]byte, error) {
+	var criteria any = q.Criteria
+	if q.Type == TypeScore {
+		criteria = q.Levels
+	}
+	data, err := json.Marshal(struct {
+		Type         string `json:"type"`
+		Instructions any    `json:"instructions"`
+		Criteria     any    `json:"criteria"`
+	}{q.Type, q.Instructions, criteria})
+	if err != nil {
+		return nil, fmt.Errorf("question: %w", err)
+	}
+	return data, nil
 }
 
 // Criterion is one named criterion; Value is a string, an object or an array.
@@ -72,11 +90,12 @@ func (c Criteria) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Answer is a validated answer to one question. Choice, Probabilities and Confidence are set for a
-// Choice, Noul for a Noul.
+// Answer is a validated answer: Choice or Score with probabilities and confidence, or Noul.
 type Answer struct {
 	Type          string
 	Choice        string
+	Score         float64
+	Legend        map[string]string
 	Probabilities map[string]float64
 	Confidence    float64
 	Noul          float64
@@ -91,6 +110,8 @@ type response struct {
 type wireAnswer struct {
 	Type          string             `json:"type"`
 	Choice        string             `json:"choice"`
+	Score         *float64           `json:"score"`
+	Legend        map[string]string  `json:"legend"`
 	Probabilities map[string]float64 `json:"probabilities"`
 	Confidence    *float64           `json:"confidence"`
 	Noul          *float64           `json:"noul"`

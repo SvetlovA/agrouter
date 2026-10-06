@@ -3,7 +3,6 @@ package router
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 
 	"github.com/SvetlovA/agrouter/pkg/catalog"
 	"github.com/SvetlovA/agrouter/pkg/config"
@@ -54,11 +53,9 @@ const (
 	relevanceFalse = "`chunk.text` is only material the task works on, or repeats `anchor`"
 )
 
-// Complexity levels of a doc request's complexity question, "0" to "10" in order, each anchored by a
-// short description so the scale means the same in every request.
+// complexityLevels is the Score rubric, ordered from 0 to 9 and normalized to 0 to 10 after asking.
 var complexityLevels = [...]string{
-	"a snippet or a single file: no architecture, dependencies or constraints to speak of",
-	"a small script or one-off tool",
+	"a snippet, a single file or a small one-off script: no architecture, dependencies or constraints to speak of",
 	"a small single-purpose utility or library of a few files",
 	"a small application with a handful of modules and common dependencies",
 	"a moderate codebase: several packages, a build and test setup, conventions to follow",
@@ -158,13 +155,9 @@ func relevanceQuestion(text string) jev.Question {
 	}}
 }
 
-// complexityQuestion is the Choice over the complexity levels asked in every doc request.
+// complexityQuestion is the Score over the ordered levels asked in every doc request.
 func complexityQuestion(text string) jev.Question {
-	criteria := make(jev.Criteria, len(complexityLevels))
-	for i, desc := range complexityLevels {
-		criteria[i] = jev.Criterion{Name: strconv.Itoa(i), Value: desc}
-	}
-	return jev.Question{Type: jev.TypeChoice, Instructions: text, Criteria: criteria}
+	return jev.Question{Type: jev.TypeScore, Instructions: text, Levels: append([]string(nil), complexityLevels[:]...)}
 }
 
 // evidenceQuestion is the Noul asked beside the complexity question: whether the doc text says

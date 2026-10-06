@@ -9,21 +9,20 @@
   },
   "questions": {
     "complexity": {
-      "type": "choice",
+      "type": "score",
       "instructions": "Rate the project the docs describe.",
-      "criteria": {
-        "0": "a snippet or a single file: no architecture, dependencies or constraints to speak of",
-        "1": "a small script or one-off tool",
-        "2": "a small single-purpose utility or library of a few files",
-        "3": "a small application with a handful of modules and common dependencies",
-        "4": "a moderate codebase: several packages, a build and test setup, conventions to follow",
-        "5": "a medium application with several components, integrations and documented conventions",
-        "6": "a larger codebase with a layered architecture, many dependencies and cross-cutting rules",
-        "7": "a multi-service or multi-platform system with integration points and compatibility constraints",
-        "8": "a large production system with strict invariants and performance, security or concurrency constraints",
-        "9": "a large enterprise system: many modules and teams, legacy and compliance constraints, a wide blast radius",
-        "10": "a very large, critical system where almost any change needs deep cross-system understanding"
-      }
+      "criteria": [
+        "a snippet, a single file or a small one-off script: no architecture, dependencies or constraints to speak of",
+        "a small single-purpose utility or library of a few files",
+        "a small application with a handful of modules and common dependencies",
+        "a moderate codebase: several packages, a build and test setup, conventions to follow",
+        "a medium application with several components, integrations and documented conventions",
+        "a larger codebase with a layered architecture, many dependencies and cross-cutting rules",
+        "a multi-service or multi-platform system with integration points and compatibility constraints",
+        "a large production system with strict invariants and performance, security or concurrency constraints",
+        "a large enterprise system: many modules and teams, legacy and compliance constraints, a wide blast radius",
+        "a very large, critical system where almost any change needs deep cross-system understanding"
+      ]
     },
     "complexity_evidence": {
       "type": "noul",

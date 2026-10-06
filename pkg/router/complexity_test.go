@@ -24,23 +24,32 @@ import (
 
 // levels is a complexity answer with the given probabilities and 0 on every other level.
 func levels(probs map[int]float64) jev.Answer {
-	a := jev.Answer{Type: jev.TypeChoice, Probabilities: map[string]float64{}}
-	best := 0
+	a := jev.Answer{Type: jev.TypeScore, Confidence: 0.8, Probabilities: map[string]float64{}}
+	var total float64
 	for i := range complexityLevels {
 		a.Probabilities[strconv.Itoa(i)] = probs[i]
-		if probs[i] > probs[best] {
-			best = i
-		}
+		a.Score += float64(i) * probs[i]
+		total += probs[i]
 	}
-	a.Choice = strconv.Itoa(best)
+	if total > 0 {
+		a.Score /= total
+	}
 	return a
 }
 
 func docAnswers(level int, evidence float64) map[string]jev.Answer {
 	return map[string]jev.Answer{
-		questionComplexity: levels(map[int]float64{level: 1}),
+		questionComplexity: complexityAnswer(float64(level)),
 		questionEvidence:   {Type: jev.TypeNoul, Noul: evidence},
 	}
+}
+
+// complexityAnswer expresses a 0-to-10 test rating on the Score question's 0-to-9 scale.
+func complexityAnswer(rating float64) jev.Answer {
+	raw := rating * float64(len(complexityLevels)-1) / 10
+	low := int(math.Floor(raw))
+	fraction := raw - float64(low)
+	return levels(map[int]float64{low: 1 - fraction, low + 1: fraction})
 }
 
 // docMock answers every doc request with fn, given the doc chunk (zero for the whole-docs state).
@@ -80,13 +89,14 @@ func TestAskDocsExpectedValue(t *testing.T) {
 		probs map[int]float64
 		want  float64
 	}{
-		{name: "certain", probs: map[int]float64{7: 1}, want: 7},
-		{name: "split between two levels", probs: map[int]float64{3: 0.5, 7: 0.5}, want: 5},
-		{name: "not the argmax", probs: map[int]float64{0: 0.4, 10: 0.3, 9: 0.3}, want: 5.7},
+		{name: "certain", probs: map[int]float64{7: 1}, want: 7 * 10.0 / 9},
+		{name: "split between two levels", probs: map[int]float64{3: 0.5, 7: 0.5}, want: 5 * 10.0 / 9},
+		{name: "not the argmax", probs: map[int]float64{0: 0.4, 9: 0.3, 8: 0.3}, want: 5.1 * 10 / 9},
 		{name: "all on zero", probs: map[int]float64{0: 1}, want: 0},
-		{name: "sum above 1 within tolerance stays in range", probs: map[int]float64{10: 1, 9: 0.009},
-			want: (10 + 9*0.009) / 1.009},
-		{name: "sum below 1 within tolerance", probs: map[int]float64{4: 0.5, 6: 0.495}, want: (2 + 6*0.495) / 0.995},
+		{name: "maximum normalizes to 10", probs: map[int]float64{9: 1}, want: 10},
+		{name: "sum above 1 within tolerance stays in range", probs: map[int]float64{9: 1, 8: 0.009},
+			want: (9 + 8*0.009) / 1.009 * 10 / 9},
+		{name: "sum below 1 within tolerance", probs: map[int]float64{4: 0.5, 6: 0.495}, want: (2 + 6*0.495) / 0.995 * 10 / 9},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -100,6 +110,7 @@ func TestAskDocsExpectedValue(t *testing.T) {
 			require.Len(t, got.Chunks, 1)
 			assert.InDelta(t, tc.want, got.Chunks[0].Score, 1e-9)
 			assert.InDelta(t, 0.8, got.Chunks[0].Evidence, 1e-9)
+			assert.InDelta(t, 0.8, got.Chunks[0].Confidence, 1e-9)
 		})
 	}
 }
@@ -131,6 +142,18 @@ func TestReduce(t *testing.T) {
 	}
 }
 
+func TestReduceConfidenceRecordedOnly(t *testing.T) {
+	results := make([]float64, 0, 2)
+	for _, confidence := range []float64{0, 1} {
+		scores := []DocScore{{Index: 1, Of: 2, Score: 9, Evidence: 0.9, Confidence: confidence},
+			{Index: 2, Of: 2, Score: 1, Evidence: 0.1, Confidence: 1 - confidence}}
+		got := reduce(scores)
+		assert.Equal(t, scores, got.Chunks, "confidence is retained exactly as supplied")
+		results = append(results, got.Complexity)
+	}
+	assert.Equal(t, []float64{8.2, 8.2}, results, "only evidence weights complexity")
+}
+
 func TestComplexitySingleRequest(t *testing.T) {
 	cfg, cat := embedded(t)
 	client := docMock(func(_ prompt.DocChunk, whole bool) (map[string]jev.Answer, error) {
@@ -145,7 +168,7 @@ func TestComplexitySingleRequest(t *testing.T) {
 
 	got, err := r.complexity(context.Background(), docs)
 	require.NoError(t, err)
-	assert.Equal(t, &ComplexityResult{Chunks: []DocScore{{Index: 1, Of: 1, Score: 6, Evidence: 0.9}}, Complexity: 6}, got)
+	assert.Equal(t, &ComplexityResult{Chunks: []DocScore{{Index: 1, Of: 1, Score: 6, Evidence: 0.9, Confidence: 0.8}}, Complexity: 6}, got)
 
 	calls := client.AskCalls()
 	require.Len(t, calls, 1)
@@ -234,7 +257,7 @@ func TestComplexityFailures(t *testing.T) {
 		{name: "probability missing for a level", captured: small, want: jev.ErrMalformed,
 			ask: func(prompt.DocChunk, bool) (map[string]jev.Answer, error) {
 				a := docAnswers(3, 1)
-				delete(a[questionComplexity].Probabilities, "10")
+				delete(a[questionComplexity].Probabilities, "9")
 				return a, nil
 			}},
 		{name: "probabilities all zero", captured: small, want: jev.ErrMalformed,

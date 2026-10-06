@@ -53,11 +53,11 @@ type Decision struct {
 	Pinned bool
 	// Undecided is why Jev could not decide when the CLI was known anyway; nil otherwise.
 	Undecided error
-	// Answer is Jev's route answer to a single request, for debug output; nil without one.
+	// Answer is Jev's route answer to a single request, for recording and debug output; nil without one.
 	Answer *jev.Answer
-	// Pooled is how a split state was decided, for debug output; nil unless it was split.
+	// Pooled is how a split state was decided, for recording and debug output; nil unless it was split.
 	Pooled *Pooled
-	// Complexity is how the docs were scored, for debug output; nil unless the complexity stage ran
+	// Complexity is how the docs were scored, for recording and debug output; nil unless the complexity stage ran
 	// to completion.
 	Complexity *ComplexityResult
 }
