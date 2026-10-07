@@ -2,14 +2,20 @@ package router
 
 import (
 	"context"
+	"encoding/json"
+	"maps"
 	"slices"
+	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/SvetlovA/agrouter/pkg/args"
 	"github.com/SvetlovA/agrouter/pkg/catalog"
+	"github.com/SvetlovA/agrouter/pkg/config"
 	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 	"github.com/SvetlovA/agrouter/pkg/router/mocks"
@@ -463,4 +469,277 @@ func TestLargestStage(t *testing.T) {
 	assert.Equal(t, want, largestStage(cfg, cat, wholeGuide))
 	assert.Greater(t, largestStage(cfg, cat, chunkGuide), largestStage(cfg, cat, wholeGuide),
 		"the chunk guide is the longer one")
+}
+
+// pickHigh is the option the stage edge-case tests route to: each of its stages has another choice.
+const pickHigh = "strong@high"
+
+// decidedStages are pickHigh's asked stages, in order.
+var decidedStages = []Stage{{Level: levelCLI, Choice: "alpha"}, {Level: levelModel, Choice: "strong"},
+	{Level: levelEffort, Choice: "high"}}
+
+func TestRouteStageWhole422Resplits(t *testing.T) {
+	cfg, cat := requestFixture(t)
+	c := captured("HARD: rename the package\n" + filler(40_000))
+	for i, lv := range routeLevels {
+		t.Run(lv.name, func(t *testing.T) {
+			client := &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+				if _, ok := req.State.(prompt.ChunkState); ok {
+					return stageAnswers(req, pickHigh, 0.8, 0.5), nil
+				}
+				if id, _, _ := stageAsked(req); id == lv.name {
+					return nil, &jev.StatusError{Status: 422}
+				}
+				return certain(req, pickHigh), nil
+			}}
+			r := newRouter(t, cfg, cat, client)
+			require.True(t, c.Fits(r.budget))
+			req := &args.Request{}
+			d, err := r.Route(context.Background(), Eligible(cfg, cat, req), req, c)
+			require.NoError(t, err)
+			require.NoError(t, d.Undecided)
+			assert.Equal(t, pickHigh, d.OptionID)
+			assert.Equal(t, decidedStages, stageSummary(d.Stages))
+			for j, st := range d.Stages {
+				if j < i {
+					assert.NotNil(t, st.Answer, "%s asked whole before the 422", st.Level)
+					assert.Nil(t, st.Pooled, st.Level)
+					continue
+				}
+				assert.Nil(t, st.Answer, st.Level)
+				require.NotNil(t, st.Pooled, "%s pooled from the rejected level on", st.Level)
+				assert.Greater(t, len(st.Pooled.Chunks), 1, st.Level)
+			}
+			whole := 0
+			for _, call := range client.AskCalls() {
+				st, ok := call.Req.State.(prompt.ChunkState)
+				if !ok {
+					whole++
+					continue
+				}
+				size, err := json.Marshal(st)
+				require.NoError(t, err)
+				assert.LessOrEqual(t, prompt.Tokens(len(size)), r.budget.Chunk/2, "split at half the budget")
+			}
+			assert.Equal(t, i+1, whole, "the whole state is sent until it is rejected, never after")
+		})
+	}
+}
+
+func TestRouteStageChunk422(t *testing.T) {
+	cfg, cat := requestFixture(t)
+	c := captured("START " + filler(200_000))
+	split, err := c.Split(newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget)
+	require.NoError(t, err)
+	require.NotNil(t, split)
+	n := len(split.Chunks)
+	pieces := len(prompt.Halve(split.Chunks[0]))
+	require.Greater(t, pieces, 1)
+	// rejectingAt answers every chunk favoring pickHigh, but rejects with a 422 the model stage's
+	// chunks that reject picks
+	rejectingAt := func(reject func(prompt.Chunk) bool) *mocks.JevClientMock {
+		return &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+			st, ok := req.State.(prompt.ChunkState)
+			if !ok {
+				return nil, &jev.StatusError{Status: 500}
+			}
+			if id, _, _ := stageAsked(req); id == levelModel && reject(st.Chunk) {
+				return nil, &jev.StatusError{Status: 422}
+			}
+			return stageAnswers(req, pickHigh, 0.8, 0.5), nil
+		}}
+	}
+	req := &args.Request{}
+
+	t.Run("only the rejected chunk re-splits; the pool covers every chunk", func(t *testing.T) {
+		client := rejectingAt(func(ch prompt.Chunk) bool { return ch.Index == 1 && ch.Of == n })
+		d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cfg, cat, req), req, c)
+		require.NoError(t, err)
+		require.NoError(t, d.Undecided)
+		assert.Equal(t, pickHigh, d.OptionID)
+		assert.Equal(t, decidedStages, stageSummary(d.Stages))
+		want := map[string]int{levelCLI: n, levelModel: n - 1 + pieces, levelEffort: n}
+		for _, st := range d.Stages {
+			require.NotNil(t, st.Pooled, st.Level)
+			assert.Len(t, st.Pooled.Chunks, want[st.Level], "%s: every level starts from the original chunks", st.Level)
+		}
+		assert.Len(t, stageCalls(client, levelModel), n+pieces, "every chunk, then the rejected one's pieces")
+	})
+	t.Run("a second 422 fails the routing with earlier stages kept", func(t *testing.T) {
+		client := rejectingAt(func(ch prompt.Chunk) bool { return strings.HasPrefix(ch.Text, "START") })
+		d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cfg, cat, req), req, c)
+		require.ErrorIs(t, err, ErrCannotDecide)
+		require.ErrorIs(t, err, errUnsplittable)
+		assert.Contains(t, err.Error(), "model stage")
+		assert.Equal(t, decidedStages[:1], stageSummary(d.Stages))
+		assert.Empty(t, stageCalls(client, levelEffort))
+	})
+}
+
+func TestRouteStageDeadline(t *testing.T) {
+	synctest.Test(t, testRouteStageDeadline)
+}
+
+func testRouteStageDeadline(t *testing.T) {
+	cfg, cat := requestFixture(t)
+	client := &mocks.JevClientMock{AskFunc: func(ctx context.Context, req jev.Request) (map[string]jev.Answer, error) {
+		if id, _, _ := stageAsked(req); id == levelCLI {
+			time.Sleep(2 * time.Second) // the cli stage answers just after the deadline passes
+			return certain(req, pickHigh), nil
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	req := &args.Request{}
+	d, err := newRouter(t, cfg, cat, client).Route(ctx, Eligible(cfg, cat, req), req, captured("fix it"))
+	require.ErrorIs(t, err, ErrCannotDecide)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Contains(t, err.Error(), "model stage")
+	assert.Equal(t, []string{levelCLI, levelModel}, askedLevels(client))
+	assert.Equal(t, decidedStages[:1], stageSummary(d.Stages), "the completed cli stage is kept")
+	assert.Empty(t, d.CLI)
+}
+
+func TestRouteStageMalformedAnswers(t *testing.T) {
+	cfg, cat := requestFixture(t)
+	// unchosen is a criterion other than pickHigh's at each level; at the effort level, an effort label
+	unchosen := map[string]string{levelCLI: "beta", levelModel: "fast", levelEffort: "low"}
+	corruptions := []struct {
+		name    string
+		corrupt func(id string, answers map[string]jev.Answer)
+	}{
+		{name: "a choice not among the criteria sent", corrupt: func(id string, answers map[string]jev.Answer) {
+			a := answers[id]
+			a.Choice = "nope"
+			answers[id] = a
+		}},
+		{name: "a missing probability", corrupt: func(id string, answers map[string]jev.Answer) {
+			a := answers[id]
+			a.Probabilities = maps.Clone(a.Probabilities)
+			delete(a.Probabilities, unchosen[id])
+			answers[id] = a
+		}},
+		{name: "a missing answer id", corrupt: func(id string, answers map[string]jev.Answer) {
+			delete(answers, id)
+		}},
+	}
+	states := []struct {
+		name     string
+		captured *prompt.Result
+	}{
+		{name: "whole", captured: captured("fix it")},
+		{name: "split", captured: captured(filler(200_000))},
+	}
+	for _, state := range states {
+		for _, cr := range corruptions {
+			for i, lv := range routeLevels {
+				t.Run(state.name+"/"+cr.name+"/"+lv.name, func(t *testing.T) {
+					client := &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+						st, chunk := req.State.(prompt.ChunkState)
+						answers := certain(req, pickHigh)
+						if chunk {
+							answers = stageAnswers(req, pickHigh, 0.8, 0.5)
+						}
+						// a split state corrupts one chunk's answers only
+						if id, _, _ := stageAsked(req); id == lv.name && (!chunk || st.Chunk.Index == 2) {
+							cr.corrupt(id, answers)
+						}
+						return answers, nil
+					}}
+					req := &args.Request{}
+					d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cfg, cat, req), req,
+						state.captured)
+					require.ErrorIs(t, err, ErrCannotDecide)
+					require.ErrorIs(t, err, jev.ErrMalformed)
+					assert.Contains(t, err.Error(), lv.name+" stage")
+					assert.Equal(t, decidedStages[:i], stageSummary(d.Stages))
+				})
+			}
+		}
+	}
+}
+
+func TestBudgetLargestStage(t *testing.T) {
+	// sizes are each level's largest whole-state question over cat, as budget measures them
+	sizes := func(cfg *config.Config, cat *catalog.Catalog) map[string]int {
+		size := func(lv level, opts []catalog.Option) int {
+			return questionLen(lv.name, stageQuestion(cfg, lv, wholeGuide, groups(opts, lv), ""))
+		}
+		out := map[string]int{levelCLI: size(routeLevels[0], cat.Options)}
+		for _, cli := range catalog.CLIs(cat.Options) {
+			out[levelModel] = max(out[levelModel], size(routeLevels[1], catalog.ByCLI(cat.Options, cli)))
+		}
+		for _, g := range groups(cat.Options, routeLevels[1]) {
+			out[levelEffort] = max(out[levelEffort], size(routeLevels[2], g.opts))
+		}
+		return out
+	}
+	long := strings.Repeat("x", 3_000)
+	tests := []struct {
+		name    string
+		mutate  func(cfg *config.Config)
+		largest string
+	}{
+		// only the model stage's criteria carry the model name
+		{name: "a long model name makes the model stage the largest", largest: levelModel,
+			mutate: func(cfg *config.Config) { cfg.Models[2].Name = long }},
+		// the effort stage repeats its labels in the criteria names and values
+		{name: "a long effort label makes the effort stage the largest", largest: levelEffort,
+			mutate: func(cfg *config.Config) {
+				cfg.Models[2].Efforts = []string{"low", long}
+				cfg.Efforts["beta."+long] = config.Effort{CLI: "beta", Level: long, Description: "Very deep reasoning."}
+			}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, _ := requestFixture(t)
+			tc.mutate(cfg)
+			cat, err := catalog.Build(cfg)
+			require.NoError(t, err)
+			s := sizes(cfg, cat)
+			for level, n := range s {
+				if level != tc.largest {
+					assert.Greater(t, s[tc.largest], n, "%s over %s", tc.largest, level)
+				}
+			}
+			assert.Equal(t, s[tc.largest], largestStage(cfg, cat, wholeGuide))
+
+			b, err := budget(cfg, cat)
+			require.NoError(t, err)
+			cliOnly, err := prompt.NewBudget(prompt.Questions{Route: s[levelCLI], ChunkRoute: 1, Relevance: 1,
+				Complexity: 1, Evidence: 1})
+			require.NoError(t, err)
+			assert.Less(t, b.State, cliOnly.State, "the whole-state budget leaves room for the largest stage")
+		})
+	}
+}
+
+func TestBudgetPolicyOverBudget(t *testing.T) {
+	long := strings.Repeat("x", 100_000)
+	tests := []struct {
+		name   string
+		mutate func(ag *config.Agrouter)
+		want   []string
+		absent string
+	}{
+		{name: "routing_policy", mutate: func(ag *config.Agrouter) { ag.RoutingPolicy = long },
+			want: []string{"routing_policy leaves", "for the state", "beside the anchor"}, absent: "complexity_policy"},
+		{name: "complexity_policy", mutate: func(ag *config.Agrouter) { ag.ComplexityPolicy = long },
+			want: []string{"complexity_policy leaves", "for the doc state"}, absent: "routing_policy"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, cat := requestFixture(t)
+			tc.mutate(&cfg.Agrouter)
+			_, err := New(cfg, cat, &mocks.JevClientMock{})
+			require.ErrorIs(t, err, prompt.ErrQuestionsOverBudget)
+			assert.Contains(t, err.Error(), "config: [agrouter]")
+			for _, w := range tc.want {
+				assert.Contains(t, err.Error(), w)
+			}
+			assert.NotContains(t, err.Error(), tc.absent)
+		})
+	}
 }

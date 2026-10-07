@@ -258,12 +258,13 @@ The config file shrinks to two short paragraphs. The comments that described sta
 - Modify: `pkg/router/stage.go`, `pkg/router/pool.go`, `pkg/router/question.go` (fixes only, if the tests find gaps)
 - Modify: `pkg/router/stage_test.go`, `pkg/router/pool_test.go`, `pkg/router/router_test.go`
 
-- [ ] write tests for a whole-state 422 at each level: re-split at half the chunk budget, pooled, routing continues to the next level
-- [ ] write tests for a chunk 422 in a middle level: only that chunk re-splits, the pool still covers every chunk; a second 422 fails the routing with earlier stages kept
-- [ ] write a deadline test: the context expires after the `cli` stage, the `model` stage fails, cannot-decide runs, and the completed stages are kept
-- [ ] write malformed-answer tests for each level: a choice not among the criteria sent, a missing probability for a criterion (including an effort label), a missing answer id
-- [ ] write budget tests with synthetic catalogs where the `model` or `effort` question is the largest, and an over-budget `routing_policy` and `complexity_policy`
-- [ ] run `make test` - must pass before task 6
+- [x] write tests for a whole-state 422 at each level: re-split at half the chunk budget, pooled, routing continues to the next level
+- [x] write tests for a chunk 422 in a middle level: only that chunk re-splits, the pool still covers every chunk; a second 422 fails the routing with earlier stages kept
+- [x] write a deadline test: the context expires after the `cli` stage, the `model` stage fails, cannot-decide runs, and the completed stages are kept
+- [x] write malformed-answer tests for each level: a choice not among the criteria sent, a missing probability for a criterion (including an effort label), a missing answer id
+- [x] write budget tests with synthetic catalogs where the `model` or `effort` question is the largest, and an over-budget `routing_policy` and `complexity_policy`
+- ➕ a chunk answer whose choice is not among the criteria sent is now malformed, like a whole-state one (`scoresOf` checks the choice for both)
+- [x] run `make test` - must pass before task 6
 
 ### Task 6: Per-stage confidence in the decision JSON, exec log and debug output
 

@@ -185,15 +185,15 @@ func (r *Router) ask(ctx context.Context, el *Eligibility, lv level, gs []group,
 	if _, err := scoresOf(answer, names); err != nil {
 		return 0, nil, err
 	}
-	i := slices.Index(names, answer.Choice)
-	if i < 0 {
-		return 0, nil, fmt.Errorf("%w: choice %q is not among the criteria sent", jev.ErrMalformed, answer.Choice)
-	}
-	return i, &answer, nil
+	return slices.Index(names, answer.Choice), &answer, nil
 }
 
-// scoresOf returns answer's probability for every name, in order; a missing one is malformed.
+// scoresOf returns answer's probability for every name, in order. A missing probability, or a
+// choice outside names, is malformed.
 func scoresOf(answer jev.Answer, names []string) ([]float64, error) {
+	if !slices.Contains(names, answer.Choice) {
+		return nil, fmt.Errorf("%w: choice %q is not among the criteria sent", jev.ErrMalformed, answer.Choice)
+	}
 	scores := make([]float64, len(names))
 	for i, name := range names {
 		p, ok := answer.Probabilities[name]
