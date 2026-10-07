@@ -299,11 +299,11 @@ The config file shrinks to two short paragraphs. The comments that described sta
 - [x] run `make test` and `go vet -tags eval ./...` - must pass before task 8
 
 ### Task 8: Verify acceptance criteria
-- [ ] verify every Overview item: three stages with skipping, passed values fixing their stage, two policy keys, removed-key errors, per-stage confidence
-- [ ] verify edge cases: one option, `--cli`, `--model` and `--effort` passthrough, a complexity stage before routing, a 422 at every level, the deadline expiring mid-stage, an undecided run with completed stages
-- [ ] run the full test suite: `make test` (and `make test RACE=-race` where cgo is available)
-- [ ] run `make lint` and lint with `GOOS=linux`, `GOOS=darwin` and `--build-tags=eval`
-- [ ] verify coverage is 80%+ per package (mocks excluded)
+- [x] verify every Overview item: three stages with skipping, passed values fixing their stage, two policy keys, removed-key errors, per-stage confidence
+- [x] verify edge cases: one option, `--cli`, `--model` and `--effort` passthrough, a complexity stage before routing, a 422 at every level, the deadline expiring mid-stage, an undecided run with completed stages
+- [x] run the full test suite: `make test` (and `make test RACE=-race` where cgo is available) (race skipped locally - no cgo; CI runs it)
+- [x] run `make lint` and lint with `GOOS=linux`, `GOOS=darwin` and `--build-tags=eval`
+- [x] verify coverage is 80%+ per package (mocks excluded)
 
 ### Task 9: [Final] Update documentation
 - [ ] README: Configuration (`routing_policy`, `complexity_policy`, the removed-key migration table), staged routing and how passed flags fix stages, the per-stage `confidence` shape, verbose `stages` and `options`, latency and when to raise `timeout`, the exit-code table unchanged
