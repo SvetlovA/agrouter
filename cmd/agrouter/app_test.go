@@ -59,16 +59,18 @@ func helper() int {
 // fakeJev answers each routing stage Choice with pick's part: its CLI, its model section or its
 // effort label (pick is an option id, "<section>@<effort>" or "<section>", or a CLI under model
 // passthrough), a complexity Score with level normalized to 0 to 10, and every Noul with 0.5, and
-// records each request's state. With failDocs it rejects every doc request with a 400.
+// records each request's state. With failDocs it rejects every doc request with a 400, and with
+// failStage every request asking that routing stage.
 type fakeJev struct {
-	t        *testing.T
-	mu       sync.Mutex
-	pick     string
-	level    string
-	failDocs bool
-	states   []string
-	stages   []string // the routing stage each Choice request asked, in order
-	srv      *httptest.Server
+	t         *testing.T
+	mu        sync.Mutex
+	pick      string
+	level     string
+	failDocs  bool
+	failStage string
+	states    []string
+	stages    []string // the routing stage each Choice request asked, in order
+	srv       *httptest.Server
 }
 
 func newFakeJev(t *testing.T) *fakeJev {
@@ -95,10 +97,14 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	f.states = append(f.states, string(req.State))
-	pick, level, failDocs := f.pick, f.level, f.failDocs
+	pick, level, failDocs, failStage := f.pick, f.level, f.failDocs, f.failStage
 	f.mu.Unlock()
 	if failDocs && strings.HasPrefix(string(req.State), `{"doc`) {
 		http.Error(w, "doc rejected", http.StatusBadRequest)
+		return
+	}
+	if _, ok := req.Questions[failStage]; ok {
+		http.Error(w, failStage+" stage rejected", http.StatusBadRequest)
 		return
 	}
 
@@ -343,7 +349,7 @@ func TestApp_RalphexClaudeMode(t *testing.T) {
 			"--print"}, strings.NewReader(task))
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, map[string]any{"cli": "claude", "model": "claude-sonnet-5-5", "effort": "medium", "confidence": map[string]any{"model_selection": 0.9}}, decision(t, r.stderr))
+		assert.Equal(t, map[string]any{"cli": "claude", "model": "claude-sonnet-5-5", "effort": "medium", "confidence": map[string]any{"model": 0.9, "effort": 0.9}}, decision(t, r.stderr))
 		argv, stdin, environ := e.child()
 		assert.Equal(t, []string{"-p", "--dangerously-skip-permissions", "--output-format", "stream-json",
 			"--model", "claude-sonnet-5-5", "--effort", "medium"}, argv)
@@ -375,7 +381,7 @@ func TestApp_RalphexCodexMode(t *testing.T) {
 		}, strings.NewReader(task))
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, map[string]any{"cli": "codex", "model": "gpt-6.1-sol", "effort": "medium", "confidence": map[string]any{"model_selection": 0.9}}, decision(t, r.stderr))
+		assert.Equal(t, map[string]any{"cli": "codex", "model": "gpt-6.1-sol", "effort": "medium", "confidence": map[string]any{"model": 0.9, "effort": 0.9}}, decision(t, r.stderr))
 		argv, stdin, _ := e.child()
 		assert.Equal(t, []string{"exec",
 			"-c", "features.multi_agent=true",
@@ -412,7 +418,7 @@ func TestApp_RalphexCodexMode(t *testing.T) {
 			strings.NewReader(task))
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, map[string]any{"cli": "codex", "model": "gpt-6-astra", "effort": "high", "confidence": map[string]any{"model_selection": 0.9}}, decision(t, r.stderr))
+		assert.Equal(t, map[string]any{"cli": "codex", "model": "gpt-6-astra", "effort": "high", "confidence": map[string]any{"model": 0.9, "effort": 0.9}}, decision(t, r.stderr))
 		argv, stdin, _ := e.child()
 		assert.Equal(t, []string{"exec", "-c", "stream_idle_timeout_ms=3600000", "--sandbox", "read-only",
 			"--model", "gpt-6-astra", "-c", `model_reasoning_effort="high"`}, argv)
@@ -430,7 +436,7 @@ func TestApp_Decision(t *testing.T) {
 		assert.Empty(t, r.stderr)
 		assert.Equal(t, map[string]any{
 			"cli": "claude", "model": "claude-sonnet-5-5", "effort": "low",
-			"confidence": map[string]any{"model_selection": 0.9},
+			"confidence": map[string]any{"cli": 0.9, "model": 0.9, "effort": 0.9},
 		}, decision(t, r.stdout))
 		assert.Equal(t, repeated(`{"prompt":"fix the typo in README"}`, 3), e.jev.requests())
 		assert.Equal(t, []string{"cli", "model", "effort"}, e.jev.asked())
@@ -553,14 +559,19 @@ func TestApp_VerboseOutput(t *testing.T) {
 				assert.Equal(t, "5.1/10", d["project_complexity"])
 				assert.NotContains(t, output, "project doc")
 				confidence := d["confidence"].(map[string]any)
-				assert.InDelta(t, 0.9, confidence["model_selection"], 1e-9)
+				for _, level := range []string{"cli", "model", "effort"} {
+					assert.InDelta(t, 0.9, confidence[level], 1e-9, level)
+				}
 				assert.InDelta(t, 0.9, confidence["project_complexity"], 1e-9)
 				if verbose {
-					assert.Contains(t, confidence, "route")
 					assert.Contains(t, confidence, "complexity_chunks")
-					assert.Equal(t, "low", confidence["choice"], "the last stage asked")
-					probabilities := confidence["probabilities"].(map[string]any)
-					assert.InDelta(t, 1, probabilities["low"], 1e-9)
+					stages := confidence["stages"].([]any)
+					require.Len(t, stages, 3)
+					for i, want := range [][2]string{{"cli", "alpha"}, {"model", "fast"}, {"effort", "low"}} {
+						stage := stages[i].(map[string]any)
+						assert.Subset(t, stage, map[string]any{"level": want[0], "choice": want[1], "skipped": false, "confidence": 0.9})
+						assert.InDelta(t, 1, stage["probabilities"].(map[string]any)[want[1]], 1e-9)
+					}
 					chunks := confidence["complexity_chunks"].([]any)
 					require.Len(t, chunks, 1)
 					assert.Subset(t, chunks[0], map[string]any{"index": float64(1), "of": float64(1),
@@ -575,7 +586,7 @@ func TestApp_VerboseOutput(t *testing.T) {
 						assert.Contains(t, output, "\n  ")
 					}
 				} else {
-					assert.Len(t, confidence, 2)
+					assert.Len(t, confidence, 4)
 					assert.Len(t, d, 5)
 				}
 				if mode == "exec" || !verbose {
@@ -837,7 +848,7 @@ func TestApp_Docs(t *testing.T) {
 		assert.Equal(t, "fast-1", decision(t, r.stdout)["model"])
 		assert.NotContains(t, r.stdout, "DOC TEXT")
 		assert.Equal(t, "8.0/10", decision(t, r.stdout)["project_complexity"])
-		assert.Equal(t, map[string]any{"model_selection": 0.9, "project_complexity": 0.9}, decision(t, r.stdout)["confidence"])
+		assert.Equal(t, map[string]any{"model": 0.9, "effort": 0.9, "project_complexity": 0.9}, decision(t, r.stdout)["confidence"])
 	})
 
 	t.Run("decision: no docs, no complexity stage and no project", func(t *testing.T) {
@@ -1054,24 +1065,32 @@ func TestApp_Exec(t *testing.T) {
 		log := decision(t, r.stderr)
 		confidence, ok := log["confidence"].(map[string]any)
 		require.True(t, ok)
-		assert.Nil(t, confidence["route"], "a pooled decision has no whole-request Jev confidence")
-		assert.InDelta(t, 0.9, confidence["model_selection"], 1e-9)
+		assert.InDelta(t, 0.9, confidence["model"], 1e-9, "the mean of the chunk confidences")
+		assert.InDelta(t, 0.9, confidence["effort"], 1e-9)
+		assert.NotContains(t, confidence, "cli", "--cli fixes the cli stage")
 		assert.NotContains(t, confidence, "project_complexity", "no document answers were recorded")
-		chunks, ok := confidence["routing_chunks"].([]any)
+		stages, ok := confidence["stages"].([]any)
 		require.True(t, ok)
-		require.Len(t, chunks, len(e.jev.requests()))
-		// --cli fixes the cli stage; the model and effort stages each pool every chunk
-		perStage := len(chunks) / 2
-		for i, chunk := range chunks {
-			choice := "claude-sonnet-5-5"
-			if i >= perStage {
-				choice = "low"
+		require.Len(t, stages, 3)
+		assert.Equal(t, map[string]any{"level": "cli", "choice": "claude", "skipped": true}, stages[0])
+		var chunkCount int
+		for i, choice := range []string{"claude-sonnet-5-5", "low"} {
+			stage := stages[i+1].(map[string]any)
+			assert.Subset(t, stage, map[string]any{"choice": choice, "skipped": false})
+			assert.InDelta(t, 0.9, stage["confidence"], 1e-9, "the mean of the chunk confidences")
+			assert.NotContains(t, stage, "probabilities", "a pooled stage has no whole-state answer")
+			assert.Contains(t, stage, "pooled_scores")
+			chunks, ok := stage["chunks"].([]any)
+			require.True(t, ok)
+			chunkCount += len(chunks)
+			for j, chunk := range chunks {
+				assert.Subset(t, chunk, map[string]any{"field": "prompt", "index": float64(j + 1),
+					"of": float64(len(chunks)), "confidence": 0.9, "choice": choice, "relevance": 0.5})
+				probabilities := chunk.(map[string]any)["probabilities"].(map[string]any)
+				assert.InDelta(t, 1, probabilities[choice], 1e-9)
 			}
-			assert.Subset(t, chunk, map[string]any{"field": "prompt", "index": float64(i%perStage + 1),
-				"of": float64(perStage), "confidence": 0.9, "choice": choice, "relevance": 0.5})
-			probabilities := chunk.(map[string]any)["probabilities"].(map[string]any)
-			assert.InDelta(t, 1, probabilities[choice], 1e-9)
 		}
+		assert.Equal(t, len(e.jev.requests()), chunkCount, "the model and effort stages each pool every chunk")
 		assert.Subset(t, log, map[string]any{"cli": "claude", "model": "claude-sonnet-5-5", "effort": "low", "confidence": confidence})
 	})
 
@@ -1152,7 +1171,7 @@ func TestApp_ConfigDrivenNames(t *testing.T) {
 			require.Equal(t, 0, r.code, r.stderr)
 			log := r.stderr
 			assert.Equal(t, map[string]any{"cli": tc.cli, "model": tc.model, "effort": tc.effort,
-				"confidence": map[string]any{"model_selection": 0.9}}, decision(t, log))
+				"confidence": map[string]any{"model": 0.9, "effort": 0.9}}, decision(t, log))
 			got, gotStdin, _ := e.child()
 			assert.Equal(t, []string{"run", "--quiet", "--events", "ndjson", "--mode", "read",
 				"--llm", tc.model, "--think=" + tc.effort, "--", "do it now"}, got)

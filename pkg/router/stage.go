@@ -12,11 +12,12 @@ import (
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 )
 
-// Routing levels, in the order they are asked. Each name is its stage request's question id.
+// Routing levels, in the order they are asked. Each name is its stage request's question id and its
+// confidence key in the decision JSON.
 const (
-	levelCLI    = "cli"
-	levelModel  = "model"
-	levelEffort = "effort"
+	LevelCLI    = "cli"
+	LevelModel  = "model"
+	LevelEffort = "effort"
 )
 
 // level is one routing stage: the options are grouped by key, Jev chooses among the groups' labels,
@@ -32,12 +33,12 @@ type level struct {
 
 // routeLevels are the routing stages in order: CLI, then model, then effort.
 var routeLevels = [...]level{
-	{name: levelCLI, key: optionCLI, label: optionCLI, question: cliText,
+	{name: LevelCLI, key: optionCLI, label: optionCLI, question: cliText,
 		shared: func(_ *Eligibility, o catalog.Option) string { return o.CLI }},
-	{name: levelModel, key: optionSection, label: modelLabel, question: modelText,
+	{name: LevelModel, key: optionSection, label: modelLabel, question: modelText,
 		shared: func(_ *Eligibility, o catalog.Option) string { return modelLabel(o) }},
 	// effort labels are unique within one model, the only one left when the effort stage is asked
-	{name: levelEffort, key: optionID, label: optionEffortLabel, question: effortText,
+	{name: LevelEffort, key: optionID, label: optionEffortLabel, question: effortText,
 		shared: func(el *Eligibility, o catalog.Option) string { return el.EffortFor(o) }},
 }
 

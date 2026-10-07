@@ -81,8 +81,8 @@ func TestRouteSingleOptionSkipsJev(t *testing.T) {
 	d, err := r.Route(context.Background(), el, req, captured("fix the flaky test"))
 	require.NoError(t, err)
 	assert.Equal(t, Decision{CLI: "claude", Model: "claude-opus-5-5", Effort: "high", OptionID: "claude-opus-5-5@high",
-		Stages: []Stage{{Level: levelCLI, Choice: "claude", Skipped: true}, {Level: levelModel, Choice: "claude-opus-5-5", Skipped: true},
-			{Level: levelEffort, Choice: "high", Skipped: true}}}, d)
+		Stages: []Stage{{Level: LevelCLI, Choice: "claude", Skipped: true}, {Level: LevelModel, Choice: "claude-opus-5-5", Skipped: true},
+			{Level: LevelEffort, Choice: "high", Skipped: true}}}, d)
 	assert.Empty(t, client.AskCalls())
 }
 
@@ -95,8 +95,8 @@ func TestRouteSingleOptionPassthrough(t *testing.T) {
 	d, err := r.Route(context.Background(), el, req, captured("x"))
 	require.NoError(t, err)
 	assert.Equal(t, Decision{CLI: "codex", Model: "gpt-9", Effort: "turbo", OptionID: "codex", Pinned: true,
-		Stages: []Stage{{Level: levelCLI, Choice: "codex", Skipped: true}, {Level: levelModel, Choice: "gpt-9", Skipped: true},
-			{Level: levelEffort, Choice: "turbo", Skipped: true}}}, d)
+		Stages: []Stage{{Level: LevelCLI, Choice: "codex", Skipped: true}, {Level: LevelModel, Choice: "gpt-9", Skipped: true},
+			{Level: LevelEffort, Choice: "turbo", Skipped: true}}}, d)
 	assert.Equal(t, []string{"codex", "exec", "--model", "gpt-9", "-c", `model_reasoning_effort="turbo"`},
 		args.Build(mustCLI(t, cfg, d.CLI), req, d.Choice()).Argv)
 }
@@ -125,7 +125,7 @@ func TestRouteJevChoice(t *testing.T) {
 	sent := client.AskCalls()[0].Req
 	assert.Equal(t, cfg.Agrouter.JevModel, sent.Model)
 	assert.Equal(t, prompt.State{Prompt: "fix it"}, sent.State)
-	assert.Equal(t, el.CLIs(), sent.Questions[levelCLI].Criteria.Names())
+	assert.Equal(t, el.CLIs(), sent.Questions[LevelCLI].Criteria.Names())
 }
 
 func TestRouteGoldenRequest(t *testing.T) {
@@ -137,14 +137,14 @@ func TestRouteGoldenRequest(t *testing.T) {
 		choice string
 		stage  string
 	}{
-		{name: "stage_cli", req: &args.Request{}, choice: "fast", stage: levelCLI},
-		{name: "stage_model", req: &args.Request{CLI: "alpha"}, choice: "strong@high", stage: levelModel},
+		{name: "stage_cli", req: &args.Request{}, choice: "fast", stage: LevelCLI},
+		{name: "stage_model", req: &args.Request{CLI: "alpha"}, choice: "strong@high", stage: LevelModel},
 		{name: "stage_effort", req: &args.Request{Model: "strong-model", ModelSource: args.SourceFlag},
-			choice: "strong@high", stage: levelEffort},
+			choice: "strong@high", stage: LevelEffort},
 		{name: "effort_passthrough", req: &args.Request{CLI: "alpha", Effort: "turbo", EffortSource: args.SourceFlag},
-			choice: "fast", stage: levelModel},
+			choice: "fast", stage: LevelModel},
 		{name: "model_passthrough", req: &args.Request{Model: "unknown-model", ModelSource: args.SourceFlag},
-			choice: "beta", stage: levelCLI},
+			choice: "beta", stage: LevelCLI},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -304,10 +304,10 @@ func TestRouteMalformedAnswers(t *testing.T) {
 		answers map[string]jev.Answer
 	}{
 		{name: "missing stage answer", answers: map[string]jev.Answer{}},
-		{name: "choice outside the criteria", answers: map[string]jev.Answer{levelModel: {Choice: "gpt-6.1-sol",
+		{name: "choice outside the criteria", answers: map[string]jev.Answer{LevelModel: {Choice: "gpt-6.1-sol",
 			Probabilities: map[string]float64{"claude-opus-5-5": 0.5, "claude-sonnet-5-5": 0.5, "claude-haiku-4-5": 0,
 				"claude-fable-5-1": 0}}}},
-		{name: "missing probability", answers: map[string]jev.Answer{levelModel: {Choice: "claude-opus-5-5",
+		{name: "missing probability", answers: map[string]jev.Answer{LevelModel: {Choice: "claude-opus-5-5",
 			Probabilities: map[string]float64{"claude-opus-5-5": 1}}}},
 	}
 	for _, tc := range tests {
@@ -321,7 +321,7 @@ func TestRouteMalformedAnswers(t *testing.T) {
 			require.NoError(t, err)
 			require.ErrorIs(t, d.Undecided, jev.ErrMalformed)
 			assert.Equal(t, Decision{CLI: "claude", Pinned: true, Undecided: d.Undecided,
-				Stages: []Stage{{Level: levelCLI, Choice: "claude", Skipped: true}}}, d)
+				Stages: []Stage{{Level: LevelCLI, Choice: "claude", Skipped: true}}}, d)
 		})
 	}
 }

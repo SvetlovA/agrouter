@@ -163,9 +163,9 @@ func stageQuestion(cfg *config.Config, lv level, guide string, gs []group, effor
 		o := g.opts[0]
 		var c stageCriterion
 		switch lv.name {
-		case levelCLI:
+		case LevelCLI:
 			c.CLI = o.CLI
-		case levelModel:
+		case LevelModel:
 			c.Model, c.CLI = o.Name, o.CLI
 		default:
 			c.Effort = optionEffort(o, effort)
@@ -175,7 +175,7 @@ func stageQuestion(cfg *config.Config, lv level, guide string, gs []group, effor
 	}
 	t := newTree(cfg, opts, effort)
 	for _, cli := range t.clis {
-		if lv.name == levelCLI {
+		if lv.name == LevelCLI {
 			c, _ := cfg.CLIByName(cli)
 			in.CLIs = append(in.CLIs, jev.Criterion{Name: cli, Value: cliEntry{Description: c.Description,
 				Models: t.modelCriteria(cli)}})

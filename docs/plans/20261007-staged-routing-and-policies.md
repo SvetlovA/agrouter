@@ -272,19 +272,20 @@ The config file shrinks to two short paragraphs. The comments that described sta
 - Modify: `cmd/agrouter/confidence.go`, `cmd/agrouter/app.go`, `cmd/agrouter/debug.go`
 - Modify: `cmd/agrouter/confidence_test.go`, `cmd/agrouter/app_test.go`, `cmd/agrouter/debug_test.go`
 
-- [ ] replace `model_selection` with `cli`, `model` and `effort`, omitting skipped stages and all three when the routing is undecided; a pooled stage reports the mean of its chunk confidences
-- [ ] replace the verbose top-level route, chunk and pooled fields with `stages`; skipped stages appear with `skipped: true` and their choice; update the `optionJSON` comment (`app.go:74`)
-- [ ] debug output prints one line per stage: `stage <level>: skipped (<choice>)`, or the choice, confidence and top 3 (per-chunk lines for pooled stages)
-- [ ] carry the partial `Decision` on the exit-2 path: `app.route` returns it beside the error, and `app.run` logs it with `debug` before `fail`. stdout stays empty.
-- [ ] the exec selection line carries the same confidence object, still without the prompt or argv
-- [ ] write tests:
+- [x] replace `model_selection` with `cli`, `model` and `effort`, omitting skipped stages and all three when the routing is undecided; a pooled stage reports the mean of its chunk confidences
+- [x] replace the verbose top-level route, chunk and pooled fields with `stages`; skipped stages appear with `skipped: true` and their choice; update the `optionJSON` comment (`app.go:74`)
+- [x] debug output prints one line per stage: `stage <level>: skipped (<choice>)`, or the choice, confidence and top 3 (per-chunk lines for pooled stages)
+- [x] carry the partial `Decision` on the exit-2 path: `app.route` returns it beside the error, and `app.run` logs it with `debug` before `fail`. stdout stays empty.
+- [x] the exec selection line carries the same confidence object, still without the prompt or argv
+- [x] write tests:
   - three asked stages;
   - skipped stages omitted from `confidence` but present in verbose;
   - pooled stages;
   - an undecided run with one CLI eligible: no stage keys in `confidence`, completed stages in verbose;
   - redaction unchanged.
-- [ ] write a `cmd/agrouter` integration test: two CLIs eligible, the CLI stage succeeds, the model stage fails → exit 2, empty stdout, and the completed CLI stage in `AGROUTER_DEBUG=1` output
-- [ ] run `make test` - must pass before task 7
+- [x] write a `cmd/agrouter` integration test: two CLIs eligible, the CLI stage succeeds, the model stage fails → exit 2, empty stdout, and the completed CLI stage in `AGROUTER_DEBUG=1` output
+- ➕ the router exports its level names (`router.LevelCLI`, `LevelModel`, `LevelEffort`) as the confidence keys; verbose pooled scores are `{"name", "score"}` since they name criteria, not options; debug chunk lines read `stage <level> chunk <field> i/n: ...`
+- [x] run `make test` - must pass before task 7
 
 ### Task 7: Adapt the routing evaluation
 

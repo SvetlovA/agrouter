@@ -161,37 +161,37 @@ func TestRouteStagesFixedByPassedValues(t *testing.T) {
 		warned bool
 	}{
 		{name: "nothing passed: every stage asked", req: &args.Request{}, pick: "strong@high",
-			asked:  []string{levelCLI, levelModel, levelEffort},
+			asked:  []string{LevelCLI, LevelModel, LevelEffort},
 			stages: []Stage{stage("cli", "alpha", false), stage("model", "strong", false), stage("effort", "high", false)},
 			want:   "strong@high"},
 		{name: "a model without efforts skips the effort stage", req: &args.Request{}, pick: "fast",
-			asked:  []string{levelCLI, levelModel},
+			asked:  []string{LevelCLI, LevelModel},
 			stages: []Stage{stage("cli", "alpha", false), stage("model", "fast", false), stage("effort", "", true)},
 			want:   "fast"},
 		{name: "--cli: only model and effort asked", req: &args.Request{CLI: "alpha"}, pick: "strong@low",
-			asked:  []string{levelModel, levelEffort},
+			asked:  []string{LevelModel, LevelEffort},
 			stages: []Stage{stage("cli", "alpha", true), stage("model", "strong", false), stage("effort", "low", false)},
 			want:   "strong@low"},
 		{name: "catalog --model: only effort asked", req: &args.Request{Model: "strong-model", ModelSource: args.SourceFlag},
-			pick: "strong@high", asked: []string{levelEffort},
+			pick: "strong@high", asked: []string{LevelEffort},
 			stages: []Stage{stage("cli", "alpha", true), stage("model", "strong", true), stage("effort", "high", false)},
 			want:   "strong@high"},
 		{name: "passthrough --model: only cli asked", req: &args.Request{Model: "unknown-model", ModelSource: args.SourceFlag},
-			pick: "beta", asked: []string{levelCLI},
+			pick: "beta", asked: []string{LevelCLI},
 			stages: []Stage{stage("cli", "beta", false), stage("model", "unknown-model", true), stage("effort", "", true)},
 			want:   "beta"},
 		{name: "passthrough --model and --effort: the effort passes through",
 			req:  &args.Request{Model: "unknown-model", ModelSource: args.SourceFlag, Effort: "turbo", EffortSource: args.SourceFlag},
-			pick: "alpha", asked: []string{levelCLI},
+			pick: "alpha", asked: []string{LevelCLI},
 			stages: []Stage{stage("cli", "alpha", false), stage("model", "unknown-model", true), stage("effort", "turbo", true)},
 			want:   "alpha"},
 		{name: "--effort: effort never asked", req: &args.Request{Effort: "high", EffortSource: args.SourceFlag},
-			pick: "worker@high", asked: []string{levelCLI},
+			pick: "worker@high", asked: []string{LevelCLI},
 			stages: []Stage{stage("cli", "beta", false), stage("model", "worker", true), stage("effort", "high", true)},
 			want:   "worker@high"},
 		{name: "effort passthrough: model asked, the passed effort recorded",
 			req:  &args.Request{CLI: "alpha", Effort: "turbo", EffortSource: args.SourceFlag},
-			pick: "strong", asked: []string{levelModel},
+			pick: "strong", asked: []string{LevelModel},
 			stages: []Stage{stage("cli", "alpha", true), stage("model", "strong", false), stage("effort", "turbo", true)},
 			want:   "strong"},
 		{name: "all three passed: Jev not asked",
@@ -200,7 +200,7 @@ func TestRouteStagesFixedByPassedValues(t *testing.T) {
 			stages: []Stage{stage("cli", "alpha", true), stage("model", "strong", true), stage("effort", "high", true)},
 			want:   "strong@high"},
 		{name: "an unusable --cli fixes nothing", req: &args.Request{CLI: "nope"}, pick: "worker@low",
-			asked:  []string{levelCLI, levelEffort},
+			asked:  []string{LevelCLI, LevelEffort},
 			stages: []Stage{stage("cli", "beta", false), stage("model", "worker", true), stage("effort", "low", false)},
 			want:   "worker@low", warned: true},
 	}
@@ -230,7 +230,7 @@ func TestRoutePassedValuesInStageCriteria(t *testing.T) {
 		client := choosing("beta")
 		_, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cfg, cat, req), req, captured("x"))
 		require.NoError(t, err)
-		in := client.AskCalls()[0].Req.Questions[levelCLI].Instructions.(stageInstructions)
+		in := client.AskCalls()[0].Req.Questions[LevelCLI].Instructions.(stageInstructions)
 		require.Equal(t, []string{"alpha", "beta"}, in.CLIs.Names())
 		for _, c := range in.CLIs {
 			models := c.Value.(cliEntry).Models
@@ -243,7 +243,7 @@ func TestRoutePassedValuesInStageCriteria(t *testing.T) {
 		client := choosing("strong")
 		_, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cfg, cat, req), req, captured("x"))
 		require.NoError(t, err)
-		in := client.AskCalls()[0].Req.Questions[levelModel].Instructions.(stageInstructions)
+		in := client.AskCalls()[0].Req.Questions[LevelModel].Instructions.(stageInstructions)
 		require.Equal(t, []string{"strong", "fast"}, in.Models.Names())
 		for _, m := range in.Models {
 			assert.Equal(t, []string{"turbo"}, m.Value.(modelEntry).Efforts, m.Name)
@@ -293,7 +293,7 @@ func TestRouteStageSequence(t *testing.T) {
 		assert.Equal(t, d.Stages[i].Choice, d.Stages[i].Answer.Choice)
 	}
 
-	cliIn := calls[0].Req.Questions[levelCLI].Instructions.(stageInstructions)
+	cliIn := calls[0].Req.Questions[LevelCLI].Instructions.(stageInstructions)
 	assert.Nil(t, cliIn.Models, "the cli stage nests the models under each CLI")
 	assert.Equal(t, jev.Criteria{
 		{Name: "alpha", Value: cliEntry{Description: "Alpha agent.", Models: jev.Criteria{
@@ -305,7 +305,7 @@ func TestRouteStageSequence(t *testing.T) {
 		}}},
 	}, cliIn.CLIs)
 	assert.Equal(t, []string{"alpha", "beta"}, cliIn.Efforts.Names())
-	effortIn := calls[2].Req.Questions[levelEffort].Instructions.(stageInstructions)
+	effortIn := calls[2].Req.Questions[LevelEffort].Instructions.(stageInstructions)
 	assert.Nil(t, effortIn.CLIs)
 	assert.Equal(t, []string{"strong"}, effortIn.Models.Names(), "only the chosen model")
 	assert.Equal(t, jev.Criteria{{Name: "alpha", Value: jev.Criteria{
@@ -330,7 +330,7 @@ func TestRouteStageFailure(t *testing.T) {
 	boom := &jev.StatusError{Status: 500}
 	t.Run("several CLIs: the cli stage succeeds, the model stage fails", func(t *testing.T) {
 		req := &args.Request{}
-		client := failingAt(levelModel, "strong@high", boom)
+		client := failingAt(LevelModel, "strong@high", boom)
 		d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cfg, cat, req), req, captured("x"))
 		require.ErrorIs(t, err, ErrCannotDecide)
 		require.ErrorIs(t, err, boom)
@@ -342,7 +342,7 @@ func TestRouteStageFailure(t *testing.T) {
 	})
 	t.Run("several CLIs: the model stage succeeds, the effort stage fails", func(t *testing.T) {
 		req := &args.Request{}
-		client := failingAt(levelEffort, "strong@high", boom)
+		client := failingAt(LevelEffort, "strong@high", boom)
 		d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cfg, cat, req), req, captured("x"))
 		require.ErrorIs(t, err, ErrCannotDecide)
 		assert.Equal(t, []Stage{{Level: "cli", Choice: "alpha"}, {Level: "model", Choice: "strong"}}, stageSummary(d.Stages))
@@ -350,7 +350,7 @@ func TestRouteStageFailure(t *testing.T) {
 	})
 	t.Run("one CLI eligible: runs with the caller's fixed values only", func(t *testing.T) {
 		req := &args.Request{Model: "strong-model", ModelSource: args.SourceFlag}
-		client := failingAt(levelEffort, "strong@high", boom)
+		client := failingAt(LevelEffort, "strong@high", boom)
 		d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cfg, cat, req), req, captured("x"))
 		require.NoError(t, err)
 		require.ErrorIs(t, d.Undecided, boom)
@@ -413,7 +413,7 @@ func TestRouteStagesSplitState(t *testing.T) {
 			id, q, _ := stageAsked(call.Req)
 			assert.Equal(t, jev.TypeNoul, call.Req.Questions[questionRelevance].Type, "relevance asked at every level")
 			perLevel[id] = append(perLevel[id], call.Req.State.(prompt.ChunkState).Chunk.Index)
-			if id == levelEffort {
+			if id == LevelEffort {
 				assert.Equal(t, []string{"low", "high"}, q.Criteria.Names(), "every chunk asked within the pooled winner")
 			}
 		}
@@ -432,7 +432,7 @@ func TestRouteStagesSplitState(t *testing.T) {
 	})
 	t.Run("a chunk failing at a later level fails the routing, earlier stages kept", func(t *testing.T) {
 		client := &mocks.JevClientMock{AskFunc: func(ctx context.Context, req jev.Request) (map[string]jev.Answer, error) {
-			if id, _, _ := stageAsked(req); id == levelEffort && req.State.(prompt.ChunkState).Chunk.Index == 2 {
+			if id, _, _ := stageAsked(req); id == LevelEffort && req.State.(prompt.ChunkState).Chunk.Index == 2 {
 				return nil, &jev.StatusError{Status: 500}
 			}
 			return mixed(0.9, 0.01)(ctx, req)
@@ -475,8 +475,8 @@ func TestLargestStage(t *testing.T) {
 const pickHigh = "strong@high"
 
 // decidedStages are pickHigh's asked stages, in order.
-var decidedStages = []Stage{{Level: levelCLI, Choice: "alpha"}, {Level: levelModel, Choice: "strong"},
-	{Level: levelEffort, Choice: "high"}}
+var decidedStages = []Stage{{Level: LevelCLI, Choice: "alpha"}, {Level: LevelModel, Choice: "strong"},
+	{Level: LevelEffort, Choice: "high"}}
 
 func TestRouteStageWhole422Resplits(t *testing.T) {
 	cfg, cat := requestFixture(t)
@@ -543,7 +543,7 @@ func TestRouteStageChunk422(t *testing.T) {
 			if !ok {
 				return nil, &jev.StatusError{Status: 500}
 			}
-			if id, _, _ := stageAsked(req); id == levelModel && reject(st.Chunk) {
+			if id, _, _ := stageAsked(req); id == LevelModel && reject(st.Chunk) {
 				return nil, &jev.StatusError{Status: 422}
 			}
 			return stageAnswers(req, pickHigh, 0.8, 0.5), nil
@@ -558,12 +558,12 @@ func TestRouteStageChunk422(t *testing.T) {
 		require.NoError(t, d.Undecided)
 		assert.Equal(t, pickHigh, d.OptionID)
 		assert.Equal(t, decidedStages, stageSummary(d.Stages))
-		want := map[string]int{levelCLI: n, levelModel: n - 1 + pieces, levelEffort: n}
+		want := map[string]int{LevelCLI: n, LevelModel: n - 1 + pieces, LevelEffort: n}
 		for _, st := range d.Stages {
 			require.NotNil(t, st.Pooled, st.Level)
 			assert.Len(t, st.Pooled.Chunks, want[st.Level], "%s: every level starts from the original chunks", st.Level)
 		}
-		assert.Len(t, stageCalls(client, levelModel), n+pieces, "every chunk, then the rejected one's pieces")
+		assert.Len(t, stageCalls(client, LevelModel), n+pieces, "every chunk, then the rejected one's pieces")
 	})
 	t.Run("a second 422 fails the routing with earlier stages kept", func(t *testing.T) {
 		client := rejectingAt(func(ch prompt.Chunk) bool { return strings.HasPrefix(ch.Text, "START") })
@@ -572,7 +572,7 @@ func TestRouteStageChunk422(t *testing.T) {
 		require.ErrorIs(t, err, errUnsplittable)
 		assert.Contains(t, err.Error(), "model stage")
 		assert.Equal(t, decidedStages[:1], stageSummary(d.Stages))
-		assert.Empty(t, stageCalls(client, levelEffort))
+		assert.Empty(t, stageCalls(client, LevelEffort))
 	})
 }
 
@@ -583,7 +583,7 @@ func TestRouteStageDeadline(t *testing.T) {
 func testRouteStageDeadline(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	client := &mocks.JevClientMock{AskFunc: func(ctx context.Context, req jev.Request) (map[string]jev.Answer, error) {
-		if id, _, _ := stageAsked(req); id == levelCLI {
+		if id, _, _ := stageAsked(req); id == LevelCLI {
 			time.Sleep(2 * time.Second) // the cli stage answers just after the deadline passes
 			return certain(req, pickHigh), nil
 		}
@@ -597,7 +597,7 @@ func testRouteStageDeadline(t *testing.T) {
 	require.ErrorIs(t, err, ErrCannotDecide)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Contains(t, err.Error(), "model stage")
-	assert.Equal(t, []string{levelCLI, levelModel}, askedLevels(client))
+	assert.Equal(t, []string{LevelCLI, LevelModel}, askedLevels(client))
 	assert.Equal(t, decidedStages[:1], stageSummary(d.Stages), "the completed cli stage is kept")
 	assert.Empty(t, d.CLI)
 }
@@ -605,7 +605,7 @@ func testRouteStageDeadline(t *testing.T) {
 func TestRouteStageMalformedAnswers(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	// unchosen is a criterion other than pickHigh's at each level; at the effort level, an effort label
-	unchosen := map[string]string{levelCLI: "beta", levelModel: "fast", levelEffort: "low"}
+	unchosen := map[string]string{LevelCLI: "beta", LevelModel: "fast", LevelEffort: "low"}
 	corruptions := []struct {
 		name    string
 		corrupt func(id string, answers map[string]jev.Answer)
@@ -667,12 +667,12 @@ func TestBudgetLargestStage(t *testing.T) {
 		size := func(lv level, opts []catalog.Option) int {
 			return questionLen(lv.name, stageQuestion(cfg, lv, wholeGuide, groups(opts, lv), ""))
 		}
-		out := map[string]int{levelCLI: size(routeLevels[0], cat.Options)}
+		out := map[string]int{LevelCLI: size(routeLevels[0], cat.Options)}
 		for _, cli := range catalog.CLIs(cat.Options) {
-			out[levelModel] = max(out[levelModel], size(routeLevels[1], catalog.ByCLI(cat.Options, cli)))
+			out[LevelModel] = max(out[LevelModel], size(routeLevels[1], catalog.ByCLI(cat.Options, cli)))
 		}
 		for _, g := range groups(cat.Options, routeLevels[1]) {
-			out[levelEffort] = max(out[levelEffort], size(routeLevels[2], g.opts))
+			out[LevelEffort] = max(out[LevelEffort], size(routeLevels[2], g.opts))
 		}
 		return out
 	}
@@ -683,10 +683,10 @@ func TestBudgetLargestStage(t *testing.T) {
 		largest string
 	}{
 		// only the model stage's criteria carry the model name
-		{name: "a long model name makes the model stage the largest", largest: levelModel,
+		{name: "a long model name makes the model stage the largest", largest: LevelModel,
 			mutate: func(cfg *config.Config) { cfg.Models[2].Name = long }},
 		// the effort stage repeats its labels in the criteria names and values
-		{name: "a long effort label makes the effort stage the largest", largest: levelEffort,
+		{name: "a long effort label makes the effort stage the largest", largest: LevelEffort,
 			mutate: func(cfg *config.Config) {
 				cfg.Models[2].Efforts = []string{"low", long}
 				cfg.Efforts["beta."+long] = config.Effort{CLI: "beta", Level: long, Description: "Very deep reasoning."}
@@ -708,7 +708,7 @@ func TestBudgetLargestStage(t *testing.T) {
 
 			b, err := budget(cfg, cat)
 			require.NoError(t, err)
-			cliOnly, err := prompt.NewBudget(prompt.Questions{Route: s[levelCLI], ChunkRoute: 1, Relevance: 1,
+			cliOnly, err := prompt.NewBudget(prompt.Questions{Route: s[LevelCLI], ChunkRoute: 1, Relevance: 1,
 				Complexity: 1, Evidence: 1})
 			require.NoError(t, err)
 			assert.Less(t, b.State, cliOnly.State, "the whole-state budget leaves room for the largest stage")

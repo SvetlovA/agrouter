@@ -49,7 +49,7 @@ func favoring(names []string, id string, confidence float64) jev.Answer {
 
 // chunkAnswers are a chunk request's answers to a model stage question and relevance.
 func chunkAnswers(route jev.Answer, relevance float64) map[string]jev.Answer {
-	return map[string]jev.Answer{levelModel: route, questionRelevance: {Type: jev.TypeNoul, Noul: relevance}}
+	return map[string]jev.Answer{LevelModel: route, questionRelevance: {Type: jev.TypeNoul, Noul: relevance}}
 }
 
 // chunked is a mock answering chunk requests with fn; a single request fails.
@@ -97,7 +97,7 @@ func chunkStates(client *mocks.JevClientMock) []prompt.ChunkState {
 func slots(answers ...map[string]jev.Answer) []*slot {
 	out := make([]*slot, len(answers))
 	for i, a := range answers {
-		out[i] = &slot{done: true, answer: routeAnswer{probs: a[levelModel].Probabilities,
+		out[i] = &slot{done: true, answer: routeAnswer{probs: a[LevelModel].Probabilities,
 			result: ChunkResult{Relevance: a[questionRelevance].Noul}}}
 	}
 	return out
@@ -288,7 +288,7 @@ func TestRouteChunked(t *testing.T) {
 	assert.Equal(t, len(split.Chunks), int(peak.Load()), "every chunk in flight at once")
 
 	require.Len(t, client.AskCalls(), 2*len(split.Chunks))
-	for _, level := range []string{levelModel, levelEffort} {
+	for _, level := range []string{LevelModel, LevelEffort} {
 		calls := stageCalls(client, level)
 		require.Len(t, calls, len(split.Chunks))
 		first := calls[0]
@@ -305,7 +305,7 @@ func TestRouteChunked(t *testing.T) {
 		assert.Equal(t, chunkGuide, in.State, "a chunk request describes the chunk state")
 		assert.Equal(t, cfg.Agrouter.RoutingPolicy, in.Policy)
 	}
-	model := stageCalls(client, levelModel)[0].Questions[levelModel]
+	model := stageCalls(client, LevelModel)[0].Questions[LevelModel]
 	assert.Equal(t, modelText, model.Instructions.(stageInstructions).Question)
 	assert.Equal(t, groupLabels(groups(el.Options, routeLevels[1])), model.Criteria.Names())
 }
@@ -557,7 +557,7 @@ func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 			require.NoError(t, err)
 			require.ErrorIs(t, d.Undecided, tc.want)
 			assert.Equal(t, Decision{CLI: "claude", Pinned: true, Undecided: d.Undecided,
-				Stages: []Stage{{Level: levelCLI, Choice: "claude", Skipped: true}}}, d, "the model stage failed")
+				Stages: []Stage{{Level: LevelCLI, Choice: "claude", Skipped: true}}}, d, "the model stage failed")
 		})
 	}
 }

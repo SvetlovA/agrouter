@@ -75,7 +75,8 @@ func (l *debugLog) eligibility(el *router.Eligibility) {
 }
 
 // decision prints how the option was chosen: the doc scores and project complexity when the docs
-// were scored, then without Jev, Jev's answer, the pooled chunks, or why Jev could not decide.
+// were scored, then one line per routing stage (skipped, Jev's answer, or the pooled chunks), and
+// why Jev could not decide. On a failure it prints the stages completed before it.
 func (l *debugLog) decision(d router.Decision) {
 	if l == nil {
 		return
@@ -89,6 +90,8 @@ func (l *debugLog) decision(d router.Decision) {
 	asked := false
 	for _, st := range d.Stages {
 		switch {
+		case st.Skipped:
+			l.printf("stage %s: skipped (%s)", st.Level, st.Choice)
 		case st.Answer != nil:
 			asked = true
 			l.printf("stage %s: choice %s, confidence %.3f, top %s", st.Level, st.Answer.Choice, st.Answer.Confidence,
@@ -96,15 +99,20 @@ func (l *debugLog) decision(d router.Decision) {
 		case st.Pooled != nil:
 			asked = true
 			for _, c := range st.Pooled.Chunks {
-				l.printf("chunk %s %d/%d: relevance %.3f, confidence %.3f, top %s", c.Field, c.Index, c.Of, c.Relevance, c.Confidence, scores(c.Top))
+				l.printf("stage %s chunk %s %d/%d: relevance %.3f, confidence %.3f, top %s", st.Level, c.Field, c.Index, c.Of,
+					c.Relevance, c.Confidence, scores(c.Top))
 			}
-			l.printf("stage %s: pooled choice %s, top %s", st.Level, st.Choice, scores(st.Pooled.Top))
+			confidence := "none"
+			if c := stageConfidence(st); c != nil {
+				confidence = fmt.Sprintf("%.3f", *c)
+			}
+			l.printf("stage %s: pooled choice %s, confidence %s, top %s", st.Level, st.Choice, confidence, scores(st.Pooled.Top))
 		}
 	}
 	switch {
 	case d.Undecided != nil:
 		l.printf("jev failed: %v; running %s with the caller's fixed values", d.Undecided, d.CLI)
-	case !asked:
+	case !asked && d.OptionID != "":
 		l.printf("one option, jev not asked: %s", d.OptionID)
 	}
 }

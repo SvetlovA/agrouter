@@ -54,9 +54,9 @@ func evalMock(pick string) *mocks.JevClientMock {
 func pickAt(id string, q jev.Question, pick string) string {
 	section, effort, _ := strings.Cut(pick, "@")
 	switch id {
-	case levelModel:
+	case LevelModel:
 		return section
-	case levelEffort:
+	case LevelEffort:
 		return effort
 	}
 	in, _ := q.Instructions.(stageInstructions)
