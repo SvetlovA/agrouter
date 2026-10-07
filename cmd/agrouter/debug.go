@@ -86,18 +86,25 @@ func (l *debugLog) decision(d router.Decision) {
 		}
 		l.printf("project complexity: %.1f", cx.Complexity)
 	}
+	asked := false
+	for _, st := range d.Stages {
+		switch {
+		case st.Answer != nil:
+			asked = true
+			l.printf("stage %s: choice %s, confidence %.3f, top %s", st.Level, st.Answer.Choice, st.Answer.Confidence,
+				topProbabilities(st.Answer.Probabilities))
+		case st.Pooled != nil:
+			asked = true
+			for _, c := range st.Pooled.Chunks {
+				l.printf("chunk %s %d/%d: relevance %.3f, confidence %.3f, top %s", c.Field, c.Index, c.Of, c.Relevance, c.Confidence, scores(c.Top))
+			}
+			l.printf("stage %s: pooled choice %s, top %s", st.Level, st.Choice, scores(st.Pooled.Top))
+		}
+	}
 	switch {
 	case d.Undecided != nil:
 		l.printf("jev failed: %v; running %s with the caller's fixed values", d.Undecided, d.CLI)
-	case d.Answer != nil:
-		l.printf("jev: choice %s, confidence %.3f, top %s", d.Answer.Choice, d.Answer.Confidence,
-			topProbabilities(d.Answer.Probabilities))
-	case d.Pooled != nil:
-		for _, c := range d.Pooled.Chunks {
-			l.printf("chunk %s %d/%d: relevance %.3f, confidence %.3f, top %s", c.Field, c.Index, c.Of, c.Relevance, c.Confidence, scores(c.Top))
-		}
-		l.printf("pooled: choice %s, top %s", d.OptionID, scores(d.Pooled.Top))
-	default:
+	case !asked:
 		l.printf("one option, jev not asked: %s", d.OptionID)
 	}
 }

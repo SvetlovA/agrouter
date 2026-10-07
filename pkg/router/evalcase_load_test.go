@@ -17,9 +17,9 @@ import (
 	"github.com/SvetlovA/agrouter/pkg/router/mocks"
 )
 
-// evalMock answers the route question with pick (probability 1, confidence 0.8), the complexity
-// Score with its last level, and the Nouls (relevance, evidence) with 0.5, over
-// whatever options each request sends.
+// evalMock answers each stage question with pick's part (probability 1, confidence 0.8; see
+// pickAt), the complexity Score with its last level, and the Nouls (relevance, evidence) with 0.5,
+// over whatever criteria each request sends.
 func evalMock(pick string) *mocks.JevClientMock {
 	return &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
 		out := map[string]jev.Answer{}
@@ -33,8 +33,8 @@ func evalMock(pick string) *mocks.JevClientMock {
 				continue
 			}
 			names := q.Criteria.Names()
-			choice := pick
-			if !slices.Contains(names, pick) {
+			choice := pickAt(id, q, pick)
+			if !slices.Contains(names, choice) {
 				choice = names[len(names)-1]
 			}
 			probs := map[string]float64{}
@@ -46,6 +46,26 @@ func evalMock(pick string) *mocks.JevClientMock {
 		}
 		return out, nil
 	}}
+}
+
+// pickAt is the criterion name of option id pick ("<section>@<effort>" or "<section>") in the stage
+// question q asked under id: its CLI, found in the cli stage's instructions, its section, or its
+// effort label.
+func pickAt(id string, q jev.Question, pick string) string {
+	section, effort, _ := strings.Cut(pick, "@")
+	switch id {
+	case levelModel:
+		return section
+	case levelEffort:
+		return effort
+	}
+	in, _ := q.Instructions.(stageInstructions)
+	for _, c := range in.CLIs {
+		if has(c.Value.(cliEntry).Models, section) {
+			return c.Name
+		}
+	}
+	return pick
 }
 
 func TestLoadEvalCases_SeedSet(t *testing.T) {
@@ -176,8 +196,10 @@ func TestRunEvalCase(t *testing.T) {
 		assert.True(t, res.Correct)
 		assert.False(t, res.Split)
 		assert.InDelta(t, 0.8, res.Confidence, 1e-9)
-		require.Len(t, client.AskCalls(), 1)
-		assert.Equal(t, []string{"Call get() here.\n"}, client.AskCalls()[0].Req.State.(prompt.State).Files)
+		require.Len(t, client.AskCalls(), 2, "the cli and model stages; haiku has no efforts")
+		for _, call := range client.AskCalls() {
+			assert.Equal(t, []string{"Call get() here.\n"}, call.Req.State.(prompt.State).Files)
+		}
 	})
 
 	t.Run("prompt file and docs: stage 1 scores the docs, stage 2 gets the prompt file text", func(t *testing.T) {
@@ -191,7 +213,7 @@ func TestRunEvalCase(t *testing.T) {
 		assert.Equal(t, "10.0", res.Project, "the mock rates the docs at the last level")
 
 		calls := client.AskCalls()
-		require.Len(t, calls, 2)
+		require.Len(t, calls, 3, "the docs, then the cli and model stages")
 		assert.Contains(t, calls[0].Req.Questions, questionComplexity)
 		state := calls[1].Req.State.(prompt.State)
 		assert.Equal(t, "first\n\nfrom the file", state.Prompt)

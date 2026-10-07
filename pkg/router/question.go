@@ -12,7 +12,6 @@ import (
 
 // Question ids in a Jev request.
 const (
-	questionRoute      = "route"
 	questionRelevance  = "relevance"
 	questionComplexity = "complexity"
 	questionEvidence   = "complexity_evidence"
@@ -29,10 +28,19 @@ const (
 // Question texts and state guides. The router owns the questions' structure: what is asked and
 // what each state field holds. The config owns only the cost/quality preference, sent as policy.
 const (
-	// routeText asks the joint Choice over every eligible (cli, model, effort) option.
-	routeText = "Which coding-agent CLI, model and reasoning effort should run the task described in `state`? " +
-		"Choose following `policy`. Look up each option's `model` in `models`, its `cli` in `clis`, " +
-		"and its `effort` under that CLI in `efforts`."
+	// cliText asks the cli stage: which CLI, judged by the models and efforts it offers.
+	cliText = "Which coding-agent CLI should run the task described in `state`? Choose following `policy`. " +
+		"Each CLI in `clis` lists the models it can run, with their reasoning efforts, described under that CLI " +
+		"in `efforts`; judge a CLI by the best of its models and efforts for the task."
+
+	// modelText asks the model stage, within the CLI already chosen or fixed.
+	modelText = "Which model should run the task described in `state`? Choose following `policy`. " +
+		"Each option is described under its name in `models`, with its reasoning efforts described under its " +
+		"`cli` in `efforts`; judge a model by the best of its efforts for the task."
+
+	// effortText asks the effort stage, for the model already chosen or fixed.
+	effortText = "Which reasoning effort should the model in `models` use for the task described in `state`? " +
+		"Choose following `policy`. Each option's `effort` is described under its CLI in `efforts`."
 
 	// wholeGuide describes a state sent whole: state.prompt is the joined -p, positional and
 	// --prompt-file text followed by text stdin; state.files holds the readable text files the
@@ -57,7 +65,7 @@ const (
 		"and `state.chunk.of` give its position. `state.anchor.project.complexity`, when present, rates " +
 		"the codebase the task runs in from 0 (a tiny script) to 10 (a large, constrained enterprise system)."
 
-	// relevanceText is asked beside the route question of a chunk request. Its 0-to-1 answer
+	// relevanceText is asked beside the stage question of a chunk request. Its 0-to-1 answer
 	// weights the chunk's probabilities when the chunk answers are pooled.
 	relevanceText = "Does the text in `chunk.text` state the task to perform, its requirements, " +
 		"or what makes it hard, beyond what `anchor` already says?"
@@ -106,11 +114,12 @@ const (
 	evidenceFalse = "the text is only style rules, workflow instructions or other content that says nothing about the project itself"
 )
 
-// routeCriterion is one option's criterion: its cli, model and effort, described in the instructions.
-type routeCriterion struct {
-	CLI    string `json:"cli"`
-	Model  string `json:"model"`
-	Effort string `json:"effort"`
+// stageCriterion identifies one group of a stage: its cli, its model and cli, or its effort. What
+// lies below it is described once in the instructions.
+type stageCriterion struct {
+	Model  string `json:"model,omitempty"`
+	CLI    string `json:"cli,omitempty"`
+	Effort string `json:"effort,omitempty"`
 }
 
 // instructions is a question's instructions: the question, its state guide and the policy from config.
@@ -120,56 +129,115 @@ type instructions struct {
 	Policy   string `json:"policy"`
 }
 
-// routeInstructions is the route question's instructions: the question, its state guide, the
-// routing policy and the catalog, once.
-type routeInstructions struct {
+// stageInstructions is a stage question's instructions: the question, its state guide, the routing
+// policy and the options below the criteria, once: by CLI for the cli stage, by model otherwise.
+type stageInstructions struct {
 	Question string       `json:"question"`
 	State    string       `json:"state"`
 	Policy   string       `json:"policy"`
-	CLIs     jev.Criteria `json:"clis"`
-	Models   jev.Criteria `json:"models"`
+	CLIs     jev.Criteria `json:"clis,omitempty"`
+	Models   jev.Criteria `json:"models,omitempty"`
 	Efforts  jev.Criteria `json:"efforts"`
 }
 
-// routeQuestion is the joint Choice over opts, which must all come from cfg, for a state described
+// cliEntry describes one CLI of the cli stage and the models it can run.
+type cliEntry struct {
+	Description string       `json:"description"`
+	Models      jev.Criteria `json:"models"`
+}
+
+// modelEntry describes one model, under its model stage criterion name, and the effort labels it runs at.
+type modelEntry struct {
+	Description string   `json:"description"`
+	Efforts     []string `json:"efforts"`
+}
+
+// stageQuestion is lv's Choice over gs, whose options must all come from cfg, for a state described
 // by guide. effort is the caller's passed-through effort, used for options without one of their own.
-func routeQuestion(cfg *config.Config, guide string, opts []catalog.Option, effort string) jev.Question {
-	models := make(map[string]config.Model, len(cfg.Models))
-	for _, m := range cfg.Models {
-		models[m.Name] = m
+func stageQuestion(cfg *config.Config, lv level, guide string, gs []group, effort string) jev.Question {
+	in := stageInstructions{Question: lv.question, State: guide, Policy: cfg.Agrouter.RoutingPolicy,
+		Efforts: jev.Criteria{}}
+	criteria := make(jev.Criteria, 0, len(gs))
+	var opts []catalog.Option
+	for _, g := range gs {
+		o := g.opts[0]
+		var c stageCriterion
+		switch lv.name {
+		case levelCLI:
+			c.CLI = o.CLI
+		case levelModel:
+			c.Model, c.CLI = o.Name, o.CLI
+		default:
+			c.Effort = optionEffort(o, effort)
+		}
+		criteria = append(criteria, jev.Criterion{Name: g.label, Value: c})
+		opts = append(opts, g.opts...)
 	}
-	in := routeInstructions{Question: routeText, State: guide, Policy: cfg.Agrouter.RoutingPolicy}
-	criteria := make(jev.Criteria, 0, len(opts))
-	var efforts []string                // CLIs with efforts, in order
-	levels := map[string]jev.Criteria{} // cli -> its efforts among opts
-	for _, o := range opts {
-		if !has(in.CLIs, o.CLI) {
-			cli, _ := cfg.CLIByName(o.CLI)
-			in.CLIs = append(in.CLIs, jev.Criterion{Name: o.CLI, Value: cli.Description})
+	t := newTree(cfg, opts, effort)
+	for _, cli := range t.clis {
+		if lv.name == levelCLI {
+			c, _ := cfg.CLIByName(cli)
+			in.CLIs = append(in.CLIs, jev.Criterion{Name: cli, Value: cliEntry{Description: c.Description,
+				Models: t.modelCriteria(cli)}})
+		} else {
+			in.Models = append(in.Models, t.modelCriteria(cli)...)
 		}
-		if !has(in.Models, o.Name) {
-			in.Models = append(in.Models, jev.Criterion{Name: o.Name, Value: modelDescription(models, o)})
+		if len(t.efforts[cli]) > 0 {
+			in.Efforts = append(in.Efforts, jev.Criterion{Name: cli, Value: t.efforts[cli]})
 		}
-		eff := optionEffort(o, effort)
-		label := eff
-		if eff == "" {
-			label = noEffortLabel(models, o)
-		} else if !has(levels[o.CLI], eff) {
-			if _, ok := levels[o.CLI]; !ok {
-				efforts = append(efforts, o.CLI)
-			}
-			levels[o.CLI] = append(levels[o.CLI], jev.Criterion{Name: eff, Value: effortDescription(cfg, o.CLI, eff)})
-		}
-		criteria = append(criteria, jev.Criterion{Name: o.ID,
-			Value: routeCriterion{CLI: o.CLI, Model: o.Name, Effort: label}})
-	}
-	for _, cli := range efforts {
-		in.Efforts = append(in.Efforts, jev.Criterion{Name: cli, Value: levels[cli]})
 	}
 	return jev.Question{Type: jev.TypeChoice, Instructions: in, Criteria: criteria}
 }
 
-// relevanceQuestion is the Noul asked beside the route question in a chunk request.
+// tree is the options below a stage's criteria, in catalog order: each CLI's models with their
+// effort labels, and each CLI's effort descriptions.
+type tree struct {
+	clis    []string
+	models  map[string][]string     // cli -> model stage criterion names (modelLabel)
+	entries map[string]*modelEntry  // cli + "/" + criterion name -> its entry
+	efforts map[string]jev.Criteria // cli -> its effort descriptions
+}
+
+func newTree(cfg *config.Config, opts []catalog.Option, effort string) *tree {
+	models := make(map[string]config.Model, len(cfg.Models))
+	for _, m := range cfg.Models {
+		models[m.Name] = m
+	}
+	t := &tree{models: map[string][]string{}, entries: map[string]*modelEntry{}, efforts: map[string]jev.Criteria{}}
+	for _, o := range opts {
+		if _, ok := t.models[o.CLI]; !ok {
+			t.clis = append(t.clis, o.CLI)
+		}
+		name := modelLabel(o)
+		e, ok := t.entries[o.CLI+"/"+name]
+		if !ok {
+			e = &modelEntry{Description: modelDescription(models, o), Efforts: []string{}}
+			t.entries[o.CLI+"/"+name] = e
+			t.models[o.CLI] = append(t.models[o.CLI], name)
+		}
+		label := optionEffort(o, effort)
+		if label == "" {
+			e.Efforts = append(e.Efforts, noEffortLabel(models, o))
+			continue
+		}
+		e.Efforts = append(e.Efforts, label)
+		if !has(t.efforts[o.CLI], label) {
+			t.efforts[o.CLI] = append(t.efforts[o.CLI], jev.Criterion{Name: label, Value: effortDescription(cfg, o.CLI, label)})
+		}
+	}
+	return t
+}
+
+// modelCriteria lists cli's models with their entries.
+func (t *tree) modelCriteria(cli string) jev.Criteria {
+	out := make(jev.Criteria, 0, len(t.models[cli]))
+	for _, name := range t.models[cli] {
+		out = append(out, jev.Criterion{Name: name, Value: *t.entries[cli+"/"+name]})
+	}
+	return out
+}
+
+// relevanceQuestion is the Noul asked beside the stage question in a chunk request.
 func relevanceQuestion() jev.Question {
 	return jev.Question{Type: jev.TypeNoul, Instructions: relevanceText, Criteria: jev.Criteria{
 		{Name: "true", Value: relevanceTrue},
@@ -239,8 +307,8 @@ func has(obj jev.Criteria, name string) bool {
 // be, so eligibility only ever shrinks them. Questions leaving too little room are a config error.
 func budget(cfg *config.Config, cat *catalog.Catalog) (prompt.Budget, error) {
 	sizes := prompt.Questions{
-		Route:      questionLen(questionRoute, routeQuestion(cfg, wholeGuide, cat.Options, "")),
-		ChunkRoute: questionLen(questionRoute, routeQuestion(cfg, chunkGuide, cat.Options, "")),
+		Route:      largestStage(cfg, cat, wholeGuide),
+		ChunkRoute: largestStage(cfg, cat, chunkGuide),
 		Relevance:  questionLen(questionRelevance, relevanceQuestion()),
 		Complexity: questionLen(questionComplexity, complexityQuestion(cfg.Agrouter.ComplexityPolicy)),
 		Evidence:   questionLen(questionEvidence, evidenceQuestion()),
@@ -250,6 +318,23 @@ func budget(cfg *config.Config, cat *catalog.Catalog) (prompt.Budget, error) {
 		return b, fmt.Errorf("config: [agrouter]: %w", err)
 	}
 	return b, nil
+}
+
+// largestStage is the largest stage question a state described by guide can travel with: the cli
+// stage over the whole catalog, the model stage over each CLI's models, and the effort stage over
+// each model's efforts (effort labels repeat across models, so they are never asked together).
+func largestStage(cfg *config.Config, cat *catalog.Catalog, guide string) int {
+	size := func(lv level, opts []catalog.Option) int {
+		return questionLen(lv.name, stageQuestion(cfg, lv, guide, groups(opts, lv), ""))
+	}
+	n := size(routeLevels[0], cat.Options)
+	for _, cli := range catalog.CLIs(cat.Options) {
+		n = max(n, size(routeLevels[1], catalog.ByCLI(cat.Options, cli)))
+	}
+	for _, g := range groups(cat.Options, routeLevels[1]) {
+		n = max(n, size(routeLevels[2], g.opts))
+	}
+	return n
 }
 
 // questionLen is the serialized size of one "id": question entry in the questions object.

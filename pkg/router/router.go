@@ -52,20 +52,13 @@ type Decision struct {
 	Pinned bool
 	// Undecided is why Jev could not decide when the CLI was known anyway; nil otherwise.
 	Undecided error
-	// Answer is Jev's route answer to a single request, for recording and debug output; nil without one.
-	Answer *jev.Answer
-	// Pooled is how a split state was decided, for recording and debug output; nil unless it was split.
-	Pooled *Pooled
+	// Stages are the routing levels in order, for recording and debug output: all three once routing
+	// completes (skipped ones included), the ones completed before a failure otherwise, and none when
+	// routing never started.
+	Stages []Stage
 	// Complexity is how the docs were scored, for recording and debug output; nil unless the complexity stage ran
 	// to completion.
 	Complexity *ComplexityResult
-}
-
-// outcome is what Jev decided: the option, with the single answer or the pooled chunks.
-type outcome struct {
-	option catalog.Option
-	answer *jev.Answer
-	pooled *Pooled
 }
 
 // Choice is the argv choice for args.Build.
@@ -73,14 +66,17 @@ func (d Decision) Choice() args.Choice {
 	return args.Choice{Model: d.Model, Effort: d.Effort, Pinned: d.Pinned}
 }
 
-// Route decides among el's options for the captured prompt. With one option Jev is not asked. When
+// Route decides among el's options for the captured prompt, level by level (see decide). With one
+// option Jev is not asked and every level is recorded as skipped. When
 // the docs have text, the complexity stage scores them first and the routing state carries the
 // project complexity. When Jev cannot decide, in either stage, the CLI is used with only the
 // caller's fixed --model and --effort if it is known (one CLI left); otherwise Route returns an
-// error matching ErrCannotDecide.
+// error matching ErrCannotDecide beside a Decision holding only the stages and complexity completed.
 func (r *Router) Route(ctx context.Context, el *Eligibility, req *args.Request, captured *prompt.Result) (Decision, error) {
 	if len(el.Options) == 1 {
-		return r.chosen(el, el.Options[0], nil), nil
+		d := r.chosen(el, el.Options[0])
+		d.Stages = skippedStages(el, el.Options[0])
+		return d, nil
 	}
 	if captured.Undecidable != nil {
 		return r.cannotDecide(el, req, captured.Undecidable)
@@ -95,56 +91,21 @@ func (r *Router) Route(ctx context.Context, el *Eligibility, req *args.Request, 
 		withProject.Project = &prompt.Project{Complexity: cx.Complexity}
 		captured = &withProject
 	}
-	out, err := r.decide(ctx, el, captured)
+	o, stages, err := r.decide(ctx, el, captured)
 	if err != nil {
+		// partial decisions are discarded: the policy runs against the original eligibility
 		d, policyErr := r.cannotDecide(el, req, err)
-		d.Complexity = cx
+		d.Stages, d.Complexity = stages, cx
 		return d, policyErr
 	}
-	d := r.chosen(el, out.option, out.answer)
-	d.Pooled, d.Complexity = out.pooled, cx
+	d := r.chosen(el, o)
+	d.Stages, d.Complexity = stages, cx
 	return d, nil
 }
 
-// decide sends the state whole when it fits, and otherwise one request per chunk, pooled.
-func (r *Router) decide(ctx context.Context, el *Eligibility, captured *prompt.Result) (outcome, error) {
-	split, err := captured.Split(r.budget)
-	if err != nil {
-		return outcome{}, fmt.Errorf("split the state: %w", err)
-	}
-	if split == nil {
-		return r.single(ctx, el, captured)
-	}
-	return r.pooled(ctx, el, split, false)
-}
-
-// ask sends state in one Choice request and returns the chosen option.
-func (r *Router) ask(ctx context.Context, el *Eligibility, state prompt.State) (catalog.Option, *jev.Answer, error) {
-	req := jev.Request{
-		Model: r.cfg.Agrouter.JevModel,
-		State: state,
-		Questions: map[string]jev.Question{
-			questionRoute: routeQuestion(r.cfg, wholeGuide, el.Options, el.effort),
-		},
-	}
-	answers, err := r.jev.Ask(ctx, req)
-	if err != nil {
-		return catalog.Option{}, nil, fmt.Errorf("route request: %w", err)
-	}
-	answer, ok := answers[questionRoute]
-	if !ok {
-		return catalog.Option{}, nil, fmt.Errorf("%w: no %q answer", jev.ErrMalformed, questionRoute)
-	}
-	for _, o := range el.Options {
-		if o.ID == answer.Choice {
-			return o, &answer, nil
-		}
-	}
-	return catalog.Option{}, nil, fmt.Errorf("%w: choice %q is not among the options sent", jev.ErrMalformed, answer.Choice)
-}
-
-func (r *Router) chosen(el *Eligibility, o catalog.Option, answer *jev.Answer) Decision {
-	return Decision{CLI: o.CLI, Model: o.Name, Effort: el.EffortFor(o), OptionID: o.ID, Pinned: el.Pinned, Answer: answer}
+// chosen is the decision to run o. Pinned comes from the caller's --cli only, never from a CLI Jev chose.
+func (r *Router) chosen(el *Eligibility, o catalog.Option) Decision {
+	return Decision{CLI: o.CLI, Model: o.Name, Effort: el.EffortFor(o), OptionID: o.ID, Pinned: el.Pinned}
 }
 
 // cannotDecide applies the policy: with one CLI left (--cli, implied by --model, or the only one

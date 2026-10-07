@@ -44,29 +44,32 @@ type complexityConfidenceJSON struct {
 }
 
 func recordedConfidence(d router.Decision, verbose bool) *confidenceJSON {
-	if d.Answer == nil && d.Pooled == nil && d.Complexity == nil {
+	asked := askedStages(d)
+	if len(asked) == 0 && d.Complexity == nil {
 		return nil
 	}
 	out := &confidenceJSON{}
 	if verbose {
 		out.confidenceDetailsJSON = &confidenceDetailsJSON{}
 	}
-	if d.Answer != nil {
-		if verbose {
-			out.Route = &d.Answer.Confidence
-			out.Choice = d.Answer.Choice
-			out.Probabilities = d.Answer.Probabilities
+	// the last asked stage reports, until per-stage confidence replaces model_selection
+	for _, st := range asked {
+		if st.Answer != nil {
+			if verbose {
+				out.Route = &st.Answer.Confidence
+				out.Choice = st.Answer.Choice
+				out.Probabilities = st.Answer.Probabilities
+			}
+			out.ModelSelection = &st.Answer.Confidence
+			continue
 		}
-		out.ModelSelection = &d.Answer.Confidence
-	}
-	if d.Pooled != nil {
 		if verbose {
-			for _, s := range d.Pooled.Scores {
+			for _, s := range st.Pooled.Scores {
 				out.PooledScores = append(out.PooledScores, optionScoreJSON{Option: s.ID, Score: s.Score})
 			}
 		}
 		var sum float64
-		for _, c := range d.Pooled.Chunks {
+		for _, c := range st.Pooled.Chunks {
 			sum += c.Confidence
 			if verbose {
 				out.RoutingChunks = append(out.RoutingChunks, routingConfidenceJSON{
@@ -75,7 +78,7 @@ func recordedConfidence(d router.Decision, verbose bool) *confidenceJSON {
 				})
 			}
 		}
-		if count := len(d.Pooled.Chunks); count > 0 {
+		if count := len(st.Pooled.Chunks); count > 0 {
 			average := sum / float64(count)
 			out.ModelSelection = &average
 		}
@@ -94,6 +97,20 @@ func recordedConfidence(d router.Decision, verbose bool) *confidenceJSON {
 		if count := len(d.Complexity.Chunks); count > 0 {
 			average := sum / float64(count)
 			out.ProjectComplexity = &average
+		}
+	}
+	return out
+}
+
+// askedStages are d's routing stages Jev answered, in order: none when the routing is undecided.
+func askedStages(d router.Decision) []router.Stage {
+	if d.OptionID == "" {
+		return nil
+	}
+	var out []router.Stage
+	for _, st := range d.Stages {
+		if st.Answer != nil || st.Pooled != nil {
+			out = append(out, st)
 		}
 	}
 	return out

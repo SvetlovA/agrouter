@@ -223,32 +223,34 @@ The config file shrinks to two short paragraphs. The comments that described sta
 - Modify: `cmd/agrouter/app_test.go`, `cmd/agrouter/confidence_test.go`, `cmd/agrouter/debug_test.go`
 - Modify: `pkg/router/testdata/*.json`
 
-- [ ] add `level`, the three levels (`cli`, `model`, `effort`) and `groups(opts, level)` in `stage.go`
-- [ ] build each stage's question (question id = level name) with the descendant subtree in the instructions, replacing the joint route question for whole and chunk states
-- [ ] rewrite `decide`: loop over the levels on a private copy of the options. Skip levels with one group, recording the shared value. Otherwise ask, by `ask` for a whole state or by fan-out, relevance and pooling for a split state, then narrow every chunk identically. Record `Stage` entries; `Decision.Stages` replaces `Answer`/`Pooled`.
-- [ ] map effort labels to options through `groups` in both `ask` and the pooled path
-- [ ] on any stage error, return the completed stages with the error. `Route` applies `cannotDecide` against the original eligibility, attaches the stages, and returns the partial `Decision` beside `ErrCannotDecide`. A Jev-chosen CLI never sets `Pinned`.
-- [ ] make the one-option bypass fill three skipped `Stage` records (no Jev call, no complexity stage)
-- [ ] derive the budget per the Decisions rule: `cli` over the whole catalog, `model` max per CLI, `effort` max per model; the chunk variants paired with relevance
-- [ ] mechanically adapt the consumers (`cmd/agrouter/confidence.go`, `debug.go`, `pkg/router/evalcase_test.go`) to read `Stages`. Output stays as close to today's as possible; the redesign is task 6 and the eval reporting is task 7.
-- [ ] redesign `fakeJev` (`app_test.go:59-137`) and `evalMock` (`evalcase_load_test.go:22-48`) to take a target option ID and answer each stage with its CLI, section or effort label; update the single-request assertions to the per-stage sequence
-- [ ] write tests for `groups` and level skipping: one CLI, one model, a no-effort model, model and effort passthrough, and the skipped-stage choice for each
-- [ ] write tests for passed values fixing their stage:
+- [x] add `level`, the three levels (`cli`, `model`, `effort`) and `groups(opts, level)` in `stage.go`
+- [x] build each stage's question (question id = level name) with the descendant subtree in the instructions, replacing the joint route question for whole and chunk states
+- [x] rewrite `decide`: loop over the levels on a private copy of the options. Skip levels with one group, recording the shared value. Otherwise ask, by `ask` for a whole state or by fan-out, relevance and pooling for a split state, then narrow every chunk identically. Record `Stage` entries; `Decision.Stages` replaces `Answer`/`Pooled`.
+- [x] map effort labels to options through `groups` in both `ask` and the pooled path
+- [x] on any stage error, return the completed stages with the error. `Route` applies `cannotDecide` against the original eligibility, attaches the stages, and returns the partial `Decision` beside `ErrCannotDecide`. A Jev-chosen CLI never sets `Pinned`.
+- [x] make the one-option bypass fill three skipped `Stage` records (no Jev call, no complexity stage)
+- [x] derive the budget per the Decisions rule: `cli` over the whole catalog, `model` max per CLI, `effort` max per model; the chunk variants paired with relevance
+- [x] mechanically adapt the consumers (`cmd/agrouter/confidence.go`, `debug.go`, `pkg/router/evalcase_test.go`) to read `Stages`. Output stays as close to today's as possible; the redesign is task 6 and the eval reporting is task 7.
+- [x] redesign `fakeJev` (`app_test.go:59-137`) and `evalMock` (`evalcase_load_test.go:22-48`) to take a target option ID and answer each stage with its CLI, section or effort label; update the single-request assertions to the per-stage sequence
+- [x] write tests for `groups` and level skipping: one CLI, one model, a no-effort model, model and effort passthrough, and the skipped-stage choice for each
+- [x] write tests for passed values fixing their stage:
   - `--cli`: only model and effort asked;
   - catalog `--model`: only effort asked;
   - passthrough `--model` with several CLIs: only cli asked, every criterion carrying the passed model;
   - `--effort`: effort never asked; criteria carry the passed effort;
   - all three passed: Jev not called, three skipped stages recorded;
   - an unusable `--cli`: warning kept, `cli` stage asked.
-- [ ] write tests for stage sequencing with the moq mock, using synthetic fixtures: request order, question id and criteria per stage, narrowing, and a final option matching the last choice
-- [ ] write failure tests:
+- [x] write tests for stage sequencing with the moq mock, using synthetic fixtures: request order, question id and criteria per stage, narrowing, and a final option matching the last choice
+- [x] write failure tests:
   - multi-CLI → CLI succeeds → model fails: exit-2 error, stages kept;
   - model succeeds → effort fails;
   - one CLI eligible → runs with caller-fixed values only;
   - `Pinned` stays false.
-- [ ] write split-state tests: per-level pooling with relevance weights and all-zero relevance; all chunks narrowed the same; a chunk failure in a later level fails the routing with earlier stages kept
-- [ ] add per-stage goldens (`request_stage_cli.json`, `request_stage_model.json`, `request_stage_effort.json`, chunk and passthrough variants) and regenerate
-- [ ] run `make test` - must pass before task 5
+- [x] write split-state tests: per-level pooling with relevance weights and all-zero relevance; all chunks narrowed the same; a chunk failure in a later level fails the routing with earlier stages kept
+- [x] add per-stage goldens (`request_stage_cli.json`, `request_stage_model.json`, `request_stage_effort.json`, chunk and passthrough variants) and regenerate
+- ➕ the instructions key models by the model stage's criterion name (the section, or the model name under passthrough), so a model has one name across the cli, model and effort stages
+- ➕ the interim debug lines read `stage <level>: choice ...` / `stage <level>: pooled choice ...`; `model_selection` and the verbose fields report the last stage asked until task 6
+- [x] run `make test` - must pass before task 5
 
 ### Task 5: Staged routing edge cases: 422s, deadline, malformed answers, budget
 

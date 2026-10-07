@@ -2,7 +2,6 @@ package router
 
 import (
 	"context"
-	"encoding/json"
 	goflag "flag"
 	"fmt"
 	"os"
@@ -60,14 +59,6 @@ func newRouter(t *testing.T, cfg *config.Config, cat *catalog.Catalog, client Je
 	return r
 }
 
-// answering returns a mock that chooses id with certainty.
-func answering(id string) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: func(context.Context, jev.Request) (map[string]jev.Answer, error) {
-		return map[string]jev.Answer{questionRoute: {Type: jev.TypeChoice, Choice: id,
-			Probabilities: map[string]float64{id: 1}, Confidence: 0.9}}, nil
-	}}
-}
-
 func failing(err error) *mocks.JevClientMock {
 	return &mocks.JevClientMock{AskFunc: func(context.Context, jev.Request) (map[string]jev.Answer, error) {
 		return nil, err
@@ -89,7 +80,9 @@ func TestRouteSingleOptionSkipsJev(t *testing.T) {
 
 	d, err := r.Route(context.Background(), el, req, captured("fix the flaky test"))
 	require.NoError(t, err)
-	assert.Equal(t, Decision{CLI: "claude", Model: "claude-opus-5-5", Effort: "high", OptionID: "claude-opus-5-5@high"}, d)
+	assert.Equal(t, Decision{CLI: "claude", Model: "claude-opus-5-5", Effort: "high", OptionID: "claude-opus-5-5@high",
+		Stages: []Stage{{Level: levelCLI, Choice: "claude", Skipped: true}, {Level: levelModel, Choice: "claude-opus-5-5", Skipped: true},
+			{Level: levelEffort, Choice: "high", Skipped: true}}}, d)
 	assert.Empty(t, client.AskCalls())
 }
 
@@ -101,14 +94,16 @@ func TestRouteSingleOptionPassthrough(t *testing.T) {
 	el := Eligible(cfg, cat, req)
 	d, err := r.Route(context.Background(), el, req, captured("x"))
 	require.NoError(t, err)
-	assert.Equal(t, Decision{CLI: "codex", Model: "gpt-9", Effort: "turbo", OptionID: "codex", Pinned: true}, d)
+	assert.Equal(t, Decision{CLI: "codex", Model: "gpt-9", Effort: "turbo", OptionID: "codex", Pinned: true,
+		Stages: []Stage{{Level: levelCLI, Choice: "codex", Skipped: true}, {Level: levelModel, Choice: "gpt-9", Skipped: true},
+			{Level: levelEffort, Choice: "turbo", Skipped: true}}}, d)
 	assert.Equal(t, []string{"codex", "exec", "--model", "gpt-9", "-c", `model_reasoning_effort="turbo"`},
 		args.Build(mustCLI(t, cfg, d.CLI), req, d.Choice()).Argv)
 }
 
 func TestRouteJevChoice(t *testing.T) {
 	cfg, cat := embedded(t)
-	client := answering("gpt-6.1-sol@medium")
+	client := choosing("gpt-6.1-sol@medium")
 	r := newRouter(t, cfg, cat, client)
 
 	req := &args.Request{}
@@ -119,33 +114,41 @@ func TestRouteJevChoice(t *testing.T) {
 	assert.Equal(t, "gpt-6.1-sol", d.Model)
 	assert.Equal(t, "medium", d.Effort)
 	assert.Equal(t, "gpt-6.1-sol@medium", d.OptionID)
-	require.NotNil(t, d.Answer)
-	assert.InDelta(t, 0.9, d.Answer.Confidence, 1e-9)
+	require.Len(t, d.Stages, 3)
+	for _, st := range d.Stages {
+		require.NotNil(t, st.Answer, st.Level)
+		assert.InDelta(t, 0.9, st.Answer.Confidence, 1e-9)
+	}
 	require.NoError(t, d.Undecided)
 
-	require.Len(t, client.AskCalls(), 1)
+	require.Len(t, client.AskCalls(), 3)
 	sent := client.AskCalls()[0].Req
 	assert.Equal(t, cfg.Agrouter.JevModel, sent.Model)
 	assert.Equal(t, prompt.State{Prompt: "fix it"}, sent.State)
-	assert.Equal(t, ids(el.Options), sent.Questions[questionRoute].Criteria.Names())
+	assert.Equal(t, el.CLIs(), sent.Questions[levelCLI].Criteria.Names())
 }
 
 func TestRouteGoldenRequest(t *testing.T) {
 	cfg, cat := requestFixture(t)
+	// the golden is the first stage request each case asks
 	tests := []struct {
 		name   string
 		req    *args.Request
 		choice string
+		stage  string
 	}{
-		{name: "all", req: &args.Request{}, choice: "fast"},
-		{name: "cli_alpha", req: &args.Request{CLI: "alpha"}, choice: "fast"},
+		{name: "stage_cli", req: &args.Request{}, choice: "fast", stage: levelCLI},
+		{name: "stage_model", req: &args.Request{CLI: "alpha"}, choice: "strong@high", stage: levelModel},
+		{name: "stage_effort", req: &args.Request{Model: "strong-model", ModelSource: args.SourceFlag},
+			choice: "strong@high", stage: levelEffort},
 		{name: "effort_passthrough", req: &args.Request{CLI: "alpha", Effort: "turbo", EffortSource: args.SourceFlag},
-			choice: "fast"},
-		{name: "model_passthrough", req: &args.Request{Model: "unknown-model", ModelSource: args.SourceFlag}, choice: "beta"},
+			choice: "fast", stage: levelModel},
+		{name: "model_passthrough", req: &args.Request{Model: "unknown-model", ModelSource: args.SourceFlag},
+			choice: "beta", stage: levelCLI},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			client := answering(tc.choice)
+			client := choosing(tc.choice)
 			r, err := New(cfg, cat, client)
 			require.NoError(t, err)
 			el := Eligible(cfg, cat, tc.req)
@@ -153,39 +156,11 @@ func TestRouteGoldenRequest(t *testing.T) {
 				Attachments: []prompt.Attachment{{Source: "mentioned", Type: "image/png", Bytes: 48213}}}
 			_, err = r.Route(context.Background(), el, tc.req, captured)
 			require.NoError(t, err)
-			require.Len(t, client.AskCalls(), 1)
-
-			got, err := json.MarshalIndent(client.AskCalls()[0].Req, "", "  ")
-			require.NoError(t, err)
-			golden := filepath.Join("testdata", "request_"+tc.name+".json")
-			if *update {
-				require.NoError(t, os.WriteFile(golden, append(got, '\n'), 0o600))
-			}
-			want, err := os.ReadFile(golden) //nolint:gosec // test fixture path
-			require.NoError(t, err)
-			assert.Equal(t, string(want), string(got)+"\n")
+			require.NotEmpty(t, client.AskCalls())
+			first := client.AskCalls()[0].Req
+			require.Contains(t, first.Questions, tc.stage)
+			assertGolden(t, tc.name, first)
 		})
-	}
-}
-
-func TestRouteQuestionContents(t *testing.T) {
-	cfg, cat := embedded(t)
-	req := &args.Request{CLI: "claude"}
-	el := Eligible(cfg, cat, req)
-	q := routeQuestion(cfg, wholeGuide, el.Options, "")
-
-	in, ok := q.Instructions.(routeInstructions)
-	require.True(t, ok)
-	assert.Equal(t, routeText, in.Question)
-	assert.Equal(t, wholeGuide, in.State)
-	assert.Equal(t, cfg.Agrouter.RoutingPolicy, in.Policy)
-	assert.Equal(t, []string{"claude"}, in.CLIs.Names(), "only the remaining CLIs")
-	assert.NotContains(t, in.Models.Names(), "gpt-6.1-sol")
-	assert.Equal(t, []string{"claude"}, in.Efforts.Names())
-	for _, c := range q.Criteria {
-		if c.Name == "claude-haiku-4-5" {
-			assert.Equal(t, routeCriterion{CLI: "claude", Model: "claude-haiku-4-5", Effort: effortNone}, c.Value)
-		}
 	}
 }
 
@@ -276,6 +251,10 @@ func TestRouteCannotDecide(t *testing.T) {
 				require.NoError(t, err)
 				require.ErrorIs(t, d.Undecided, cause.err)
 				d.Undecided = nil
+				for _, st := range d.Stages {
+					assert.True(t, st.Skipped, "only the stages fixed before the failing one: %s", st.Level)
+				}
+				d.Stages = nil
 				assert.Equal(t, tc.want, d)
 				assert.Equal(t, tc.argv, args.Build(mustCLI(t, cfg, d.CLI), tc.req, d.Choice()).Argv)
 				assert.Len(t, client.AskCalls(), 1)
@@ -324,8 +303,12 @@ func TestRouteMalformedAnswers(t *testing.T) {
 		name    string
 		answers map[string]jev.Answer
 	}{
-		{name: "missing route answer", answers: map[string]jev.Answer{}},
-		{name: "choice outside the options", answers: map[string]jev.Answer{questionRoute: {Choice: "gpt-6.1-sol@high"}}},
+		{name: "missing stage answer", answers: map[string]jev.Answer{}},
+		{name: "choice outside the criteria", answers: map[string]jev.Answer{levelModel: {Choice: "gpt-6.1-sol",
+			Probabilities: map[string]float64{"claude-opus-5-5": 0.5, "claude-sonnet-5-5": 0.5, "claude-haiku-4-5": 0,
+				"claude-fable-5-1": 0}}}},
+		{name: "missing probability", answers: map[string]jev.Answer{levelModel: {Choice: "claude-opus-5-5",
+			Probabilities: map[string]float64{"claude-opus-5-5": 1}}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -337,7 +320,8 @@ func TestRouteMalformedAnswers(t *testing.T) {
 			d, err := r.Route(context.Background(), Eligible(cfg, cat, req), req, captured("x"))
 			require.NoError(t, err)
 			require.ErrorIs(t, d.Undecided, jev.ErrMalformed)
-			assert.Equal(t, Decision{CLI: "claude", Pinned: true, Undecided: d.Undecided}, d)
+			assert.Equal(t, Decision{CLI: "claude", Pinned: true, Undecided: d.Undecided,
+				Stages: []Stage{{Level: levelCLI, Choice: "claude", Skipped: true}}}, d)
 		})
 	}
 }

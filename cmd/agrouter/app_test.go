@@ -56,9 +56,10 @@ func helper() int {
 	return code
 }
 
-// fakeJev answers every route Choice with pick (which must be among the options sent), a complexity
-// Score with level normalized to 0 to 10, and every Noul with 0.5, and records each request's
-// state. With failDocs it rejects every doc request with a 400.
+// fakeJev answers each routing stage Choice with pick's part: its CLI, its model section or its
+// effort label (pick is an option id, "<section>@<effort>" or "<section>", or a CLI under model
+// passthrough), a complexity Score with level normalized to 0 to 10, and every Noul with 0.5, and
+// records each request's state. With failDocs it rejects every doc request with a 400.
 type fakeJev struct {
 	t        *testing.T
 	mu       sync.Mutex
@@ -66,6 +67,7 @@ type fakeJev struct {
 	level    string
 	failDocs bool
 	states   []string
+	stages   []string // the routing stage each Choice request asked, in order
 	srv      *httptest.Server
 }
 
@@ -81,8 +83,9 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 		Model     string          `json:"model"`
 		State     json.RawMessage `json:"state"`
 		Questions map[string]struct {
-			Type     string          `json:"type"`
-			Criteria json.RawMessage `json:"criteria"`
+			Type         string          `json:"type"`
+			Instructions json.RawMessage `json:"instructions"`
+			Criteria     json.RawMessage `json:"criteria"`
 		} `json:"questions"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -125,17 +128,41 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 		for name := range criteria {
 			probs[name] = 0
 		}
-		choice := pick
-		if _, ok := probs[pick]; !ok {
-			choice = level
-		}
+		choice := stagePick(id, pick, q.Instructions)
 		if _, ok := probs[choice]; !ok {
-			f.t.Errorf("fake jev: neither pick %q nor level %q is among the criteria sent", pick, level)
+			f.t.Errorf("fake jev: %s stage: pick %q (%q) is not among the criteria sent", id, pick, choice)
 		}
 		probs[choice] = 1
 		answers[id] = map[string]any{"type": q.Type, "choice": choice, "probabilities": probs, "confidence": 0.9}
+		f.mu.Lock()
+		f.stages = append(f.stages, id)
+		f.mu.Unlock()
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"model": req.Model, "answers": answers})
+}
+
+// stagePick is pick's criterion name at the stage asked under id. The cli stage finds the CLI
+// whose models in the instructions include pick's section; pick itself is a CLI under model passthrough.
+func stagePick(id, pick string, instructions json.RawMessage) string {
+	section, effort, _ := strings.Cut(pick, "@")
+	switch id {
+	case "model":
+		return section
+	case "effort":
+		return effort
+	}
+	var in struct {
+		CLIs map[string]struct {
+			Models map[string]json.RawMessage `json:"models"`
+		} `json:"clis"`
+	}
+	_ = json.Unmarshal(instructions, &in)
+	for cli, c := range in.CLIs {
+		if _, ok := c.Models[section]; ok {
+			return cli
+		}
+	}
+	return pick
 }
 
 func fakeScoreAnswer(criteria json.RawMessage, level string) (map[string]any, error) {
@@ -168,6 +195,22 @@ func (f *fakeJev) requests() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(f.states)
+}
+
+// asked lists the routing stages asked, one entry per Choice request.
+func (f *fakeJev) asked() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.stages)
+}
+
+// repeated is state sent once per stage request.
+func repeated(state string, n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = state
+	}
+	return out
 }
 
 // env is an isolated agrouter environment: its own global config dir, working directory, fake Jev
@@ -305,7 +348,8 @@ func TestApp_RalphexClaudeMode(t *testing.T) {
 		assert.Equal(t, []string{"-p", "--dangerously-skip-permissions", "--output-format", "stream-json",
 			"--model", "claude-sonnet-5-5", "--effort", "medium"}, argv)
 		assert.Equal(t, task, string(stdin))
-		assert.Equal(t, []string{`{"prompt":"implement task 3\nof the plan\n"}`}, e.jev.requests())
+		assert.Equal(t, repeated(`{"prompt":"implement task 3\nof the plan\n"}`, 2), e.jev.requests())
+		assert.Equal(t, []string{"model", "effort"}, e.jev.asked(), "--cli fixes the cli stage")
 		for _, kv := range environ {
 			assert.False(t, strings.HasPrefix(strings.ToUpper(kv), config.EnvAPIKey+"="), "API key reached the child")
 		}
@@ -388,7 +432,8 @@ func TestApp_Decision(t *testing.T) {
 			"cli": "claude", "model": "claude-sonnet-5-5", "effort": "low",
 			"confidence": map[string]any{"model_selection": 0.9},
 		}, decision(t, r.stdout))
-		assert.Equal(t, []string{`{"prompt":"fix the typo in README"}`}, e.jev.requests())
+		assert.Equal(t, repeated(`{"prompt":"fix the typo in README"}`, 3), e.jev.requests())
+		assert.Equal(t, []string{"cli", "model", "effort"}, e.jev.asked())
 	})
 
 	t.Run("mentioned file sent to Jev", func(t *testing.T) {
@@ -398,7 +443,7 @@ func TestApp_Decision(t *testing.T) {
 		r := e.run([]string{"summarize notes.md"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, []string{`{"prompt":"summarize notes.md","files":["use opus\n"]}`}, e.jev.requests())
+		assert.Equal(t, repeated(`{"prompt":"summarize notes.md","files":["use opus\n"]}`, 3), e.jev.requests())
 	})
 
 	t.Run("model without efforts: effort null", func(t *testing.T) {
@@ -458,7 +503,7 @@ func TestApp_Decision(t *testing.T) {
 			"--", "--add-dir", "RAWTOKEN"}, strings.NewReader("details on stdin"))
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, []string{`{"prompt":"plan the migration\n\ndetails on stdin"}`}, e.jev.requests())
+		assert.Equal(t, repeated(`{"prompt":"plan the migration\n\ndetails on stdin"}`, 2), e.jev.requests())
 		d := decision(t, r.stdout)
 		assert.Equal(t, strs("claude", "-p", "--permission-mode", "plan",
 			"--model", "claude-opus-5-5", "--effort", "high", "--add-dir", "RAWTOKEN", "--", "plan the migration"), d["argv"])
@@ -513,9 +558,9 @@ func TestApp_VerboseOutput(t *testing.T) {
 				if verbose {
 					assert.Contains(t, confidence, "route")
 					assert.Contains(t, confidence, "complexity_chunks")
-					assert.Equal(t, "fast@low", confidence["choice"])
+					assert.Equal(t, "low", confidence["choice"], "the last stage asked")
 					probabilities := confidence["probabilities"].(map[string]any)
-					assert.InDelta(t, 1, probabilities["fast@low"], 1e-9)
+					assert.InDelta(t, 1, probabilities["low"], 1e-9)
 					chunks := confidence["complexity_chunks"].([]any)
 					require.Len(t, chunks, 1)
 					assert.Subset(t, chunks[0], map[string]any{"index": float64(1), "of": float64(1),
@@ -727,7 +772,7 @@ func TestApp_PromptSources(t *testing.T) {
 				r := e.run(append([]string{"--verbose", "--cli=alpha"}, tc.argv...), stdin)
 
 				require.Equal(t, 0, r.code, r.stderr)
-				assert.Equal(t, []string{jevPrompt(t, tc.wantJev)}, e.jev.requests())
+				assert.Equal(t, repeated(jevPrompt(t, tc.wantJev), 2), e.jev.requests())
 				d := decision(t, r.stdout)
 				assert.Equal(t, tc.wantArgv, d["argv"], "the prompt last, after --; none without one")
 			})
@@ -742,7 +787,7 @@ func TestApp_PromptSources(t *testing.T) {
 			strings.NewReader("stdin text"))
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, []string{jevPrompt(t, "flag text\n\npositional text\n\nfile text\n\n\nstdin text")}, e.jev.requests())
+		assert.Equal(t, repeated(jevPrompt(t, "flag text\n\npositional text\n\nfile text\n\n\nstdin text"), 2), e.jev.requests())
 		assert.Equal(t, strs(helperCommand(t), "-p", "--model", "fast-1", "--effort", "low",
 			"--", "flag text\n\npositional text\n\nfile text\n"), decision(t, r.stdout)["argv"])
 	})
@@ -755,7 +800,7 @@ func TestApp_PromptSources(t *testing.T) {
 		r := e.run([]string{"--cli=alpha", "--prompt-file", "task.md"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, []string{`{"prompt":"follow notes.md","files":["use opus\n"]}`}, e.jev.requests())
+		assert.Equal(t, repeated(`{"prompt":"follow notes.md","files":["use opus\n"]}`, 2), e.jev.requests())
 	})
 
 	t.Run("exec: native child gets the explicit prompt in argv and stdin replayed", func(t *testing.T) {
@@ -786,10 +831,9 @@ func TestApp_Docs(t *testing.T) {
 		r := e.run([]string{"--cli=alpha", "--doc", "project.md", "fix it"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, []string{
-			`{"docs":["DOC TEXT, see notes.md\n"]}`,
-			`{"prompt":"fix it","project":{"complexity":8}}`,
-		}, e.jev.requests(), "the docs are not read for mentions and not resent")
+		assert.Equal(t, append([]string{`{"docs":["DOC TEXT, see notes.md\n"]}`},
+			repeated(`{"prompt":"fix it","project":{"complexity":8}}`, 2)...),
+			e.jev.requests(), "the docs are not read for mentions and not resent")
 		assert.Equal(t, "fast-1", decision(t, r.stdout)["model"])
 		assert.NotContains(t, r.stdout, "DOC TEXT")
 		assert.Equal(t, "8.0/10", decision(t, r.stdout)["project_complexity"])
@@ -802,7 +846,7 @@ func TestApp_Docs(t *testing.T) {
 		r := e.run([]string{"--cli=alpha", "fix it"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, []string{jevPrompt(t, "fix it")}, e.jev.requests())
+		assert.Equal(t, repeated(jevPrompt(t, "fix it"), 2), e.jev.requests())
 	})
 
 	t.Run("decision: an empty doc has nothing to score", func(t *testing.T) {
@@ -812,7 +856,7 @@ func TestApp_Docs(t *testing.T) {
 		r := e.run([]string{"--cli=alpha", "--doc", "empty.md", "fix it"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, []string{jevPrompt(t, "fix it")}, e.jev.requests())
+		assert.Equal(t, repeated(jevPrompt(t, "fix it"), 2), e.jev.requests())
 	})
 
 	t.Run("decision: one eligible option asks Jev nothing, docs or not", func(t *testing.T) {
@@ -1016,11 +1060,17 @@ func TestApp_Exec(t *testing.T) {
 		chunks, ok := confidence["routing_chunks"].([]any)
 		require.True(t, ok)
 		require.Len(t, chunks, len(e.jev.requests()))
+		// --cli fixes the cli stage; the model and effort stages each pool every chunk
+		perStage := len(chunks) / 2
 		for i, chunk := range chunks {
-			assert.Subset(t, chunk, map[string]any{"field": "prompt", "index": float64(i + 1),
-				"of": float64(len(chunks)), "confidence": 0.9, "choice": e.jev.pick, "relevance": 0.5})
+			choice := "claude-sonnet-5-5"
+			if i >= perStage {
+				choice = "low"
+			}
+			assert.Subset(t, chunk, map[string]any{"field": "prompt", "index": float64(i%perStage + 1),
+				"of": float64(perStage), "confidence": 0.9, "choice": choice, "relevance": 0.5})
 			probabilities := chunk.(map[string]any)["probabilities"].(map[string]any)
-			assert.InDelta(t, 1, probabilities[e.jev.pick], 1e-9)
+			assert.InDelta(t, 1, probabilities[choice], 1e-9)
 		}
 		assert.Subset(t, log, map[string]any{"cli": "claude", "model": "claude-sonnet-5-5", "effort": "low", "confidence": confidence})
 	})
@@ -1107,7 +1157,7 @@ func TestApp_ConfigDrivenNames(t *testing.T) {
 			assert.Equal(t, []string{"run", "--quiet", "--events", "ndjson", "--mode", "read",
 				"--llm", tc.model, "--think=" + tc.effort, "--", "do it now"}, got)
 			assert.Equal(t, stdin, string(gotStdin))
-			require.Len(t, e.jev.requests(), 1)
+			require.Len(t, e.jev.requests(), 2, "one CLI: model and effort asked")
 
 			r = e.run([]string{"--verbose", "--cli", tc.cli, "--model", "preferred", "--effort", tc.effort, "do it"}, nil)
 			require.Equal(t, 0, r.code, r.stderr)
@@ -1117,7 +1167,7 @@ func TestApp_ConfigDrivenNames(t *testing.T) {
 			assert.Equal(t, tc.effort, d["effort"])
 			assert.Equal(t, strs(helperCommand(t), "run", "--quiet", "--llm", tc.model,
 				"--think="+tc.effort, "--", "do it"), d["argv"])
-			assert.Len(t, e.jev.requests(), 1, "a model alias plus an effort selects one option without Jev")
+			assert.Len(t, e.jev.requests(), 2, "a model alias plus an effort selects one option without Jev")
 		})
 	}
 }

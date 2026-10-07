@@ -213,12 +213,15 @@ func runEvalCase(ctx context.Context, r *Router, cfg *config.Config, cat *catalo
 	}
 	res.Chosen = d.OptionID
 	res.Correct = slices.Contains(c.Acceptable, d.OptionID)
-	res.Split = d.Pooled != nil
 	if d.Complexity != nil {
 		res.Project = fmt.Sprintf("%.1f", d.Complexity.Complexity)
 	}
-	if d.Answer != nil {
-		res.Confidence = d.Answer.Confidence
+	// the last stage asked reports, until the eval reports confidence per stage
+	for _, st := range d.Stages {
+		res.Split = res.Split || st.Pooled != nil
+		if st.Answer != nil {
+			res.Confidence = st.Answer.Confidence
+		}
 	}
 	res.Duration = time.Since(start)
 	return res
