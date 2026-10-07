@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/SvetlovA/agrouter/pkg/catalog"
+	"github.com/SvetlovA/agrouter/pkg/config"
 	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 )
@@ -75,4 +77,22 @@ func TestComplexityGoldenRequest(t *testing.T) {
 			assert.Equal(t, string(want), string(got)+"\n")
 		})
 	}
+}
+
+func TestNewTreeKeepsSeparatorNamesApart(t *testing.T) {
+	cfg := &config.Config{
+		CLIs: []config.CLI{{Name: "a", Command: "a"}, {Name: "a/b", Command: "ab"}},
+		Models: []config.Model{
+			{Section: "b/c", CLI: "a", Name: "first-model", Efforts: []string{"low"}, Description: "First."},
+			{Section: "c", CLI: "a/b", Name: "second-model", Efforts: []string{"high"}, Description: "Second."},
+		},
+	}
+	cat, err := catalog.Build(cfg)
+	require.NoError(t, err)
+
+	tr := newTree(cfg, cat.Options, "")
+	assert.Equal(t, jev.Criteria{{Name: "b/c", Value: modelEntry{Description: "First.", Efforts: []string{"low"}}}},
+		tr.modelCriteria("a"))
+	assert.Equal(t, jev.Criteria{{Name: "c", Value: modelEntry{Description: "Second.", Efforts: []string{"high"}}}},
+		tr.modelCriteria("a/b"))
 }

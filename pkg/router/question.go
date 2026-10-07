@@ -133,9 +133,9 @@ type instructions struct {
 // policy and the options below the criteria, once: by CLI for the cli stage, by model otherwise.
 type stageInstructions struct {
 	instructions
-	CLIs     jev.Criteria `json:"clis,omitempty"`
-	Models   jev.Criteria `json:"models,omitempty"`
-	Efforts  jev.Criteria `json:"efforts"`
+	CLIs    jev.Criteria `json:"clis,omitempty"`
+	Models  jev.Criteria `json:"models,omitempty"`
+	Efforts jev.Criteria `json:"efforts"`
 }
 
 // cliEntry describes one CLI of the cli stage and the models it can run.
@@ -191,26 +191,30 @@ func stageQuestion(cfg *config.Config, lv level, guide string, gs []group, effor
 // effort labels, and each CLI's effort descriptions.
 type tree struct {
 	clis    []string
-	models  map[string][]string     // cli -> model stage criterion names (modelLabel)
-	entries map[string]*modelEntry  // cli + "/" + criterion name -> its entry
-	efforts map[string]jev.Criteria // cli -> its effort descriptions
+	models  map[string][]string      // cli -> model stage criterion names (modelLabel)
+	entries map[modelKey]*modelEntry // cli and model stage criterion name -> its entry
+	efforts map[string]jev.Criteria  // cli -> its effort descriptions
 }
+
+// modelKey is a model stage criterion under its CLI; a struct, since names may hold any separator.
+type modelKey struct{ cli, name string }
 
 func newTree(cfg *config.Config, opts []catalog.Option, effort string) *tree {
 	models := make(map[string]config.Model, len(cfg.Models))
 	for _, m := range cfg.Models {
 		models[m.Name] = m
 	}
-	t := &tree{models: map[string][]string{}, entries: map[string]*modelEntry{}, efforts: map[string]jev.Criteria{}}
+	t := &tree{models: map[string][]string{}, entries: map[modelKey]*modelEntry{}, efforts: map[string]jev.Criteria{}}
 	for _, o := range opts {
 		if _, ok := t.models[o.CLI]; !ok {
 			t.clis = append(t.clis, o.CLI)
 		}
 		name := modelLabel(o)
-		e, ok := t.entries[o.CLI+"/"+name]
+		key := modelKey{o.CLI, name}
+		e, ok := t.entries[key]
 		if !ok {
 			e = &modelEntry{Description: modelDescription(models, o), Efforts: []string{}}
-			t.entries[o.CLI+"/"+name] = e
+			t.entries[key] = e
 			t.models[o.CLI] = append(t.models[o.CLI], name)
 		}
 		label := optionEffort(o, effort)
@@ -230,7 +234,7 @@ func newTree(cfg *config.Config, opts []catalog.Option, effort string) *tree {
 func (t *tree) modelCriteria(cli string) jev.Criteria {
 	out := make(jev.Criteria, 0, len(t.models[cli]))
 	for _, name := range t.models[cli] {
-		out = append(out, jev.Criterion{Name: name, Value: *t.entries[cli+"/"+name]})
+		out = append(out, jev.Criterion{Name: name, Value: *t.entries[modelKey{cli, name}]})
 	}
 	return out
 }
