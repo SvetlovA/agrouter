@@ -292,10 +292,11 @@ The config file shrinks to two short paragraphs. The comments that described sta
 **Files:**
 - Modify: `pkg/router/evalcase_test.go`, `pkg/router/eval_test.go`, `pkg/router/evalcase_load_test.go`
 
-- [ ] read the decision from `Decision.Stages`: correctness on `OptionID`, split detection from any pooled stage, per-stage confidence
-- [ ] report accuracy, latency per case and in total, and the confidence distribution per stage (labelled conditional)
-- [ ] update the untagged eval-case and load tests that run in `make test`; `eval_test.go` is the only `eval`-tagged file
-- [ ] run `make test` and `go vet -tags eval ./...` - must pass before task 8
+- [x] read the decision from `Decision.Stages`: correctness on `OptionID`, split detection from any pooled stage, per-stage confidence
+- [x] report accuracy, latency per case and in total, and the confidence distribution per stage (labelled conditional)
+- [x] update the untagged eval-case and load tests that run in `make test`; `eval_test.go` is the only `eval`-tagged file
+- ➕ a stage counts as correct when its choice keeps an acceptable option, given the stages before it; pooled stages count in the distribution with their chunk mean, as in the decision JSON
+- [x] run `make test` and `go vet -tags eval ./...` - must pass before task 8
 
 ### Task 8: Verify acceptance criteria
 - [ ] verify every Overview item: three stages with skipping, passed values fixing their stage, two policy keys, removed-key errors, per-stage confidence

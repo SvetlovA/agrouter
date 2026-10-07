@@ -8,10 +8,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/SvetlovA/agrouter/pkg/catalog"
 	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 	"github.com/SvetlovA/agrouter/pkg/router/mocks"
@@ -195,7 +197,8 @@ func TestRunEvalCase(t *testing.T) {
 		require.NoError(t, res.Err)
 		assert.True(t, res.Correct)
 		assert.False(t, res.Split)
-		assert.InDelta(t, 0.8, res.Confidence, 1e-9)
+		assert.Equal(t, []evalStage{{Level: LevelCLI, Confidence: 0.8, Correct: true},
+			{Level: LevelModel, Confidence: 0.8, Correct: true}}, res.Stages, "the effort stage is skipped")
 		require.Len(t, client.AskCalls(), 2, "the cli and model stages; haiku has no efforts")
 		for _, call := range client.AskCalls() {
 			assert.Equal(t, []string{"Call get() here.\n"}, call.Req.State.(prompt.State).Files)
@@ -228,6 +231,10 @@ func TestRunEvalCase(t *testing.T) {
 		require.NoError(t, res.Err)
 		assert.False(t, res.Correct)
 		assert.Equal(t, "gpt-6-astra@ultra", res.Chosen)
+		require.NotEmpty(t, res.Stages)
+		for _, st := range res.Stages {
+			assert.False(t, st.Correct, st.Level)
+		}
 	})
 
 	t.Run("jev failing with the CLI known is an error, not a guess", func(t *testing.T) {
@@ -252,39 +259,109 @@ func TestRunEvalCase(t *testing.T) {
 		for _, c := range cases {
 			res := runEvalCase(ctx, r, cfg, cat, c, t.TempDir())
 			require.NoError(t, res.Err, c.Name)
-			assert.Equal(t, strings.HasPrefix(c.Name, "oversized") || strings.HasPrefix(c.Name, "distant"), res.Split, c.Name)
+			split := strings.HasPrefix(c.Name, "oversized") || strings.HasPrefix(c.Name, "distant")
+			assert.Equal(t, split, res.Split, c.Name)
+			for _, st := range res.Stages {
+				assert.Equal(t, split, st.Pooled, "%s %s", c.Name, st.Level)
+				assert.InDelta(t, 0.8, st.Confidence, 1e-9, "%s %s: pooled stages report the chunk mean", c.Name, st.Level)
+			}
 		}
 	})
 }
 
+func TestEvalStages(t *testing.T) {
+	a := catalog.Option{ID: "m1@low", CLI: "c1", Section: "m1", Effort: "low"}
+	b := catalog.Option{ID: "m1@high", CLI: "c1", Section: "m1", Effort: "high"}
+	c := catalog.Option{ID: "m2", CLI: "c2", Section: "m2"}
+	asked := func(level, choice string, confidence float64) Stage {
+		return Stage{Level: level, Choice: choice, Answer: &jev.Answer{Confidence: confidence}}
+	}
+	pooled := Stage{Level: LevelEffort, Choice: "high", Pooled: &Pooled{Chunks: []ChunkResult{{Confidence: 0.2}, {Confidence: 0.6}}}}
+
+	tests := map[string]struct {
+		stages     []Stage
+		acceptable []catalog.Option
+		want       []evalStage
+	}{
+		"all asked and right": {
+			stages:     []Stage{asked(LevelCLI, "c1", 0.9), asked(LevelModel, "m1", 0.5), asked(LevelEffort, "low", 0.3)},
+			acceptable: []catalog.Option{a, c},
+			want: []evalStage{{Level: LevelCLI, Confidence: 0.9, Correct: true},
+				{Level: LevelModel, Confidence: 0.5, Correct: true}, {Level: LevelEffort, Confidence: 0.3, Correct: true}},
+		},
+		"a wrong stage makes every later stage wrong": {
+			stages:     []Stage{asked(LevelCLI, "c1", 0.9), asked(LevelModel, "m1", 0.5), asked(LevelEffort, "low", 0.3)},
+			acceptable: []catalog.Option{c},
+			want: []evalStage{{Level: LevelCLI, Confidence: 0.9}, {Level: LevelModel, Confidence: 0.5},
+				{Level: LevelEffort, Confidence: 0.3}},
+		},
+		"skipped stages narrow but are not reported; pooled stages report the chunk mean": {
+			stages: []Stage{{Level: LevelCLI, Choice: "c1", Skipped: true}, {Level: LevelModel, Choice: "m1", Skipped: true},
+				pooled},
+			acceptable: []catalog.Option{a, b},
+			want:       []evalStage{{Level: LevelEffort, Confidence: 0.4, Pooled: true, Correct: true}},
+		},
+		"the effort of the wrong option": {
+			stages:     []Stage{asked(LevelEffort, "high", 0.7)},
+			acceptable: []catalog.Option{a},
+			want:       []evalStage{{Level: LevelEffort, Confidence: 0.7}},
+		},
+		"no stages": {acceptable: []catalog.Option{a}},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := evalStages(tt.stages, tt.acceptable)
+			require.Len(t, got, len(tt.want))
+			for i := range tt.want {
+				assert.Equal(t, tt.want[i].Level, got[i].Level)
+				assert.InDelta(t, tt.want[i].Confidence, got[i].Confidence, 1e-9)
+				assert.Equal(t, tt.want[i].Pooled, got[i].Pooled)
+				assert.Equal(t, tt.want[i].Correct, got[i].Correct)
+			}
+		})
+	}
+}
+
 func TestScoreEval(t *testing.T) {
 	results := []evalResult{
-		{Case: "a", Chosen: "x", Correct: true, Confidence: 0.95},
-		{Case: "b", Chosen: "x", Correct: true, Confidence: 1},
-		{Case: "c", Chosen: "y", Confidence: 0.42},
-		{Case: "d", Chosen: "x", Correct: true, Split: true},
-		{Case: "e", Err: errors.New("timeout")},
-		{Case: "f", Chosen: "x", Correct: true, Confidence: 0.9, Project: "6.9"},
+		{Case: "a", Chosen: "x", Correct: true, Duration: time.Second,
+			Stages: []evalStage{{Level: LevelCLI, Confidence: 0.95, Correct: true}, {Level: LevelModel, Confidence: 0.45, Correct: true}}},
+		{Case: "b", Chosen: "x", Correct: true, Stages: []evalStage{{Level: LevelModel, Confidence: 1, Correct: true}}},
+		{Case: "c", Chosen: "y", Duration: 2 * time.Second,
+			Stages: []evalStage{{Level: LevelCLI, Confidence: 0.97, Correct: true}, {Level: LevelModel, Confidence: 0.42}}},
+		{Case: "d", Chosen: "x", Correct: true, Split: true,
+			Stages: []evalStage{{Level: LevelEffort, Confidence: 0.3, Pooled: true, Correct: true}}},
+		{Case: "e", Err: errors.New("timeout"), Duration: 3 * time.Second},
+		{Case: "f", Chosen: "x", Correct: true, Project: "6.9"},
 		{Case: "g", Err: errors.New("cannot decide"), Project: "2.0"},
 	}
 	rep := scoreEval(results)
 	assert.Equal(t, 7, rep.Total)
 	assert.Equal(t, 4, rep.Correct)
 	assert.Equal(t, 2, rep.Errors)
+	assert.Equal(t, 6*time.Second, rep.Duration)
 	assert.InDelta(t, 4.0/7, rep.Accuracy(), 1e-9)
-	assert.Equal(t, 3, rep.CorrectBuckets[9], "1.0 falls in the top decile")
-	assert.Equal(t, 1, rep.WrongBuckets[4])
-	assert.Equal(t, "accuracy 4/7 (57.1%), 2 error(s)\nconfidence  correct  wrong\n"+
-		"0.4-0.5         0      1\n0.9-1.0         3      0\n", rep.String())
+	assert.Equal(t, 2, rep.Levels[LevelCLI].Correct[9])
+	assert.Equal(t, 1, rep.Levels[LevelModel].Correct[9], "1.0 falls in the top decile")
+	assert.Equal(t, 1, rep.Levels[LevelModel].Wrong[4])
+	assert.Equal(t, "accuracy 4/7 (57.1%), 2 error(s), latency 6s total, 857ms per case\n"+
+		"cli confidence (conditional)  correct  wrong\n"+
+		"  0.9-1.0         2      0\n"+
+		"model confidence (conditional)  correct  wrong\n"+
+		"  0.4-0.5         1      1\n"+
+		"  0.9-1.0         1      0\n"+
+		"effort confidence (conditional)  correct  wrong\n"+
+		"  0.3-0.4         1      0\n", rep.String())
 	assert.Zero(t, evalReport{}.Accuracy())
+	assert.Equal(t, "accuracy 0/0 (0.0%), 0 error(s), latency 0s total\n", evalReport{}.String())
 
 	assert.Equal(t, []string{
-		"ERROR e: timeout",
-		"ERROR g: cannot decide",
-		"WRONG c: y confidence 0.420 in 0s",
-		"ok    a: x confidence 0.950 in 0s",
-		"ok    b: x confidence 1.000 in 0s",
-		"ok    d: x (split) in 0s",
-		"ok    f: x confidence 0.900 in 0s, project 6.9",
+		"ERROR e: timeout in 3s",
+		"ERROR g: cannot decide in 0s",
+		"WRONG c: y, cli 0.970, model 0.420 in 2s",
+		"ok    a: x, cli 0.950, model 0.450 in 1s",
+		"ok    b: x, model 1.000 in 0s",
+		"ok    d: x, effort 0.300 (split) in 0s",
+		"ok    f: x in 0s, project 6.9",
 	}, resultLines(results))
 }
