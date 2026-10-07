@@ -222,20 +222,15 @@ func TestRunEvalCase(t *testing.T) {
 		require.ErrorIs(t, res.Err, ErrCannotDecide)
 	})
 
-	t.Run("every seed case routes, and the oversized ones are split, with both encodings", func(t *testing.T) {
+	t.Run("every seed case routes, and the oversized ones are split", func(t *testing.T) {
 		cases, err := loadEvalCases(evalDir, cat)
 		require.NoError(t, err)
-		for _, enc := range []Encoding{EncodingCompact, EncodingFull} {
-			cfg, cat := embedded(t)
-			evalQuestions(cfg, enc)
-			r, err := New(cfg, cat, evalMock("claude-opus-5-5@high"), enc)
-			require.NoError(t, err)
-			for _, c := range cases {
-				res := runEvalCase(ctx, r, cfg, cat, c, t.TempDir())
-				require.NoError(t, res.Err, "%s %s", enc, c.Name)
-				assert.Equal(t, strings.HasPrefix(c.Name, "oversized") || strings.HasPrefix(c.Name, "distant"), res.Split,
-					"%s %s", enc, c.Name)
-			}
+		r, err := New(cfg, cat, evalMock("claude-opus-5-5@high"))
+		require.NoError(t, err)
+		for _, c := range cases {
+			res := runEvalCase(ctx, r, cfg, cat, c, t.TempDir())
+			require.NoError(t, res.Err, c.Name)
+			assert.Equal(t, strings.HasPrefix(c.Name, "oversized") || strings.HasPrefix(c.Name, "distant"), res.Split, c.Name)
 		}
 	})
 }
@@ -270,16 +265,4 @@ func TestScoreEval(t *testing.T) {
 		"ok    d: x (split) in 0s",
 		"ok    f: x confidence 0.900 in 0s, project 6.9",
 	}, resultLines(results))
-}
-
-func TestEvalQuestions(t *testing.T) {
-	cfg, _ := embedded(t)
-	q := cfg.Agrouter.Question
-	evalQuestions(cfg, EncodingCompact)
-	assert.Equal(t, q, cfg.Agrouter.Question)
-
-	evalQuestions(cfg, EncodingFull)
-	assert.NotContains(t, cfg.Agrouter.Question, "Look up")
-	assert.NotContains(t, cfg.Agrouter.ChunkQuestion, "Look up")
-	assert.True(t, strings.HasPrefix(q, cfg.Agrouter.Question))
 }

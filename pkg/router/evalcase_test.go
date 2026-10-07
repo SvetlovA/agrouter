@@ -306,16 +306,3 @@ func mark(ok bool) string {
 	}
 	return "WRONG"
 }
-
-// evalQuestions adapts the configured questions to enc: the full encoding has no instructions
-// object to look options up in, so the sentence pointing there is dropped.
-func evalQuestions(cfg *config.Config, enc Encoding) {
-	if enc != EncodingFull {
-		return
-	}
-	for _, q := range []*string{&cfg.Agrouter.Question, &cfg.Agrouter.ChunkQuestion} {
-		if i := strings.Index(*q, " Look up each option"); i >= 0 {
-			*q = (*q)[:i]
-		}
-	}
-}

@@ -152,7 +152,7 @@ func (a *app) setup(req *args.Request) (*config.Config, *catalog.Catalog, *route
 	}
 	key, source := config.ResolveAPIKey(req.APIKey.Value, req.APIKey.Set, a.getenv(config.EnvAPIKey), cfg.Agrouter)
 	a.debug.apiKey(key, source)
-	rt, err := router.New(cfg, cat, a.newJev(key), router.EncodingCompact)
+	rt, err := router.New(cfg, cat, a.newJev(key))
 	if err != nil {
 		return nil, nil, nil, err
 	}

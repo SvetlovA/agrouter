@@ -18,27 +18,6 @@ const (
 	questionEvidence   = "complexity_evidence"
 )
 
-// Encoding selects how the catalog goes into the route question.
-type Encoding int
-
-// Encodings of the route question.
-const (
-	// EncodingCompact puts the descriptions once in a structured instructions object; each option's
-	// criterion names its cli, model and effort.
-	EncodingCompact Encoding = iota
-	// EncodingFull puts the question alone in instructions and each option's full cli, model and
-	// effort descriptions in its own criterion; larger, kept for the routing evaluation to compare.
-	EncodingFull
-)
-
-// String names the encoding, for debug and evaluation output.
-func (e Encoding) String() string {
-	if e == EncodingFull {
-		return "full"
-	}
-	return "compact"
-}
-
 // Criterion values for an option without an effort.
 const (
 	effortNone       = "none (not supported)"
@@ -73,14 +52,14 @@ const (
 	evidenceFalse = "the text is only style rules, workflow instructions or other content that says nothing about the project itself"
 )
 
-// routeCriterion is one option's criterion in the compact encoding.
+// routeCriterion is one option's criterion: its cli, model and effort, described in the instructions.
 type routeCriterion struct {
 	CLI    string `json:"cli"`
 	Model  string `json:"model"`
 	Effort string `json:"effort"`
 }
 
-// routeInstructions is the compact encoding's instructions: the question and the catalog, once.
+// routeInstructions is the route question's instructions: the question and the catalog, once.
 type routeInstructions struct {
 	Question string       `json:"question"`
 	CLIs     jev.Criteria `json:"clis"`
@@ -90,13 +69,10 @@ type routeInstructions struct {
 
 // routeQuestion is the joint Choice over opts, which must all come from cfg. effort is the
 // caller's passed-through effort, used for options without one of their own.
-func routeQuestion(cfg *config.Config, text string, opts []catalog.Option, effort string, enc Encoding) jev.Question {
+func routeQuestion(cfg *config.Config, text string, opts []catalog.Option, effort string) jev.Question {
 	models := make(map[string]config.Model, len(cfg.Models))
 	for _, m := range cfg.Models {
 		models[m.Name] = m
-	}
-	if enc == EncodingFull {
-		return fullRouteQuestion(cfg, models, text, opts, effort)
 	}
 	in := routeInstructions{Question: text}
 	criteria := make(jev.Criteria, 0, len(opts))
@@ -127,24 +103,6 @@ func routeQuestion(cfg *config.Config, text string, opts []catalog.Option, effor
 		in.Efforts = append(in.Efforts, jev.Criterion{Name: cli, Value: levels[cli]})
 	}
 	return jev.Question{Type: jev.TypeChoice, Instructions: in, Criteria: criteria}
-}
-
-// fullRouteQuestion is the route question in EncodingFull: each criterion describes its option in
-// full, so no criterion refers to the instructions.
-func fullRouteQuestion(cfg *config.Config, models map[string]config.Model, text string, opts []catalog.Option,
-	effort string) jev.Question {
-	criteria := make(jev.Criteria, 0, len(opts))
-	for _, o := range opts {
-		cli, _ := cfg.CLIByName(o.CLI)
-		desc := fmt.Sprintf("CLI %s: %s\nModel %s: %s\n", o.CLI, cli.Description, o.Name, modelDescription(models, o))
-		if eff := optionEffort(o, effort); eff == "" {
-			desc += "Effort: " + noEffortLabel(models, o)
-		} else {
-			desc += fmt.Sprintf("Effort %s: %s", eff, effortDescription(cfg, o.CLI, eff))
-		}
-		criteria = append(criteria, jev.Criterion{Name: o.ID, Value: desc})
-	}
-	return jev.Question{Type: jev.TypeChoice, Instructions: text, Criteria: criteria}
 }
 
 // relevanceQuestion is the Noul asked beside the route question in a chunk request.
@@ -211,11 +169,11 @@ func has(obj jev.Criteria, name string) bool {
 
 // budget derives the state budgets from the questions over the whole catalog, the largest they can
 // be, so eligibility only ever shrinks them. Questions leaving too little room are a config error.
-func budget(cfg *config.Config, cat *catalog.Catalog, enc Encoding) (prompt.Budget, error) {
+func budget(cfg *config.Config, cat *catalog.Catalog) (prompt.Budget, error) {
 	ag := cfg.Agrouter
 	sizes := prompt.Questions{
-		Route:      questionLen(questionRoute, routeQuestion(cfg, ag.Question, cat.Options, "", enc)),
-		ChunkRoute: questionLen(questionRoute, routeQuestion(cfg, ag.ChunkQuestion, cat.Options, "", enc)),
+		Route:      questionLen(questionRoute, routeQuestion(cfg, ag.Question, cat.Options, "")),
+		ChunkRoute: questionLen(questionRoute, routeQuestion(cfg, ag.ChunkQuestion, cat.Options, "")),
 		Relevance:  questionLen(questionRelevance, relevanceQuestion(ag.Relevance)),
 		Complexity: questionLen(questionComplexity, complexityQuestion(ag.ComplexityQuestion)),
 		Evidence:   questionLen(questionEvidence, evidenceQuestion(ag.ComplexityEvidence)),

@@ -174,11 +174,11 @@ The config file shrinks to two short paragraphs. The comments that described sta
 - Modify: `pkg/router/router_test.go`, `pkg/router/question_test.go`
 - Delete: `pkg/router/testdata/request_full_*.json`
 
-- [ ] delete `Encoding`, `EncodingFull`, `fullRouteQuestion`, `Router.enc` and the `enc` parameter from `New`, `routeQuestion` (also the call in `pool.go:80`) and `budget`; update the call site in `cmd/agrouter`
-- [ ] remove the encoding loop from the eval test, keeping accuracy, confidence distribution and latency reporting
-- [ ] delete the full-encoding goldens and their test cases
-- [ ] update the remaining tests that passed an encoding
-- [ ] run `make test` and `go vet -tags eval ./pkg/router` - must pass before task 2
+- [x] delete `Encoding`, `EncodingFull`, `fullRouteQuestion`, `Router.enc` and the `enc` parameter from `New`, `routeQuestion` (also the call in `pool.go:80`) and `budget`; update the call site in `cmd/agrouter`
+- [x] remove the encoding loop from the eval test, keeping accuracy, confidence distribution and latency reporting
+- [x] delete the full-encoding goldens and their test cases
+- [x] update the remaining tests that passed an encoding
+- [x] run `make test` and `go vet -tags eval ./pkg/router` - must pass before task 2
 
 ### Task 2: Replace the question keys with `routing_policy` and `complexity_policy`
 

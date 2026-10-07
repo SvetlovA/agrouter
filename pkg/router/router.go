@@ -28,18 +28,17 @@ var ErrCannotDecide = errors.New("jev cannot decide")
 type Router struct {
 	cfg    *config.Config
 	jev    JevClient
-	enc    Encoding
 	budget prompt.Budget
 }
 
 // New checks the questions against Jev's budget over the whole catalog and returns a router asking
 // client. A question over budget is a config error.
-func New(cfg *config.Config, cat *catalog.Catalog, client JevClient, enc Encoding) (*Router, error) {
-	b, err := budget(cfg, cat, enc)
+func New(cfg *config.Config, cat *catalog.Catalog, client JevClient) (*Router, error) {
+	b, err := budget(cfg, cat)
 	if err != nil {
 		return nil, err
 	}
-	return &Router{cfg: cfg, jev: client, enc: enc, budget: b}, nil
+	return &Router{cfg: cfg, jev: client, budget: b}, nil
 }
 
 // Decision is what runs: the CLI, and the model and effort to emit through its templates.
@@ -125,7 +124,7 @@ func (r *Router) ask(ctx context.Context, el *Eligibility, state prompt.State) (
 		Model: r.cfg.Agrouter.JevModel,
 		State: state,
 		Questions: map[string]jev.Question{
-			questionRoute: routeQuestion(r.cfg, r.cfg.Agrouter.Question, el.Options, el.effort, r.enc),
+			questionRoute: routeQuestion(r.cfg, r.cfg.Agrouter.Question, el.Options, el.effort),
 		},
 	}
 	answers, err := r.jev.Ask(ctx, req)

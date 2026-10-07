@@ -77,7 +77,7 @@ func (r *Router) single(ctx context.Context, el *Eligibility, captured *prompt.R
 func (r *Router) pooled(ctx context.Context, el *Eligibility, split *prompt.Split, resplit bool) (outcome, error) {
 	ag := r.cfg.Agrouter
 	questions := map[string]jev.Question{
-		questionRoute:     routeQuestion(r.cfg, ag.ChunkQuestion, el.Options, el.effort, r.enc),
+		questionRoute:     routeQuestion(r.cfg, ag.ChunkQuestion, el.Options, el.effort),
 		questionRelevance: relevanceQuestion(ag.Relevance),
 	}
 	f := fanout[prompt.Chunk, routeAnswer]{

@@ -57,7 +57,7 @@ func requestFixture(t *testing.T) (*config.Config, *catalog.Catalog) {
 
 func newRouter(t *testing.T, cfg *config.Config, cat *catalog.Catalog, client JevClient) *Router {
 	t.Helper()
-	r, err := New(cfg, cat, client, EncodingCompact)
+	r, err := New(cfg, cat, client)
 	require.NoError(t, err)
 	return r
 }
@@ -138,23 +138,17 @@ func TestRouteGoldenRequest(t *testing.T) {
 		name   string
 		req    *args.Request
 		choice string
-		enc    Encoding
 	}{
 		{name: "all", req: &args.Request{}, choice: "fast"},
-		{name: "full_cli_beta", req: &args.Request{CLI: "beta"}, choice: "worker@low", enc: EncodingFull},
-		{name: "full_effort_passthrough", req: &args.Request{CLI: "alpha", Effort: "turbo", EffortSource: args.SourceFlag},
-			choice: "fast", enc: EncodingFull},
 		{name: "cli_alpha", req: &args.Request{CLI: "alpha"}, choice: "fast"},
 		{name: "effort_passthrough", req: &args.Request{CLI: "alpha", Effort: "turbo", EffortSource: args.SourceFlag},
 			choice: "fast"},
 		{name: "model_passthrough", req: &args.Request{Model: "unknown-model", ModelSource: args.SourceFlag}, choice: "beta"},
-		{name: "full_model_passthrough", req: &args.Request{Model: "unknown-model", ModelSource: args.SourceFlag},
-			choice: "beta", enc: EncodingFull},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			client := answering(tc.choice)
-			r, err := New(cfg, cat, client, tc.enc)
+			r, err := New(cfg, cat, client)
 			require.NoError(t, err)
 			el := Eligible(cfg, cat, tc.req)
 			captured := &prompt.Result{Prompt: "fix the flaky test in pkg/foo/foo_test.go", Files: []string{"package foo\n"},
@@ -180,7 +174,7 @@ func TestRouteQuestionContents(t *testing.T) {
 	cfg, cat := embedded(t)
 	req := &args.Request{CLI: "claude"}
 	el := Eligible(cfg, cat, req)
-	q := routeQuestion(cfg, "Q?", el.Options, "", EncodingCompact)
+	q := routeQuestion(cfg, "Q?", el.Options, "")
 
 	in, ok := q.Instructions.(routeInstructions)
 	require.True(t, ok)
@@ -195,32 +189,6 @@ func TestRouteQuestionContents(t *testing.T) {
 	}
 }
 
-func TestFullEncodingCriteria(t *testing.T) {
-	cfg, cat := embedded(t)
-	el := Eligible(cfg, cat, &args.Request{})
-	q := routeQuestion(cfg, "Q?", el.Options, "", EncodingFull)
-
-	assert.Equal(t, "Q?", q.Instructions)
-	assert.Equal(t, ids(el.Options), q.Criteria.Names())
-	for _, c := range q.Criteria {
-		desc, ok := c.Value.(string)
-		require.True(t, ok)
-		assert.Contains(t, desc, "CLI ")
-		assert.Contains(t, desc, "Model ")
-		if c.Name == "claude-haiku-4-5" {
-			assert.Contains(t, desc, "Effort: "+effortNone)
-		}
-	}
-	assert.Equal(t, "full", EncodingFull.String())
-	assert.Equal(t, "compact", EncodingCompact.String())
-
-	// the full encoding is larger but still fits the budget over the whole catalog
-	_, err := New(cfg, cat, &mocks.JevClientMock{}, EncodingFull)
-	require.NoError(t, err)
-	assert.Greater(t, questionLen(questionRoute, routeQuestion(cfg, "Q?", cat.Options, "", EncodingFull)),
-		questionLen(questionRoute, routeQuestion(cfg, "Q?", cat.Options, "", EncodingCompact)))
-}
-
 func TestNewQuestionOverBudget(t *testing.T) {
 	long := strings.Repeat("x", 100_000)
 	for _, key := range []string{"question", "chunk_question", "relevance", "complexity_question", "complexity_evidence"} {
@@ -232,7 +200,7 @@ func TestNewQuestionOverBudget(t *testing.T) {
 			cat, err := catalog.Build(cfg)
 			require.NoError(t, err)
 
-			_, err = New(cfg, cat, &mocks.JevClientMock{}, EncodingCompact)
+			_, err = New(cfg, cat, &mocks.JevClientMock{})
 			require.ErrorIs(t, err, prompt.ErrQuestionsOverBudget)
 			assert.Contains(t, err.Error(), "config:")
 		})
