@@ -134,7 +134,12 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 		for name := range criteria {
 			probs[name] = 0
 		}
-		choice := stagePick(id, pick, q.Instructions)
+		choice, err := stagePick(id, pick, q.Instructions)
+		if err != nil {
+			f.t.Errorf("fake jev: %s stage: decode instructions: %v", id, err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		if _, ok := probs[choice]; !ok {
 			f.t.Errorf("fake jev: %s stage: pick %q (%q) is not among the criteria sent", id, pick, choice)
 		}
@@ -149,26 +154,28 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 
 // stagePick is pick's criterion name at the stage asked under id. The cli stage finds the CLI
 // whose models in the instructions include pick's section; pick itself is a CLI under model passthrough.
-func stagePick(id, pick string, instructions json.RawMessage) string {
+func stagePick(id, pick string, instructions json.RawMessage) (string, error) {
 	section, effort, _ := strings.Cut(pick, "@")
 	switch id {
 	case "model":
-		return section
+		return section, nil
 	case "effort":
-		return effort
+		return effort, nil
 	}
 	var in struct {
 		CLIs map[string]struct {
 			Models map[string]json.RawMessage `json:"models"`
 		} `json:"clis"`
 	}
-	_ = json.Unmarshal(instructions, &in)
+	if err := json.Unmarshal(instructions, &in); err != nil {
+		return "", fmt.Errorf("decode cli stage instructions: %w", err)
+	}
 	for cli, c := range in.CLIs {
 		if _, ok := c.Models[section]; ok {
-			return cli
+			return cli, nil
 		}
 	}
-	return pick
+	return pick, nil
 }
 
 func fakeScoreAnswer(criteria json.RawMessage, level string) (map[string]any, error) {

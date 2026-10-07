@@ -150,6 +150,22 @@ func TestDebug_StagesBeforeAFailureWithTwoCLIs(t *testing.T) {
 	}
 }
 
+func TestDebug_FailureBeforeRoutingPrintsNoStage(t *testing.T) {
+	e := newSyntheticEnv(t)
+	t.Setenv(envDebug, "1")
+	r := e.run([]string{"--prompt-file", filepath.Join(t.TempDir(), "missing.md")}, nil)
+
+	assert.Equal(t, exitUsage, r.code)
+	assert.Empty(t, r.stdout)
+	assert.Empty(t, e.jev.asked())
+	lines := debugLines(r.stderr)
+	require.NotEmpty(t, lines, r.stderr)
+	for _, line := range lines {
+		assert.False(t, strings.HasPrefix(line, "stage ") || strings.HasPrefix(line, "one option"), line)
+	}
+	assert.True(t, strings.HasPrefix(lines[len(lines)-1], "no decision: "), r.stderr)
+}
+
 func TestDebugLog(t *testing.T) {
 	t.Run("nil prints nothing", func(t *testing.T) {
 		var l *debugLog

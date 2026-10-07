@@ -27,19 +27,14 @@ type level struct {
 	key      func(catalog.Option) string // group key
 	label    func(catalog.Option) string // criterion name
 	question string                      // the stage question
-	// shared is the choice recorded when the level is skipped: the value every option shares
-	shared func(el *Eligibility, o catalog.Option) string
 }
 
 // routeLevels are the routing stages in order: CLI, then model, then effort.
 var routeLevels = [...]level{
-	{name: LevelCLI, key: optionCLI, label: optionCLI, question: cliText,
-		shared: func(_ *Eligibility, o catalog.Option) string { return o.CLI }},
-	{name: LevelModel, key: optionSection, label: modelLabel, question: modelText,
-		shared: func(_ *Eligibility, o catalog.Option) string { return modelLabel(o) }},
+	{name: LevelCLI, key: optionCLI, label: optionCLI, question: cliText},
+	{name: LevelModel, key: optionSection, label: modelLabel, question: modelText},
 	// effort labels are unique within one model, the only one left when the effort stage is asked
-	{name: LevelEffort, key: optionID, label: optionEffortLabel, question: effortText,
-		shared: func(el *Eligibility, o catalog.Option) string { return el.EffortFor(o) }},
+	{name: LevelEffort, key: optionID, label: optionEffortLabel, question: effortText},
 }
 
 func optionCLI(o catalog.Option) string         { return o.CLI }
@@ -94,11 +89,21 @@ func groupLabels(gs []group) []string {
 	return out
 }
 
+// skipped records lv as skipped, with the value every option left shares, o among them: its label,
+// or for the effort level the effort o runs at, the passed one included.
+func skipped(el *Eligibility, lv level, o catalog.Option) Stage {
+	choice := lv.label(o)
+	if lv.name == LevelEffort {
+		choice = el.EffortFor(o)
+	}
+	return Stage{Level: lv.name, Choice: choice, Skipped: true}
+}
+
 // skippedStages records every level as skipped for a single option, chosen without Jev.
 func skippedStages(el *Eligibility, o catalog.Option) []Stage {
 	out := make([]Stage, len(routeLevels))
 	for i, lv := range routeLevels {
-		out[i] = Stage{Level: lv.name, Choice: lv.shared(el, o), Skipped: true}
+		out[i] = skipped(el, lv, o)
 	}
 	return out
 }
@@ -125,7 +130,7 @@ func (r *Router) decide(ctx context.Context, el *Eligibility, captured *prompt.R
 	for _, lv := range routeLevels {
 		gs := groups(opts, lv)
 		if len(gs) == 1 {
-			stages = append(stages, Stage{Level: lv.name, Choice: lv.shared(el, opts[0]), Skipped: true})
+			stages = append(stages, skipped(el, lv, opts[0]))
 			continue
 		}
 		winner, stage, err := r.stage(ctx, el, lv, gs, st)

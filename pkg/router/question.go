@@ -132,9 +132,7 @@ type instructions struct {
 // stageInstructions is a stage question's instructions: the question, its state guide, the routing
 // policy and the options below the criteria, once: by CLI for the cli stage, by model otherwise.
 type stageInstructions struct {
-	Question string       `json:"question"`
-	State    string       `json:"state"`
-	Policy   string       `json:"policy"`
+	instructions
 	CLIs     jev.Criteria `json:"clis,omitempty"`
 	Models   jev.Criteria `json:"models,omitempty"`
 	Efforts  jev.Criteria `json:"efforts"`

@@ -79,7 +79,7 @@ func (r *Router) pooled(ctx context.Context, el *Eligibility, lv level, gs []gro
 	for i, s := range seq {
 		p.Chunks[i] = s.answer.result
 	}
-	return slices.Index(names, best), p, nil
+	return best, p, nil
 }
 
 // askChunk sends one chunk request and returns its validated answers, with a probability under
@@ -114,9 +114,9 @@ func (r *Router) askChunk(ctx context.Context, id string, names []string, anchor
 // pool combines the chunks' probabilities over the ordered criterion names: each chunk weighs its
 // raw relevance, a criterion's score is the weighted average of its probabilities (a plain average
 // when every relevance is 0), and the highest score wins with the order of names breaking ties. It
-// returns the winning name, the top scores and every score. Zero-relevance chunks have no effect,
+// returns the winner's index in names, the top scores and every score. Zero-relevance chunks have no effect,
 // but enough low-relevance ones still dilute a relevant chunk: a raw weighted mean has no cap.
-func pool(names []string, seq []*slot) (string, []Score, []Score) {
+func pool(names []string, seq []*slot) (int, []Score, []Score) {
 	pooled := pooledScores(names, seq)
 	best := 0
 	scores := make([]float64, len(pooled))
@@ -126,7 +126,7 @@ func pool(names []string, seq []*slot) (string, []Score, []Score) {
 			best = i
 		}
 	}
-	return names[best], ranked(names, scores), pooled
+	return best, ranked(names, scores), pooled
 }
 
 // pooledScores retains the full relevance-weighted result in the order of names.

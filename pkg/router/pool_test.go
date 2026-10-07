@@ -123,7 +123,8 @@ func TestPoolRelevanceWeights(t *testing.T) {
 	}
 
 	t.Run("short hard requirement outweighs long filler", func(t *testing.T) {
-		o, top, _ := pool(opts, withHard(5, fill))
+		i, top, _ := pool(opts, withHard(5, fill))
+		o := opts[i]
 		assert.Equal(t, optHard, o)
 		assert.Equal(t, optHard, top[0].ID)
 		// raw weights: 0.95 and 5 Ã— 0.01
@@ -131,22 +132,26 @@ func TestPoolRelevanceWeights(t *testing.T) {
 	})
 	t.Run("zero-relevance filler of any length has no effect", func(t *testing.T) {
 		for _, n := range []int{1, 1000, 100_000} {
-			o, top, _ := pool(opts, withHard(n, zero))
+			i, top, _ := pool(opts, withHard(n, zero))
+			o := opts[i]
 			assert.Equal(t, optHard, o, "%d filler chunks", n)
 			assert.InDelta(t, 0.9, top[0].Score, 1e-9, "%d filler chunks", n)
 		}
 	})
 	t.Run("enough low-relevance filler dilutes it (documented limit)", func(t *testing.T) {
 		// hard wins while 0.95 > n Ã— 0.01: a raw weighted mean has no cap
-		o, _, _ := pool(opts, withHard(94, fill))
+		i, _, _ := pool(opts, withHard(94, fill))
+		o := opts[i]
 		assert.Equal(t, optHard, o, "94 Ã— 0.01 = 0.94 < 0.95")
-		o, _, _ = pool(opts, withHard(96, fill))
+		i, _, _ = pool(opts, withHard(96, fill))
+		o = opts[i]
 		assert.Equal(t, optEasy, o, "96 Ã— 0.01 = 0.96 > 0.95")
 	})
 	t.Run("all-zero relevance gives a plain mean and catalog order breaks ties", func(t *testing.T) {
 		a := chunkAnswers(favoring(opts, optEasy, 0.9), 0)
 		b := chunkAnswers(favoring(opts, optHard, 0.1), 0)
-		o, top, _ := pool(opts, slots(a, b))
+		i, top, _ := pool(opts, slots(a, b))
+		o := opts[i]
 		require.Len(t, top, topOptions)
 		assert.InDelta(t, top[0].Score, top[1].Score, 1e-12, "equal weights, mirrored answers")
 		first := optHard // earlier in the catalog than haiku
@@ -168,7 +173,7 @@ func TestPoolRetainsEveryNameInOrder(t *testing.T) {
 	first := chunkAnswers(jev.Answer{Probabilities: map[string]float64{"a": 0.1, "b": 0.2, "c": 0.3, "d": 0.4}}, 0.25)
 	second := chunkAnswers(jev.Answer{Probabilities: map[string]float64{"a": 0.4, "b": 0.3, "c": 0.2, "d": 0.1}}, 0.75)
 	chosen, top, all := pool(names, slots(first, second))
-	assert.Equal(t, "a", chosen)
+	assert.Equal(t, "a", names[chosen])
 	assert.Len(t, top, 3)
 	require.Len(t, all, 4)
 	for i, want := range []float64{0.325, 0.275, 0.225, 0.175} {
@@ -217,7 +222,7 @@ func TestPoolNamesOtherThanOptionIDs(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			chosen, top, all := pool(tc.names, slots(tc.answers...))
-			assert.Equal(t, tc.want, chosen)
+			assert.Equal(t, tc.want, tc.names[chosen])
 			require.Len(t, top, len(tc.top))
 			for i, want := range tc.top {
 				assert.Equal(t, want.ID, top[i].ID)

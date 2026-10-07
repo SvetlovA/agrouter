@@ -526,6 +526,28 @@ func TestRouteStageWhole422Resplits(t *testing.T) {
 	}
 }
 
+func TestRouteStageWhole422ResplitFails(t *testing.T) {
+	cfg, cat := requestFixture(t)
+	c := captured("HARD: rename the package\n" + filler(40_000))
+	client := &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+		if id, _, _ := stageAsked(req); id == LevelModel {
+			return nil, &jev.StatusError{Status: 422}
+		}
+		return certain(req, pickHigh), nil
+	}}
+	r := newRouter(t, cfg, cat, client)
+	require.True(t, c.Fits(r.budget))
+	r.budget.Chunk = 2 // half of it leaves no room for chunk text beside the anchor
+	req := &args.Request{}
+	d, err := r.Route(context.Background(), Eligible(cfg, cat, req), req, c)
+	require.ErrorIs(t, err, ErrCannotDecide)
+	require.ErrorIs(t, err, jev.ErrUnprocessable)
+	require.ErrorIs(t, err, prompt.ErrQuestionsOverBudget)
+	assert.Contains(t, err.Error(), "model stage: re-split after")
+	assert.Equal(t, decidedStages[:1], stageSummary(d.Stages), "the cli stage is kept")
+	assert.Empty(t, stageCalls(client, LevelEffort))
+}
+
 func TestRouteStageChunk422(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	c := captured("START " + filler(200_000))
@@ -662,10 +684,11 @@ func TestRouteStageMalformedAnswers(t *testing.T) {
 }
 
 func TestBudgetLargestStage(t *testing.T) {
-	// sizes are each level's largest whole-state question over cat, as budget measures them
-	sizes := func(cfg *config.Config, cat *catalog.Catalog) map[string]int {
+	// sizes are each level's largest question over cat for a state described by guide, as budget
+	// measures them
+	sizes := func(cfg *config.Config, cat *catalog.Catalog, guide string) map[string]int {
 		size := func(lv level, opts []catalog.Option) int {
-			return questionLen(lv.name, stageQuestion(cfg, lv, wholeGuide, groups(opts, lv), ""))
+			return questionLen(lv.name, stageQuestion(cfg, lv, guide, groups(opts, lv), ""))
 		}
 		out := map[string]int{LevelCLI: size(routeLevels[0], cat.Options)}
 		for _, cli := range catalog.CLIs(cat.Options) {
@@ -698,7 +721,7 @@ func TestBudgetLargestStage(t *testing.T) {
 			tc.mutate(cfg)
 			cat, err := catalog.Build(cfg)
 			require.NoError(t, err)
-			s := sizes(cfg, cat)
+			s := sizes(cfg, cat, wholeGuide)
 			for level, n := range s {
 				if level != tc.largest {
 					assert.Greater(t, s[tc.largest], n, "%s over %s", tc.largest, level)
@@ -708,10 +731,16 @@ func TestBudgetLargestStage(t *testing.T) {
 
 			b, err := budget(cfg, cat)
 			require.NoError(t, err)
-			cliOnly, err := prompt.NewBudget(prompt.Questions{Route: s[LevelCLI], ChunkRoute: 1, Relevance: 1,
-				Complexity: 1, Evidence: 1})
+			chunk := sizes(cfg, cat, chunkGuide)
+			cliOnly, err := prompt.NewBudget(prompt.Questions{Route: s[LevelCLI], ChunkRoute: chunk[LevelCLI],
+				Relevance: 1, Complexity: 1, Evidence: 1})
 			require.NoError(t, err)
 			assert.Less(t, b.State, cliOnly.State, "the whole-state budget leaves room for the largest stage")
+			assert.Less(t, b.Chunk, cliOnly.Chunk, "the chunk budget leaves room for the largest stage")
+			largest, err := prompt.NewBudget(prompt.Questions{Route: s[tc.largest], ChunkRoute: chunk[tc.largest],
+				Relevance: questionLen(questionRelevance, relevanceQuestion()), Complexity: 1, Evidence: 1})
+			require.NoError(t, err)
+			assert.Equal(t, largest.Chunk, b.Chunk, "sized by the largest stage with the chunk guide")
 		})
 	}
 }

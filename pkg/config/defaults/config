@@ -22,7 +22,8 @@
 api_key   =
 # pin a versioned id (e.g. jev-1.13.0) to keep routing stable across Jev releases
 jev_model = jev-latest
-# total routing budget: reading stdin and files, every Jev request (all chunks at once) and retries.
+# total routing budget: reading stdin and files, the --doc complexity stage and up to three sequential
+# routing stages (cli, model, effort), each sending its chunks at once, with retries.
 # cooperative: reading and network stop at it, splitting and encoding do not. raise it for very long inputs
 timeout   = 10s
 

@@ -151,7 +151,7 @@ Verbose output includes all available numeric details, without truncating chunks
 |---|---|
 | `options` | every eligible option's ID, CLI, model and effort, in catalog order, before any stage narrowed them |
 | `confidence.stages` | every routing stage in order (`cli`, `model`, `effort`) with its `level`, `choice` and `skipped`; a skipped stage's choice is the value its options share |
-| `confidence.stages[].confidence`, `probabilities` | for a stage asked with the whole request: Jev's Choice confidence and the probability of every candidate (CLI, model or effort label) |
+| `confidence.stages[].confidence`, `probabilities` | for a stage asked with the whole request: Jev's Choice confidence and the probability of every candidate: the CLI name, the model's `[model.<section>]` name (the passed model under passthrough), or the effort label |
 | `confidence.stages[].chunks` | for a pooled stage: every chunk's field, index/count, choice, Choice confidence, relevance weight and full probability map |
 | `confidence.stages[].pooled_scores` | for a pooled stage: every candidate's `name` and final `score` in catalog order, using relevance weights or an ordinary mean when all relevance is zero; catalog order breaks ties |
 | `confidence.complexity_chunks` | every document request's index/count, formatted project complexity (`5.1/10`), raw numeric `score` for precise calculations, Score confidence and evidence weight; scores use evidence weights or an ordinary mean when all evidence is zero |
