@@ -306,9 +306,9 @@ The config file shrinks to two short paragraphs. The comments that described sta
 - [x] verify coverage is 80%+ per package (mocks excluded)
 
 ### Task 9: [Final] Update documentation
-- [ ] README: Configuration (`routing_policy`, `complexity_policy`, the removed-key migration table), staged routing and how passed flags fix stages, the per-stage `confidence` shape, verbose `stages` and `options`, latency and when to raise `timeout`, the exit-code table unchanged
-- [ ] CLAUDE.md and AGENTS.md: question structure lives in `pkg/router/question.go` and config holds only policy; routing is staged
-- [ ] move this plan to `docs/plans/completed/`
+- [x] README: Configuration (`routing_policy`, `complexity_policy`, the removed-key migration table), staged routing and how passed flags fix stages, the per-stage `confidence` shape, verbose `stages` and `options`, latency and when to raise `timeout`, the exit-code table unchanged
+- [x] CLAUDE.md and AGENTS.md: question structure lives in `pkg/router/question.go` and config holds only policy; routing is staged
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 *Items requiring manual intervention or external systems - no checkboxes, informational only*

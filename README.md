@@ -4,7 +4,7 @@ agrouter picks the coding-agent CLI, model and reasoning effort for a prompt by 
 
 It has two modes:
 
-- **Decision** (default): print the choice, project complexity and average confidence as one JSON line. Add `--verbose` for the argv and other details when the caller launches the CLI itself.
+- **Decision** (default): print the choice, project complexity and per-stage confidence as one JSON line. Add `--verbose` for the argv and other details when the caller launches the CLI itself.
 - **Exec** (`agrouter exec`): translate agrouter's arguments into the chosen CLI's own arguments through config, and run it.
 
 ## Install
@@ -65,9 +65,33 @@ The `-p`, positional and `--prompt-file` text reaches the child as one argument,
 
 To route, agrouter also reads the text files the prompt names inside the working directory (quoted, backticked, Markdown-linked or plain paths) and sends their contents, never their paths, to TypeSafe. That includes files such as `.env` when the prompt mentions them. Paths outside the working directory are ignored and URLs are not fetched; binary files are described by type and size only. Nothing is read when only one option is left. The `--prompt-file` text counts as prompt, so the files it mentions are read too; `--doc` text is not scanned for mentions.
 
+### Staged routing
+
+agrouter routes in up to three stages, each narrowing the options for the next:
+
+| Stage | Jev chooses among | Asked when |
+|---|---|---|
+| `cli` | the eligible CLIs | more than one CLI is left |
+| `model` | the chosen CLI's eligible models | more than one model is left |
+| `effort` | the chosen model's effort levels | more than one effort is left |
+
+A stage with one candidate is skipped without asking Jev. Each `cli` candidate is described together with its models, their prices and effort levels, so Jev can weigh what lies below it; each `model` candidate with its efforts. A stage's confidence is therefore conditional on the stages before it.
+
+A value the caller passes fixes its stage, because eligibility filters by it before routing:
+
+| Passed | Stages asked |
+|---|---|
+| `--cli X` | `model` and `effort` within X (an unknown or disabled `--cli` is skipped with a warning and fixes nothing) |
+| `--model M` from the catalog | `effort` only: M belongs to one CLI |
+| `--model M` outside the catalog | `cli` only, when more than one CLI is left; M is passed through with the caller's `--effort`, if any |
+| `--effort E` | `cli` and `model`; E is never re-decided |
+| `--cli`, `--model` and `--effort` | none: one option is left and Jev is not asked |
+
+If any stage fails, the whole routing fails and the cannot-decide policy below applies to the original eligibility; the stages that completed appear only in `--verbose` and `AGROUTER_DEBUG=1` output. A CLI Jev chose never enables raw `--` passthrough; only an explicit `--cli` does.
+
 ### Project complexity
 
-The same task can need a different model in a small script than in a large, constrained system. With `--doc`, agrouter first asks Jev to rate the project the docs describe, from 0 (a snippet) to 10 (a large enterprise system), without the prompt: one request when the docs fit, otherwise one per doc chunk, all at once, merged into a mean weighted by how much each chunk says about the project's size, architecture, dependencies or constraints. The routing request then gets `"project":{"complexity":6.9}` in its state, as context for judging the task rather than a multiplier: a typo fix stays trivial in any codebase. The doc text itself is not resent.
+The same task can need a different model in a small script than in a large, constrained system. With `--doc`, agrouter first asks Jev to rate the project the docs describe, from 0 (a snippet) to 10 (a large enterprise system), without the prompt: one request when the docs fit, otherwise one per doc chunk, all at once, merged into a mean weighted by how much each chunk says about the project's size, architecture, dependencies or constraints. Every routing stage then gets `"project":{"complexity":6.9}` in its state, as context for judging the task rather than a multiplier: a typo fix stays trivial in any codebase. The doc text itself is not resent.
 
 ```sh
 agrouter --doc CLAUDE.md --doc docs/architecture.md -p "refactor the retry logic"
@@ -79,21 +103,21 @@ Complexity uses Jev's Score question with ten ordered descriptions. Jev returns 
 
 ### Long inputs
 
-A prompt with its files that is too large for one request is split into chunks, all sent at once. Each chunk also rates how relevant its text is to the task, and the chunks' answers are averaged with that relevance as weight, so filler with zero relevance has no effect. Low but non-zero relevance still dilutes the result when there is a lot of it.
+A prompt with its files that is too large for one request is split into chunks, all sent at once. Each chunk also rates how relevant its text is to the task, and the chunks' answers are averaged with that relevance as weight, so filler with zero relevance has no effect. Low but non-zero relevance still dilutes the result when there is a lot of it. Every routing stage asks all chunks and pools their answers; every chunk then moves on to the same narrowed next stage.
 
-`[agrouter] timeout` covers the whole routing, both stages included. It is cooperative: reading stdin and files and every Jev request stop at it, but splitting and encoding a very large input do not. Raise it for very long inputs.
+`[agrouter] timeout` covers the whole routing: reading the inputs, the complexity stage and every routing stage. Routing makes up to three sequential Jev round trips (`cli`, `model`, `effort`), plus one for the complexity stage with `--doc`; chunks within a stage run in parallel, but a re-split after a too-large request adds another round trip. The timeout is cooperative: reading stdin and files and every Jev request stop at it, but splitting and encoding a very large input do not. Raise it when routing often runs out of time, typically with very long inputs, many `--doc` files or a slow network.
 
 Decision mode:
 
 ```sh
 agrouter -p "fix the flaky test in pkg/foo" --dangerously-skip-permissions --output-format stream-json
-# {"cli":"codex","model":"gpt-6.1-sol","effort":"medium","confidence":{"model_selection":0.8}}
+# {"cli":"codex","model":"gpt-6.1-sol","effort":"medium","confidence":{"cli":0.82,"model":0.64,"effort":0.41}}
 ```
 
-Add `--verbose` for indented JSON with every chunk and option, plus a readable command. The default stays on one JSON line. For example, with project docs the concise result can be:
+Add `--verbose` for indented JSON with every stage, chunk and option, plus a readable command. The default stays on one JSON line. For example, with project docs the concise result can be:
 
 ```json
-{"cli":"codex","model":"gpt-6.1-sol","effort":"medium","project_complexity":"6.9/10","confidence":{"model_selection":0.8,"project_complexity":0.9}}
+{"cli":"codex","model":"gpt-6.1-sol","effort":"medium","project_complexity":"6.9/10","confidence":{"cli":0.82,"model":0.64,"effort":0.41,"project_complexity":0.9}}
 ```
 
 `project_complexity` is the final project score formatted as `score/10` with one decimal, for example `5.1/10` and is omitted when the complexity stage did not complete. In verbose output, `argv` holds the `-p`, positional and `--prompt-file` text, joined like the routing prompt, as its last token after `--`, so text that starts with `-` reaches the child as the prompt and never as one of its flags (each CLI's `prompt` mapping must end with `"--", "{prompt}"`; raw tokens after agrouter's own `--` come before it). It never holds stdin: a caller that piped a prompt must send it to the child itself. `--doc` is never in `argv`; the child loads its own `CLAUDE.md`/`AGENTS.md`. `effort` is `null` for a model without efforts; `skipped` lists, as the caller spelled them, the arguments that got a skip warning: an unknown or disabled `--cli`, arguments the chosen CLI does not map or maps to nothing, and raw tokens after `--` without `--cli`.
@@ -108,35 +132,45 @@ The first `--verbose` requests full agrouter selection details; the raw `--verbo
 
 On Windows with npm's `claude.cmd`/`codex.cmd` shims, pass a multi-line prompt on stdin: cmd.exe cannot carry a line break inside an argument, so a multi-line `-p`, positional or `--prompt-file` prompt fails to start (exit `127`). This includes any prompt combined from two sources, since they are joined with a blank line. Decision mode and native executables are unaffected.
 
-Before starting the child, exec mode logs one JSON line with `cli`, `model`, `effort`, any completed `project_complexity` score and average `confidence` to stderr, so tools such as Ralphex can record the selection for each step. Model and effort are `null` when the CLI's defaults apply. With `--verbose` it also includes whole-request and per-request confidence. This line does not include the prompt or argv.
+Before starting the child, exec mode logs one JSON line with `cli`, `model`, `effort`, any completed `project_complexity` score and the same `confidence` object as decision mode to stderr, so tools such as Ralphex can record the selection for each step. Model and effort are `null` when the CLI's defaults apply. With `--verbose` it also includes every stage and per-request confidence. This line does not include the prompt or argv.
 
-Decision JSON and the exec selection line include `confidence` when Jev answered. By default it contains only `model_selection` (confidence in model selection) and/or `project_complexity` (confidence in project complexity scoring). Each is the arithmetic mean of that stage's final request confidences, including zeros, without relevance or evidence weights. A single request uses its own confidence; an unanswered stage omits its value. These means describe the answers' confidence and do not measure the probability that the whole result is correct. Confidence changes neither weighting nor model selection.
+Decision JSON and the exec selection line include `confidence` when Jev answered:
+
+| Key | Meaning |
+|---|---|
+| `cli`, `model`, `effort` | Jev's confidence in each routing stage it was asked; a skipped stage is omitted, and all three are omitted when Jev could not decide |
+| `project_complexity` | confidence in the project complexity score; omitted without a completed complexity stage |
+
+Each value is the arithmetic mean of that stage's final request confidences, including zeros, without relevance or evidence weights; a single request uses its own confidence. Stage confidences are conditional, each given the stages before it, and none of them is the probability that the whole result is correct. Confidence changes neither weighting nor the choice.
+
+`cli`, `model` and `effort` replace the former `model_selection` key; readers of `confidence.model_selection` must switch to them.
 
 Verbose output includes all available numeric details, without truncating chunks or options:
 
 | Field | Meaning |
 |---|---|
-| `options` | every eligible option's ID, CLI, model and effort, in catalog order; this order breaks pooled-score ties |
-| `confidence.route`, `choice`, `probabilities` | the whole-request Choice confidence, selected option ID and every option probability; `route` is `null` for pooled routing |
-| `confidence.routing_chunks` | every chunk's field, index/count, chosen option, Choice confidence, relevance weight and full probability map |
-| `confidence.pooled_scores` | every option's final routing score in catalog order, using relevance weights or an ordinary mean when all relevance is zero |
+| `options` | every eligible option's ID, CLI, model and effort, in catalog order, before any stage narrowed them |
+| `confidence.stages` | every routing stage in order (`cli`, `model`, `effort`) with its `level`, `choice` and `skipped`; a skipped stage's choice is the value its options share |
+| `confidence.stages[].confidence`, `probabilities` | for a stage asked with the whole request: Jev's Choice confidence and the probability of every candidate (CLI, model or effort label) |
+| `confidence.stages[].chunks` | for a pooled stage: every chunk's field, index/count, choice, Choice confidence, relevance weight and full probability map |
+| `confidence.stages[].pooled_scores` | for a pooled stage: every candidate's `name` and final `score` in catalog order, using relevance weights or an ordinary mean when all relevance is zero; catalog order breaks ties |
 | `confidence.complexity_chunks` | every document request's index/count, formatted project complexity (`5.1/10`), raw numeric `score` for precise calculations, Score confidence and evidence weight; scores use evidence weights or an ordinary mean when all evidence is zero |
 | `argv`, `skipped` | exact child arguments and arguments skipped with a warning; decision mode only |
 | `command` | readable command text for copying; adapt quoting to your terminal; decision mode only |
 | `stdin_required` | whether the command needs the original stdin supplied again; stdin contents are not included in the command |
 
-Option probabilities and pooled scores are separate from Jev's Choice confidence. Verbose JSON retains zero values. The exec selection log remains one JSON line on stderr and excludes argv and command; the child's output goes to stdout.
+Stage probabilities and pooled scores are separate from Jev's Choice confidence. Verbose JSON retains zero values. The exec selection log remains one JSON line on stderr and excludes argv and command; the child's output goes to stdout.
 
 
-The child's stdout, stderr and exit code are agrouter's. An argument the chosen CLI does not map is skipped with one `agrouter: warning:` line on stderr, never an error. Set `AGROUTER_DEBUG=1` to see eligibility, each `--doc` chunk's complexity score, evidence and confidence with the project complexity, routing confidence per request, Jev's probabilities and the final command on stderr (prompt text and key redacted; doc text is never printed).
+The child's stdout, stderr and exit code are agrouter's. An argument the chosen CLI does not map is skipped with one `agrouter: warning:` line on stderr, never an error. Set `AGROUTER_DEBUG=1` to see eligibility, each `--doc` chunk's complexity score, evidence and confidence with the project complexity, one line per routing stage (`stage <level>: skipped (<choice>)`, or the choice, confidence and top candidates, per chunk when pooled), Jev's probabilities and the final command on stderr (prompt text and key redacted; doc text is never printed).
 
-When Jev cannot decide (no key, timeout, API errors) and the CLI is known (`--cli`, implied by `--model`, or the only one left), agrouter runs it with only the caller's fixed `--model`/`--effort`, so the CLI's defaults apply. With more than one CLI left, it exits `2`.
+When Jev cannot decide (no key, timeout, API errors, at any stage) and the CLI is known (`--cli`, implied by `--model`, or the only one left), agrouter runs it with only the caller's fixed `--model`/`--effort`, so the CLI's defaults apply. With more than one CLI left, it exits `2` with nothing on stdout; `AGROUTER_DEBUG=1` shows the stages that completed.
 
 ## Configuration
 
 INI files, merged per section and per key, later layers winning:
 
-1. embedded defaults ([`pkg/config/defaults/config`](pkg/config/defaults/config)): the catalog, questions and argument mappings;
+1. embedded defaults ([`pkg/config/defaults/config`](pkg/config/defaults/config)): the catalog, routing policies and argument mappings;
 2. global `~/.config/agrouter/config` (directory overridable with `AGROUTER_CONFIG_DIR`);
 3. local `.agrouter/config` in the working directory;
 4. environment (`TYPESAFE_API_KEY`, `AGROUTER_CLI`).
@@ -156,7 +190,23 @@ timeout   = 20s
 enabled = false
 ```
 
-CLI names, model IDs and aliases, and effort labels come from the merged config. Adding or renaming any of them, or changing their argument mappings, requires no Go code changes. The embedded defaults document every key, including the routing and complexity question texts (`question`, `chunk_question`, `relevance`, `complexity_question`, `complexity_evidence`).
+CLI names, model IDs and aliases, and effort labels come from the merged config. Adding or renaming any of them, or changing their argument mappings, requires no Go code changes. The embedded defaults document every key.
+
+The questions sent to Jev and the description of every state field are built into agrouter. Config holds only the preference they follow, in two `[agrouter]` keys that must be non-empty:
+
+| Key | Preference |
+|---|---|
+| `routing_policy` | cost versus quality when choosing the CLI, model and effort; shared by every routing stage, for a whole prompt and for each chunk |
+| `complexity_policy` | how the `--doc` stage judges the project the docs describe |
+
+The old question keys are config errors that name their replacement, for example `[agrouter] question (global ~/.config/agrouter/config): removed; set routing_policy instead`. They mixed question structure with preference, so they are not converted: move only the preference text into the new key.
+
+| Removed key | Replacement |
+|---|---|
+| `question`, `chunk_question` | `routing_policy` |
+| `relevance` | no longer configurable; tune `routing_policy` |
+| `complexity_question` | `complexity_policy` |
+| `complexity_evidence` | no longer configurable; tune `complexity_policy` |
 
 `max_chunks`, `chunk_parallel` and `relevance_floor` no longer exist: chunks are unlimited and run in parallel, and relevance has no floor. A config that still sets one of them fails with an unknown-key error.
 
