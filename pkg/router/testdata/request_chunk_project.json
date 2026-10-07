@@ -29,7 +29,7 @@
   "questions": {
     "relevance": {
       "type": "noul",
-      "instructions": "Does chunk add requirements beyond anchor?",
+      "instructions": "Does the text in `chunk.text` state the task to perform, its requirements, or what makes it hard, beyond what `anchor` already says?",
       "criteria": {
         "true": "`chunk.text` adds to what the task is, what it requires, or what makes it hard",
         "false": "`chunk.text` is only material the task works on, or repeats `anchor`"
@@ -38,7 +38,9 @@
     "route": {
       "type": "choice",
       "instructions": {
-        "question": "Choose an option for anchor and chunk.",
+        "question": "Which coding-agent CLI, model and reasoning effort should run the task described in `state`? Choose following `policy`. Look up each option's `model` in `models`, its `cli` in `clis`, and its `effort` under that CLI in `efforts`.",
+        "state": "`state.anchor` is context shared by every part of a longer task: excerpts of the prompt and the files it mentions, and `attachments`, the images, PDFs and other non-text inputs the task includes, by type and size only. `state.chunk.text` is one part of the longer input; `state.chunk.field` says whether it comes from the prompt or a file, and `state.chunk.index` and `state.chunk.of` give its position. `state.anchor.project.complexity`, when present, rates the codebase the task runs in from 0 (a tiny script) to 10 (a large, constrained enterprise system).",
+        "policy": "Prefer the cheapest option that can do the task.",
         "clis": {
           "alpha": "Alpha agent."
         },

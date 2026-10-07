@@ -237,9 +237,12 @@ func TestRouteChunked(t *testing.T) {
 		assert.Equal(t, split.Anchor, st.Anchor, "anchor repeated")
 	}
 	assert.Equal(t, jev.TypeNoul, first.Questions[questionRelevance].Type)
+	assert.Equal(t, relevanceText, first.Questions[questionRelevance].Instructions)
 	in, ok := first.Questions[questionRoute].Instructions.(routeInstructions)
 	require.True(t, ok)
-	assert.Equal(t, cfg.Agrouter.ChunkQuestion, in.Question)
+	assert.Equal(t, routeText, in.Question)
+	assert.Equal(t, chunkGuide, in.State, "a chunk request describes the chunk state")
+	assert.Equal(t, cfg.Agrouter.RoutingPolicy, in.Policy)
 	assert.Equal(t, ids(el.Options), first.Questions[questionRoute].Criteria.Names())
 }
 

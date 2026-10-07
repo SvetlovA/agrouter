@@ -217,6 +217,16 @@ func (m *merged) decodeSection(cfg *Config, s *section, disabled map[string]bool
 	return nil
 }
 
+// removedAgrouterKeys maps each removed [agrouter] question key to what replaces it. The old
+// questions mixed structure and preference, so they can't be converted; they are never ignored.
+var removedAgrouterKeys = map[string]string{
+	"question":            "removed; set routing_policy instead",
+	"chunk_question":      "removed; set routing_policy instead",
+	"relevance":           "no longer configurable; tune routing_policy instead",
+	"complexity_question": "removed; set complexity_policy instead",
+	"complexity_evidence": "no longer configurable; tune complexity_policy instead",
+}
+
 func (s *section) decodeAgrouter(a *Agrouter) error {
 	for _, k := range s.keys {
 		e := s.values[k]
@@ -228,17 +238,14 @@ func (s *section) decodeAgrouter(a *Agrouter) error {
 			a.JevModel = e.value
 		case "timeout":
 			a.Timeout, err = time.ParseDuration(e.value)
-		case "question":
-			a.Question = e.value
-		case "chunk_question":
-			a.ChunkQuestion = e.value
-		case "relevance":
-			a.Relevance = e.value
-		case "complexity_question":
-			a.ComplexityQuestion = e.value
-		case "complexity_evidence":
-			a.ComplexityEvidence = e.value
+		case "routing_policy":
+			a.RoutingPolicy = e.value
+		case "complexity_policy":
+			a.ComplexityPolicy = e.value
 		default:
+			if hint, ok := removedAgrouterKeys[k]; ok {
+				return s.removedKey(k, hint)
+			}
 			return s.unknownKey(k)
 		}
 		if err != nil {
@@ -340,6 +347,13 @@ func (s *section) enabled() (bool, error) {
 func (s *section) unknownKey(key string) error {
 	e := s.values[key]
 	return fmt.Errorf("[%s] %s (%s): unknown key", s.name, key, origin(e.layer, e.path))
+}
+
+// removedKey reports a key that no longer exists and what replaces it. Like unknownKey, it
+// leaves the value out.
+func (s *section) removedKey(key, hint string) error {
+	e := s.values[key]
+	return fmt.Errorf("[%s] %s (%s): %s", s.name, key, origin(e.layer, e.path), hint)
 }
 
 // keyError wraps err with the section, the key, its value and the layer that set it.

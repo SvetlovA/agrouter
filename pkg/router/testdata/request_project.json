@@ -20,7 +20,9 @@
     "route": {
       "type": "choice",
       "instructions": {
-        "question": "Choose an option for state.",
+        "question": "Which coding-agent CLI, model and reasoning effort should run the task described in `state`? Choose following `policy`. Look up each option's `model` in `models`, its `cli` in `clis`, and its `effort` under that CLI in `efforts`.",
+        "state": "`state.prompt` is the task. `state.files` are the contents of files the prompt mentions. `state.attachments` lists images, PDFs and other non-text inputs the task includes, by type and size only. `state.project.complexity`, when present, rates the codebase the task runs in from 0 (a tiny script) to 10 (a large, constrained enterprise system).",
+        "policy": "Prefer the cheapest option that can do the task.",
         "clis": {
           "alpha": "Alpha agent."
         },

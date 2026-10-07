@@ -124,7 +124,7 @@ func (r *Router) ask(ctx context.Context, el *Eligibility, state prompt.State) (
 		Model: r.cfg.Agrouter.JevModel,
 		State: state,
 		Questions: map[string]jev.Question{
-			questionRoute: routeQuestion(r.cfg, r.cfg.Agrouter.Question, el.Options, el.effort),
+			questionRoute: routeQuestion(r.cfg, wholeGuide, el.Options, el.effort),
 		},
 	}
 	answers, err := r.jev.Ask(ctx, req)

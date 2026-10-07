@@ -56,13 +56,13 @@ func NewBudget(q Questions) (Budget, error) {
 	}
 	var errs []error
 	if b.State < MinStateTokens {
-		errs = append(errs, fmt.Errorf("%w: question leaves %d tokens for the state, need %d", ErrQuestionsOverBudget, b.State, MinStateTokens))
+		errs = append(errs, fmt.Errorf("%w: routing_policy leaves %d tokens for the state, need %d", ErrQuestionsOverBudget, b.State, MinStateTokens))
 	}
 	if left := b.Chunk - AnchorTokens; left < MinStateTokens {
-		errs = append(errs, fmt.Errorf("%w: chunk_question and relevance leave %d tokens beside the anchor, need %d", ErrQuestionsOverBudget, left, MinStateTokens))
+		errs = append(errs, fmt.Errorf("%w: routing_policy leaves %d tokens beside the anchor in a chunk request, need %d", ErrQuestionsOverBudget, left, MinStateTokens))
 	}
 	if b.Doc < MinStateTokens {
-		errs = append(errs, fmt.Errorf("%w: complexity_question and complexity_evidence leave %d tokens for the doc state, need %d", ErrQuestionsOverBudget, b.Doc, MinStateTokens))
+		errs = append(errs, fmt.Errorf("%w: complexity_policy leaves %d tokens for the doc state, need %d", ErrQuestionsOverBudget, b.Doc, MinStateTokens))
 	}
 	return b, errors.Join(errs...)
 }

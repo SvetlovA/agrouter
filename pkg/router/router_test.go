@@ -30,10 +30,8 @@ func requestFixture(t *testing.T) (*config.Config, *catalog.Catalog) {
 	t.Helper()
 	cfg := &config.Config{
 		Agrouter: config.Agrouter{JevModel: "test-jev", Timeout: time.Second,
-			Question: "Choose an option for state.", ChunkQuestion: "Choose an option for anchor and chunk.",
-			Relevance:          "Does chunk add requirements beyond anchor?",
-			ComplexityQuestion: "Rate the project the docs describe.",
-			ComplexityEvidence: "Does the text describe the project?"},
+			RoutingPolicy:    "Prefer the cheapest option that can do the task.",
+			ComplexityPolicy: "Judge the codebase as a whole."},
 		CLIs: []config.CLI{
 			{Name: "alpha", Command: "alpha", Description: "Alpha agent."},
 			{Name: "beta", Command: "beta", Description: "Beta agent."},
@@ -174,11 +172,13 @@ func TestRouteQuestionContents(t *testing.T) {
 	cfg, cat := embedded(t)
 	req := &args.Request{CLI: "claude"}
 	el := Eligible(cfg, cat, req)
-	q := routeQuestion(cfg, "Q?", el.Options, "")
+	q := routeQuestion(cfg, wholeGuide, el.Options, "")
 
 	in, ok := q.Instructions.(routeInstructions)
 	require.True(t, ok)
-	assert.Equal(t, "Q?", in.Question)
+	assert.Equal(t, routeText, in.Question)
+	assert.Equal(t, wholeGuide, in.State)
+	assert.Equal(t, cfg.Agrouter.RoutingPolicy, in.Policy)
 	assert.Equal(t, []string{"claude"}, in.CLIs.Names(), "only the remaining CLIs")
 	assert.NotContains(t, in.Models.Names(), "gpt-6.1-sol")
 	assert.Equal(t, []string{"claude"}, in.Efforts.Names())
@@ -191,10 +191,17 @@ func TestRouteQuestionContents(t *testing.T) {
 
 func TestNewQuestionOverBudget(t *testing.T) {
 	long := strings.Repeat("x", 100_000)
-	for _, key := range []string{"question", "chunk_question", "relevance", "complexity_question", "complexity_evidence"} {
-		t.Run(key, func(t *testing.T) {
+	tests := []struct {
+		key  string
+		want []string // the budgets the long policy exhausts, each naming the key
+	}{
+		{"routing_policy", []string{"routing_policy leaves", "for the state", "beside the anchor"}},
+		{"complexity_policy", []string{"complexity_policy leaves", "for the doc state"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.key, func(t *testing.T) {
 			local := filepath.Join(t.TempDir(), "config")
-			require.NoError(t, os.WriteFile(local, fmt.Appendf(nil, "[agrouter]\n%s = %s\n", key, long), 0o600))
+			require.NoError(t, os.WriteFile(local, fmt.Appendf(nil, "[agrouter]\n%s = %s\n", tc.key, long), 0o600))
 			cfg, err := config.Load(config.Sources{Embedded: defaults.Config, LocalPath: local})
 			require.NoError(t, err)
 			cat, err := catalog.Build(cfg)
@@ -202,7 +209,10 @@ func TestNewQuestionOverBudget(t *testing.T) {
 
 			_, err = New(cfg, cat, &mocks.JevClientMock{})
 			require.ErrorIs(t, err, prompt.ErrQuestionsOverBudget)
-			assert.Contains(t, err.Error(), "config:")
+			assert.Contains(t, err.Error(), "config: [agrouter]")
+			for _, w := range tc.want {
+				assert.Contains(t, err.Error(), w)
+			}
 		})
 	}
 }

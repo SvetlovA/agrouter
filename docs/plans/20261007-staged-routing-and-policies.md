@@ -190,17 +190,17 @@ The config file shrinks to two short paragraphs. The comments that described sta
 - Modify: `pkg/config/config_test.go`, `pkg/config/validate_test.go`, `pkg/catalog/catalog_test.go`, `pkg/args/build_test.go`, `pkg/prompt/chunk_test.go`
 - Modify: `pkg/router/question_test.go`, `pkg/router/router_test.go`, `pkg/router/pool_test.go`, `pkg/router/evalcase_test.go`, `pkg/router/evalcase_load_test.go`, `pkg/router/testdata/*.json`
 
-- [ ] replace the five question fields with `RoutingPolicy` and `ComplexityPolicy`; decode the new keys; validate both as non-empty
-- [ ] make each removed key an error that names its replacement and the layer path (`removedKey`)
-- [ ] rewrite `pkg/config/defaults/config`: two policy paragraphs holding only the preference; move the state-field comments into Go doc comments
-- [ ] add code constants in `pkg/router/question.go`: whole/chunk/doc state guides, the joint route question (replaced in task 4), the relevance and evidence questions, the complexity question
-- [ ] compose the route, chunk route and complexity instructions as `{question, state, policy, …}`
-- [ ] rename the old keys in the `NewBudget` errors (`pkg/prompt/budget.go:64,67`) and the router wrap (`question.go:225`)
-- [ ] switch every synthetic fixture listed in Files to the two policy keys
-- [ ] write config tests: new keys load and layer; each removed key errors with its hint and path; an empty policy is rejected
-- [ ] rewrite `TestNewQuestionOverBudget` for `routing_policy` and `complexity_policy`; update the budget error assertions in `pkg/prompt/chunk_test.go`
-- [ ] write question tests for the composed instructions with a synthetic config; regenerate goldens with `go test ./pkg/router -update` and review the diff
-- [ ] run `make test` - must pass before task 3
+- [x] replace the five question fields with `RoutingPolicy` and `ComplexityPolicy`; decode the new keys; validate both as non-empty
+- [x] make each removed key an error that names its replacement and the layer path (`removedKey`)
+- [x] rewrite `pkg/config/defaults/config`: two policy paragraphs holding only the preference; move the state-field comments into Go doc comments
+- [x] add code constants in `pkg/router/question.go`: whole/chunk/doc state guides, the joint route question (replaced in task 4), the relevance and evidence questions, the complexity question
+- [x] compose the route, chunk route and complexity instructions as `{question, state, policy, …}`
+- [x] rename the old keys in the `NewBudget` errors (`pkg/prompt/budget.go:64,67`) and the router wrap (`question.go:225`)
+- [x] switch every synthetic fixture listed in Files to the two policy keys
+- [x] write config tests: new keys load and layer; each removed key errors with its hint and path; an empty policy is rejected
+- [x] rewrite `TestNewQuestionOverBudget` for `routing_policy` and `complexity_policy`; update the budget error assertions in `pkg/prompt/chunk_test.go`
+- [x] write question tests for the composed instructions with a synthetic config; regenerate goldens with `go test ./pkg/router -update` and review the diff
+- [x] run `make test` - must pass before task 3
 
 ### Task 3: Pool and rank by criterion name (refactor, no behavior change)
 

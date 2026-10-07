@@ -39,7 +39,7 @@ func TestNewBudget(t *testing.T) {
 	t.Run("doc questions over budget", func(t *testing.T) {
 		_, err := NewBudget(Questions{Complexity: 84_003})
 		require.ErrorIs(t, err, ErrQuestionsOverBudget)
-		assert.Contains(t, err.Error(), "complexity_question and complexity_evidence leave 1999 tokens for the doc state")
+		assert.Contains(t, err.Error(), "complexity_policy leaves 1999 tokens for the doc state")
 		_, err = NewBudget(Questions{Complexity: 84_000})
 		require.NoError(t, err)
 	})
@@ -57,12 +57,12 @@ func TestNewBudget(t *testing.T) {
 	t.Run("question over budget", func(t *testing.T) {
 		_, err := NewBudget(Questions{Route: 84_003})
 		require.ErrorIs(t, err, ErrQuestionsOverBudget)
-		assert.Contains(t, err.Error(), "question leaves 1999 tokens")
+		assert.Contains(t, err.Error(), "routing_policy leaves 1999 tokens for the state")
 	})
 	t.Run("chunk questions over budget beside a maximal anchor", func(t *testing.T) {
 		_, err := NewBudget(Questions{ChunkRoute: 72_003})
 		require.ErrorIs(t, err, ErrQuestionsOverBudget)
-		assert.Contains(t, err.Error(), "leave 1999 tokens beside the anchor")
+		assert.Contains(t, err.Error(), "routing_policy leaves 1999 tokens beside the anchor")
 		_, err = NewBudget(Questions{ChunkRoute: 72_000})
 		require.NoError(t, err)
 	})

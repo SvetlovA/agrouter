@@ -75,10 +75,9 @@ func (r *Router) single(ctx context.Context, el *Eligibility, captured *prompt.R
 // chunk re-splits it once at half size; any other failure, a second 422, or a 422 on a chunk under
 // the minimum state size means Jev cannot decide.
 func (r *Router) pooled(ctx context.Context, el *Eligibility, split *prompt.Split, resplit bool) (outcome, error) {
-	ag := r.cfg.Agrouter
 	questions := map[string]jev.Question{
-		questionRoute:     routeQuestion(r.cfg, ag.ChunkQuestion, el.Options, el.effort),
-		questionRelevance: relevanceQuestion(ag.Relevance),
+		questionRoute:     routeQuestion(r.cfg, chunkGuide, el.Options, el.effort),
+		questionRelevance: relevanceQuestion(),
 	}
 	f := fanout[prompt.Chunk, routeAnswer]{
 		name: "chunk",
