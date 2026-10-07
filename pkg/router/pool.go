@@ -11,10 +11,10 @@ import (
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 )
 
-// topOptions is how many options debug output lists per chunk and for the pool.
+// topOptions is how many criteria debug output lists per chunk and for the pool.
 const topOptions = 3
 
-// Score is an option's probability in one chunk, or its pooled score.
+// Score is a criterion's probability in one chunk, or its pooled score.
 type Score struct {
 	ID    string
 	Score float64
@@ -79,10 +79,11 @@ func (r *Router) pooled(ctx context.Context, el *Eligibility, split *prompt.Spli
 		questionRoute:     routeQuestion(r.cfg, chunkGuide, el.Options, el.effort),
 		questionRelevance: relevanceQuestion(),
 	}
+	names := optionIDs(el.Options)
 	f := fanout[prompt.Chunk, routeAnswer]{
 		name: "chunk",
 		ask: func(ctx context.Context, c prompt.Chunk) (routeAnswer, error) {
-			return r.askChunk(ctx, el, split.Anchor, questions, c)
+			return r.askChunk(ctx, names, split.Anchor, questions, c)
 		},
 		halve: prompt.Halve,
 		text:  func(c prompt.Chunk) string { return c.Text },
@@ -96,17 +97,18 @@ func (r *Router) pooled(ctx context.Context, el *Eligibility, split *prompt.Spli
 		return outcome{}, err
 	}
 
-	o, top, all := pool(el.Options, seq)
+	best, top, all := pool(names, seq)
 	p := &Pooled{Top: top, Chunks: make([]ChunkResult, len(seq))}
 	p.Scores = all
 	for i, s := range seq {
 		p.Chunks[i] = s.answer.result
 	}
-	return outcome{option: o, pooled: p}, nil
+	return outcome{option: el.Options[slices.Index(names, best)], pooled: p}, nil
 }
 
-// askChunk sends one chunk request and returns its validated answers.
-func (r *Router) askChunk(ctx context.Context, el *Eligibility, anchor prompt.Anchor,
+// askChunk sends one chunk request and returns its validated answers, with a probability for every
+// criterion in names.
+func (r *Router) askChunk(ctx context.Context, names []string, anchor prompt.Anchor,
 	questions map[string]jev.Question, c prompt.Chunk) (routeAnswer, error) {
 	answers, err := r.jev.Ask(ctx, jev.Request{
 		Model:     r.cfg.Agrouter.JevModel,
@@ -124,25 +126,26 @@ func (r *Router) askChunk(ctx context.Context, el *Eligibility, anchor prompt.An
 	if !ok {
 		return routeAnswer{}, fmt.Errorf("%w: no %q answer", jev.ErrMalformed, questionRelevance)
 	}
-	scores := make([]float64, len(el.Options))
-	for i, o := range el.Options {
-		p, ok := route.Probabilities[o.ID]
+	scores := make([]float64, len(names))
+	for i, name := range names {
+		p, ok := route.Probabilities[name]
 		if !ok {
-			return routeAnswer{}, fmt.Errorf("%w: no probability for %q", jev.ErrMalformed, o.ID)
+			return routeAnswer{}, fmt.Errorf("%w: no probability for %q", jev.ErrMalformed, name)
 		}
 		scores[i] = p
 	}
 	return routeAnswer{probs: route.Probabilities, result: ChunkResult{Field: c.Field, Index: c.Index, Of: c.Of,
 		Relevance: relevance.Noul, Confidence: route.Confidence, Choice: route.Choice,
-		Probabilities: route.Probabilities, Top: ranked(el.Options, scores)}}, nil
+		Probabilities: route.Probabilities, Top: ranked(names, scores)}}, nil
 }
 
-// pool combines the chunks' probabilities: each chunk weighs its raw relevance, an option's score is
-// the weighted average of its probabilities (a plain average when every relevance is 0), and the
-// highest score wins with catalog order breaking ties. Zero-relevance chunks have no effect, but
-// enough low-relevance ones still dilute a relevant chunk: a raw weighted mean has no cap.
-func pool(opts []catalog.Option, seq []*slot) (catalog.Option, []Score, []Score) {
-	pooled := pooledScores(opts, seq)
+// pool combines the chunks' probabilities over the ordered criterion names: each chunk weighs its
+// raw relevance, a criterion's score is the weighted average of its probabilities (a plain average
+// when every relevance is 0), and the highest score wins with the order of names breaking ties. It
+// returns the winning name, the top scores and every score. Zero-relevance chunks have no effect,
+// but enough low-relevance ones still dilute a relevant chunk: a raw weighted mean has no cap.
+func pool(names []string, seq []*slot) (string, []Score, []Score) {
+	pooled := pooledScores(names, seq)
 	best := 0
 	scores := make([]float64, len(pooled))
 	for i, s := range pooled {
@@ -151,41 +154,41 @@ func pool(opts []catalog.Option, seq []*slot) (catalog.Option, []Score, []Score)
 			best = i
 		}
 	}
-	return opts[best], ranked(opts, scores), pooled
+	return names[best], ranked(names, scores), pooled
 }
 
-// pooledScores retains the full relevance-weighted result in catalog order.
-func pooledScores(opts []catalog.Option, seq []*slot) []Score {
+// pooledScores retains the full relevance-weighted result in the order of names.
+func pooledScores(names []string, seq []*slot) []Score {
 	var total float64
 	for _, s := range seq {
 		total += s.answer.result.Relevance
 	}
-	scores := make([]float64, len(opts))
+	scores := make([]float64, len(names))
 	for _, s := range seq {
 		w := s.answer.result.Relevance
 		if total == 0 {
 			w = 1
 		}
-		for i, o := range opts {
-			scores[i] += w * s.answer.probs[o.ID]
+		for i, name := range names {
+			scores[i] += w * s.answer.probs[name]
 		}
 	}
 	if total == 0 {
 		total = float64(len(seq))
 	}
-	out := make([]Score, len(opts))
+	out := make([]Score, len(names))
 	for i := range scores {
 		scores[i] /= total
-		out[i] = Score{ID: opts[i].ID, Score: scores[i]}
+		out[i] = Score{ID: names[i], Score: scores[i]}
 	}
 	return out
 }
 
-// ranked lists the top options by score, catalog order breaking ties.
-func ranked(opts []catalog.Option, scores []float64) []Score {
-	out := make([]Score, len(opts))
-	for i, o := range opts {
-		out[i] = Score{ID: o.ID, Score: scores[i]}
+// ranked lists the top criteria by score, the order of names breaking ties.
+func ranked(names []string, scores []float64) []Score {
+	out := make([]Score, len(names))
+	for i, name := range names {
+		out[i] = Score{ID: name, Score: scores[i]}
 	}
 	slices.SortStableFunc(out, func(a, b Score) int {
 		switch {
@@ -197,4 +200,13 @@ func ranked(opts []catalog.Option, scores []float64) []Score {
 		return 0
 	})
 	return out[:min(len(out), topOptions)]
+}
+
+// optionIDs lists the options' IDs in catalog order: the joint route question's criterion names.
+func optionIDs(opts []catalog.Option) []string {
+	out := make([]string, len(opts))
+	for i, o := range opts {
+		out[i] = o.ID
+	}
+	return out
 }

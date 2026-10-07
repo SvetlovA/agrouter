@@ -113,37 +113,37 @@ func TestPoolRelevanceWeights(t *testing.T) {
 	}
 
 	t.Run("short hard requirement outweighs long filler", func(t *testing.T) {
-		o, top, _ := pool(opts, withHard(5, fill))
-		assert.Equal(t, optHard, o.ID)
+		o, top, _ := pool(optionIDs(opts), withHard(5, fill))
+		assert.Equal(t, optHard, o)
 		assert.Equal(t, optHard, top[0].ID)
 		// raw weights: 0.95 and 5 Ã— 0.01
 		assert.InDelta(t, (0.95*0.9+0.05*other)/1.0, top[0].Score, 1e-9)
 	})
 	t.Run("zero-relevance filler of any length has no effect", func(t *testing.T) {
 		for _, n := range []int{1, 1000, 100_000} {
-			o, top, _ := pool(opts, withHard(n, zero))
-			assert.Equal(t, optHard, o.ID, "%d filler chunks", n)
+			o, top, _ := pool(optionIDs(opts), withHard(n, zero))
+			assert.Equal(t, optHard, o, "%d filler chunks", n)
 			assert.InDelta(t, 0.9, top[0].Score, 1e-9, "%d filler chunks", n)
 		}
 	})
 	t.Run("enough low-relevance filler dilutes it (documented limit)", func(t *testing.T) {
 		// hard wins while 0.95 > n Ã— 0.01: a raw weighted mean has no cap
-		o, _, _ := pool(opts, withHard(94, fill))
-		assert.Equal(t, optHard, o.ID, "94 Ã— 0.01 = 0.94 < 0.95")
-		o, _, _ = pool(opts, withHard(96, fill))
-		assert.Equal(t, optEasy, o.ID, "96 Ã— 0.01 = 0.96 > 0.95")
+		o, _, _ := pool(optionIDs(opts), withHard(94, fill))
+		assert.Equal(t, optHard, o, "94 Ã— 0.01 = 0.94 < 0.95")
+		o, _, _ = pool(optionIDs(opts), withHard(96, fill))
+		assert.Equal(t, optEasy, o, "96 Ã— 0.01 = 0.96 > 0.95")
 	})
 	t.Run("all-zero relevance gives a plain mean and catalog order breaks ties", func(t *testing.T) {
 		a := chunkAnswers(favoring(opts, optEasy, 0.9), 0)
 		b := chunkAnswers(favoring(opts, optHard, 0.1), 0)
-		o, top, _ := pool(opts, slots(a, b))
+		o, top, _ := pool(optionIDs(opts), slots(a, b))
 		require.Len(t, top, topOptions)
 		assert.InDelta(t, top[0].Score, top[1].Score, 1e-12, "equal weights, mirrored answers")
 		first := optHard // earlier in the catalog than haiku
 		if catalogIndex(opts, optEasy) < catalogIndex(opts, optHard) {
 			first = optEasy
 		}
-		assert.Equal(t, first, o.ID)
+		assert.Equal(t, first, o)
 		assert.Equal(t, first, top[0].ID)
 	})
 }
@@ -158,22 +158,75 @@ func catalogIndex(opts []catalog.Option, id string) int {
 }
 
 func TestRankedStableTies(t *testing.T) {
-	opts := []catalog.Option{{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "d"}}
-	top := ranked(opts, []float64{0.2, 0.3, 0.3, 0.2})
+	top := ranked([]string{"a", "b", "c", "d"}, []float64{0.2, 0.3, 0.3, 0.2})
 	assert.Equal(t, []Score{{"b", 0.3}, {"c", 0.3}, {"a", 0.2}}, top)
 }
 
-func TestPoolRetainsEveryOptionInCatalogOrder(t *testing.T) {
-	opts := []catalog.Option{{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "d"}}
+func TestPoolRetainsEveryNameInOrder(t *testing.T) {
+	names := []string{"a", "b", "c", "d"}
 	first := chunkAnswers(jev.Answer{Probabilities: map[string]float64{"a": 0.1, "b": 0.2, "c": 0.3, "d": 0.4}}, 0.25)
 	second := chunkAnswers(jev.Answer{Probabilities: map[string]float64{"a": 0.4, "b": 0.3, "c": 0.2, "d": 0.1}}, 0.75)
-	chosen, top, all := pool(opts, slots(first, second))
-	assert.Equal(t, "a", chosen.ID)
+	chosen, top, all := pool(names, slots(first, second))
+	assert.Equal(t, "a", chosen)
 	assert.Len(t, top, 3)
 	require.Len(t, all, 4)
 	for i, want := range []float64{0.325, 0.275, 0.225, 0.175} {
-		assert.Equal(t, opts[i].ID, all[i].ID)
+		assert.Equal(t, names[i], all[i].ID)
 		assert.InDelta(t, want, all[i].Score, 1e-9)
+	}
+}
+
+func TestPoolNamesOtherThanOptionIDs(t *testing.T) {
+	// a later stage's criteria: effort labels or CLIs, not option IDs
+	probs := func(p map[string]float64, relevance float64) map[string]jev.Answer {
+		return chunkAnswers(jev.Answer{Probabilities: p}, relevance)
+	}
+	tests := []struct {
+		name    string
+		names   []string
+		answers []map[string]jev.Answer
+		want    string
+		top     []Score
+	}{
+		{
+			name:  "weighted by relevance",
+			names: []string{"low", "medium", "high"},
+			answers: []map[string]jev.Answer{
+				probs(map[string]float64{"low": 0.1, "medium": 0.2, "high": 0.7}, 0.9),
+				probs(map[string]float64{"low": 0.8, "medium": 0.1, "high": 0.1}, 0.1),
+			},
+			want: "high",
+			top:  []Score{{"high", 0.64}, {"medium", 0.19}, {"low", 0.17}},
+		},
+		{
+			name:    "ties keep the order of names",
+			names:   []string{"beta", "alpha"},
+			answers: []map[string]jev.Answer{probs(map[string]float64{"alpha": 0.5, "beta": 0.5}, 0)},
+			want:    "beta",
+			top:     []Score{{"beta", 0.5}, {"alpha", 0.5}},
+		},
+		{
+			name:    "probabilities for unlisted names are ignored",
+			names:   []string{"alpha", "beta"},
+			answers: []map[string]jev.Answer{probs(map[string]float64{"alpha": 0.2, "beta": 0.3, "alpha@high": 0.5}, 1)},
+			want:    "beta",
+			top:     []Score{{"beta", 0.3}, {"alpha", 0.2}},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			chosen, top, all := pool(tc.names, slots(tc.answers...))
+			assert.Equal(t, tc.want, chosen)
+			require.Len(t, top, len(tc.top))
+			for i, want := range tc.top {
+				assert.Equal(t, want.ID, top[i].ID)
+				assert.InDelta(t, want.Score, top[i].Score, 1e-9)
+			}
+			require.Len(t, all, len(tc.names))
+			for i, name := range tc.names {
+				assert.Equal(t, name, all[i].ID, "every score in the order of names")
+			}
+		})
 	}
 }
 

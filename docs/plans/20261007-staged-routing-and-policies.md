@@ -208,10 +208,10 @@ The config file shrinks to two short paragraphs. The comments that described sta
 - Modify: `pkg/router/pool.go`, `pkg/router/router.go`
 - Modify: `pkg/router/pool_test.go`
 
-- [ ] make `pool`, `pooledScores`, `ranked` and `askChunk` take ordered criterion names instead of `[]catalog.Option`, mapping the winner back to its option at the call site
-- [ ] keep the joint question and the outputs unchanged; the goldens must not change
-- [ ] adapt the `pool_test.go` unit tests to the new signatures; add a case pooling names that aren't option IDs
-- [ ] run `make test` - must pass before task 4
+- [x] make `pool`, `pooledScores`, `ranked` and `askChunk` take ordered criterion names instead of `[]catalog.Option`, mapping the winner back to its option at the call site
+- [x] keep the joint question and the outputs unchanged; the goldens must not change
+- [x] adapt the `pool_test.go` unit tests to the new signatures; add a case pooling names that aren't option IDs
+- [x] run `make test` - must pass before task 4
 
 ### Task 4: Staged routing for whole and split states
 
