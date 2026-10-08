@@ -71,7 +71,7 @@ type selectionJSON struct {
 	Options           []optionJSON    `json:"options,omitempty"`
 }
 
-// optionJSON identifies probability keys and preserves catalog order for tie-breaking.
+// optionJSON is one eligible option, in catalog order.
 type optionJSON struct {
 	ID     string `json:"id"`
 	CLI    string `json:"cli"`
@@ -113,6 +113,8 @@ func (a *app) run(argv []string) int {
 
 	d, err := a.route(cfg, cat, rt, req)
 	if err != nil {
+		// the stages completed before Jev failed, if any; stdout stays empty
+		a.debug.decision(d.Decision)
 		a.debug.failed(err)
 		return a.fail(err)
 	}
@@ -152,7 +154,7 @@ func (a *app) setup(req *args.Request) (*config.Config, *catalog.Catalog, *route
 	}
 	key, source := config.ResolveAPIKey(req.APIKey.Value, req.APIKey.Set, a.getenv(config.EnvAPIKey), cfg.Agrouter)
 	a.debug.apiKey(key, source)
-	rt, err := router.New(cfg, cat, a.newJev(key), router.EncodingCompact)
+	rt, err := router.New(cfg, cat, a.newJev(key))
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -169,7 +171,8 @@ type routed struct {
 }
 
 // route reads --prompt-file and every --doc, captures the prompt and decides, all within the routing
-// deadline. Eligibility warnings go to stderr once the prompt is known to be there.
+// deadline. Eligibility warnings go to stderr once the prompt is known to be there. When Jev cannot
+// decide, the error comes with the partial decision: the stages and complexity completed.
 func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router, req *args.Request) (routed, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Agrouter.Timeout)
 	defer cancel()
@@ -221,7 +224,7 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 
 	d, err := rt.Route(ctx, el, req, captured)
 	if err != nil {
-		return routed{}, err
+		return routed{Decision: d}, err
 	}
 	options := make([]optionJSON, len(el.Options))
 	for i, o := range el.Options {

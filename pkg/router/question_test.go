@@ -9,14 +9,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/SvetlovA/agrouter/pkg/catalog"
+	"github.com/SvetlovA/agrouter/pkg/config"
 	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 )
 
 func TestComplexityQuestion(t *testing.T) {
-	q := complexityQuestion("How complex?")
+	q := complexityQuestion("Judge the whole codebase.")
 	assert.Equal(t, jev.TypeScore, q.Type)
-	assert.Equal(t, "How complex?", q.Instructions)
+	assert.Equal(t, instructions{Question: complexityText, State: docGuide, Policy: "Judge the whole codebase."}, q.Instructions)
 	require.Len(t, q.Levels, 10)
 	for i, description := range q.Levels {
 		assert.NotEmpty(t, description, "level %d is anchored", i)
@@ -25,9 +27,9 @@ func TestComplexityQuestion(t *testing.T) {
 }
 
 func TestEvidenceQuestion(t *testing.T) {
-	q := evidenceQuestion("Is it evidence?")
+	q := evidenceQuestion()
 	assert.Equal(t, jev.TypeNoul, q.Type)
-	assert.Equal(t, "Is it evidence?", q.Instructions)
+	assert.Equal(t, evidenceText, q.Instructions)
 	assert.Equal(t, []string{"true", "false"}, q.Criteria.Names())
 }
 
@@ -35,8 +37,9 @@ func TestComplexityQuestionsFromConfig(t *testing.T) {
 	cfg, _ := requestFixture(t)
 	qs := complexityQuestions(cfg.Agrouter)
 	require.Len(t, qs, 2)
-	assert.Equal(t, cfg.Agrouter.ComplexityQuestion, qs[questionComplexity].Instructions)
-	assert.Equal(t, cfg.Agrouter.ComplexityEvidence, qs[questionEvidence].Instructions)
+	assert.Equal(t, instructions{Question: complexityText, State: docGuide, Policy: cfg.Agrouter.ComplexityPolicy},
+		qs[questionComplexity].Instructions)
+	assert.Equal(t, evidenceText, qs[questionEvidence].Instructions, "evidence is not configurable")
 }
 
 func TestComplexityGoldenRequest(t *testing.T) {
@@ -74,4 +77,22 @@ func TestComplexityGoldenRequest(t *testing.T) {
 			assert.Equal(t, string(want), string(got)+"\n")
 		})
 	}
+}
+
+func TestNewTreeKeepsSeparatorNamesApart(t *testing.T) {
+	cfg := &config.Config{
+		CLIs: []config.CLI{{Name: "a", Command: "a"}, {Name: "a/b", Command: "ab"}},
+		Models: []config.Model{
+			{Section: "b/c", CLI: "a", Name: "first-model", Efforts: []string{"low"}, Description: "First."},
+			{Section: "c", CLI: "a/b", Name: "second-model", Efforts: []string{"high"}, Description: "Second."},
+		},
+	}
+	cat, err := catalog.Build(cfg)
+	require.NoError(t, err)
+
+	tr := newTree(cfg, cat.Options, "")
+	assert.Equal(t, jev.Criteria{{Name: "b/c", Value: modelEntry{Description: "First.", Efforts: []string{"low"}}}},
+		tr.modelCriteria("a"))
+	assert.Equal(t, jev.Criteria{{Name: "c", Value: modelEntry{Description: "Second.", Efforts: []string{"high"}}}},
+		tr.modelCriteria("a/b"))
 }

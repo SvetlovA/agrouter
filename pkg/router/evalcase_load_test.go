@@ -8,18 +8,20 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/SvetlovA/agrouter/pkg/catalog"
 	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 	"github.com/SvetlovA/agrouter/pkg/router/mocks"
 )
 
-// evalMock answers the route question with pick (probability 1, confidence 0.8), the complexity
-// Score with its last level, and the Nouls (relevance, evidence) with 0.5, over
-// whatever options each request sends.
+// evalMock answers each stage question with pick's part (probability 1, confidence 0.8; see
+// pickAt), the complexity Score with its last level, and the Nouls (relevance, evidence) with 0.5,
+// over whatever criteria each request sends.
 func evalMock(pick string) *mocks.JevClientMock {
 	return &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
 		out := map[string]jev.Answer{}
@@ -33,8 +35,8 @@ func evalMock(pick string) *mocks.JevClientMock {
 				continue
 			}
 			names := q.Criteria.Names()
-			choice := pick
-			if !slices.Contains(names, pick) {
+			choice := pickAt(id, q, pick)
+			if !slices.Contains(names, choice) {
 				choice = names[len(names)-1]
 			}
 			probs := map[string]float64{}
@@ -46,6 +48,26 @@ func evalMock(pick string) *mocks.JevClientMock {
 		}
 		return out, nil
 	}}
+}
+
+// pickAt is the criterion name of option id pick ("<section>@<effort>" or "<section>") in the stage
+// question q asked under id: its CLI, found in the cli stage's instructions, its section, or its
+// effort label.
+func pickAt(id string, q jev.Question, pick string) string {
+	section, effort, _ := strings.Cut(pick, "@")
+	switch id {
+	case LevelModel:
+		return section
+	case LevelEffort:
+		return effort
+	}
+	in, _ := q.Instructions.(stageInstructions)
+	for _, c := range in.CLIs {
+		if has(c.Value.(cliEntry).Models, section) {
+			return c.Name
+		}
+	}
+	return pick
 }
 
 func TestLoadEvalCases_SeedSet(t *testing.T) {
@@ -103,21 +125,21 @@ func assertMidText(t *testing.T, text, marker string) {
 func TestLoadEvalCase_Invalid(t *testing.T) {
 	_, cat := embedded(t)
 	tests := map[string]string{
-		"unknown field":     `{"prompt":"x","acceptable":["claude-haiku-4-5"],"extra":1}`,
+		"unknown field":     `{"prompt":"x","acceptable":["claude-haiku-5-5@low"],"extra":1}`,
 		"no acceptable":     `{"prompt":"x"}`,
 		"unknown option":    `{"prompt":"x","acceptable":["gpt-9@low"]}`,
-		"no prompt":         `{"acceptable":["claude-haiku-4-5"]}`,
-		"bad filler":        `{"prompt":"x","filler":{"text":"a","bytes":10,"position":"middle"},"acceptable":["claude-haiku-4-5"]}`,
-		"no stdin file":     `{"prompt":"x","stdin_file":"missing.txt","acceptable":["claude-haiku-4-5"]}`,
+		"no prompt":         `{"acceptable":["claude-haiku-5-5@low"]}`,
+		"bad filler":        `{"prompt":"x","filler":{"text":"a","bytes":10,"position":"middle"},"acceptable":["claude-haiku-5-5@low"]}`,
+		"no stdin file":     `{"prompt":"x","stdin_file":"missing.txt","acceptable":["claude-haiku-5-5@low"]}`,
 		"malformed json":    `{"prompt":`,
-		"empty filler txt":  `{"prompt":"x","filler":{"bytes":10,"position":"after"},"acceptable":["claude-haiku-4-5"]}`,
-		"no prompt file":    `{"prompt_file":"missing.txt","acceptable":["claude-haiku-4-5"]}`,
-		"binary prompt":     `{"prompt_file":"bin.dat","acceptable":["claude-haiku-4-5"]}`,
-		"empty prompt file": `{"prompt_file":"empty.txt","acceptable":["claude-haiku-4-5"]}`,
-		"no doc file":       `{"prompt":"x","docs":[{"file":"missing.md"}],"acceptable":["claude-haiku-4-5"]}`,
-		"binary doc":        `{"prompt":"x","docs":[{"file":"bin.dat"}],"acceptable":["claude-haiku-4-5"]}`,
-		"doc text & file":   `{"prompt":"x","docs":[{"text":"a","file":"doc.md"}],"acceptable":["claude-haiku-4-5"]}`,
-		"empty doc":         `{"prompt":"x","docs":[{}],"acceptable":["claude-haiku-4-5"]}`,
+		"empty filler txt":  `{"prompt":"x","filler":{"bytes":10,"position":"after"},"acceptable":["claude-haiku-5-5@low"]}`,
+		"no prompt file":    `{"prompt_file":"missing.txt","acceptable":["claude-haiku-5-5@low"]}`,
+		"binary prompt":     `{"prompt_file":"bin.dat","acceptable":["claude-haiku-5-5@low"]}`,
+		"empty prompt file": `{"prompt_file":"empty.txt","acceptable":["claude-haiku-5-5@low"]}`,
+		"no doc file":       `{"prompt":"x","docs":[{"file":"missing.md"}],"acceptable":["claude-haiku-5-5@low"]}`,
+		"binary doc":        `{"prompt":"x","docs":[{"file":"bin.dat"}],"acceptable":["claude-haiku-5-5@low"]}`,
+		"doc text & file":   `{"prompt":"x","docs":[{"text":"a","file":"doc.md"}],"acceptable":["claude-haiku-5-5@low"]}`,
+		"empty doc":         `{"prompt":"x","docs":[{}],"acceptable":["claude-haiku-5-5@low"]}`,
 	}
 	for name, content := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -140,7 +162,7 @@ func TestLoadEvalCase_Filler(t *testing.T) {
 	_, cat := embedded(t)
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "c.json"),
-		[]byte(`{"stdin":"REQ","filler":{"text":"ab","bytes":5,"position":"before"},"acceptable":["claude-haiku-4-5"]}`), 0o600))
+		[]byte(`{"stdin":"REQ","filler":{"text":"ab","bytes":5,"position":"before"},"acceptable":["claude-haiku-5-5@low"]}`), 0o600))
 	cases, err := loadEvalCases(dir, cat)
 	require.NoError(t, err)
 	assert.Equal(t, "ababaREQ", cases[0].Stdin)
@@ -152,7 +174,7 @@ func TestLoadEvalCase_PromptFileAndDocs(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "task.txt"), []byte("do the task\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.md"), []byte("# big system\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "c.json"), []byte(`{"prompt_file":"task.txt",`+
-		`"docs":[{"file":"a.md"},{"text":"inline doc"}],"acceptable":["claude-haiku-4-5"]}`), 0o600))
+		`"docs":[{"file":"a.md"},{"text":"inline doc"}],"acceptable":["claude-haiku-5-5@low"]}`), 0o600))
 	cases, err := loadEvalCases(dir, cat)
 	require.NoError(t, err)
 	require.Len(t, cases, 1)
@@ -167,31 +189,34 @@ func TestRunEvalCase(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("correct, with the mentioned file in the state", func(t *testing.T) {
-		client := evalMock("claude-haiku-4-5")
+		client := evalMock("claude-haiku-5-5@low")
 		r := newRouter(t, cfg, cat, client)
 		c := evalCase{Name: "typo", Prompt: "fix the typo in README.md", Files: map[string]string{"README.md": "Call get() here.\n"},
-			Acceptable: []string{"claude-haiku-4-5"}}
+			Acceptable: []string{"claude-haiku-5-5@low"}}
 		res := runEvalCase(ctx, r, cfg, cat, c, t.TempDir())
 		require.NoError(t, res.Err)
 		assert.True(t, res.Correct)
 		assert.False(t, res.Split)
-		assert.InDelta(t, 0.8, res.Confidence, 1e-9)
-		require.Len(t, client.AskCalls(), 1)
-		assert.Equal(t, []string{"Call get() here.\n"}, client.AskCalls()[0].Req.State.(prompt.State).Files)
+		assert.Equal(t, []evalStage{{Level: LevelCLI, Confidence: 0.8, Correct: true},
+			{Level: LevelModel, Confidence: 0.8, Correct: true}, {Level: LevelEffort, Confidence: 0.8, Correct: true}}, res.Stages)
+		require.Len(t, client.AskCalls(), 3, "the cli, model and effort stages")
+		for _, call := range client.AskCalls() {
+			assert.Equal(t, []string{"Call get() here.\n"}, call.Req.State.(prompt.State).Files)
+		}
 	})
 
 	t.Run("prompt file and docs: stage 1 scores the docs, stage 2 gets the prompt file text", func(t *testing.T) {
-		client := evalMock("claude-haiku-4-5")
+		client := evalMock("claude-haiku-5-5@low")
 		r := newRouter(t, cfg, cat, client)
 		c := evalCase{Name: "docs", Prompt: "first", PromptFile: "task.txt", FileText: "from the file",
-			DocTexts: []string{"# a large system\n"}, Acceptable: []string{"claude-haiku-4-5"}}
+			DocTexts: []string{"# a large system\n"}, Acceptable: []string{"claude-haiku-5-5@low"}}
 		res := runEvalCase(ctx, r, cfg, cat, c, t.TempDir())
 		require.NoError(t, res.Err)
 		assert.True(t, res.Correct)
 		assert.Equal(t, "10.0", res.Project, "the mock rates the docs at the last level")
 
 		calls := client.AskCalls()
-		require.Len(t, calls, 2)
+		require.Len(t, calls, 4, "the docs, then the cli, model and effort stages")
 		assert.Contains(t, calls[0].Req.Questions, questionComplexity)
 		state := calls[1].Req.State.(prompt.State)
 		assert.Equal(t, "first\n\nfrom the file", state.Prompt)
@@ -201,85 +226,142 @@ func TestRunEvalCase(t *testing.T) {
 
 	t.Run("wrong", func(t *testing.T) {
 		r := newRouter(t, cfg, cat, evalMock("gpt-6-astra@ultra"))
-		res := runEvalCase(ctx, r, cfg, cat, evalCase{Name: "w", Prompt: "x", Acceptable: []string{"claude-haiku-4-5"}},
+		res := runEvalCase(ctx, r, cfg, cat, evalCase{Name: "w", Prompt: "x", Acceptable: []string{"claude-haiku-5-5@low"}},
 			t.TempDir())
 		require.NoError(t, res.Err)
 		assert.False(t, res.Correct)
 		assert.Equal(t, "gpt-6-astra@ultra", res.Chosen)
+		require.NotEmpty(t, res.Stages)
+		for _, st := range res.Stages {
+			assert.False(t, st.Correct, st.Level)
+		}
 	})
 
 	t.Run("jev failing with the CLI known is an error, not a guess", func(t *testing.T) {
 		r := newRouter(t, cfg, cat, failing(jev.ErrMalformed))
-		res := runEvalCase(ctx, r, cfg, cat, evalCase{Name: "f", Prompt: "x", CLI: "claude", Acceptable: []string{"claude-haiku-4-5"}},
+		res := runEvalCase(ctx, r, cfg, cat, evalCase{Name: "f", Prompt: "x", CLI: "claude", Acceptable: []string{"claude-haiku-5-5@low"}},
 			t.TempDir())
 		require.ErrorIs(t, res.Err, jev.ErrMalformed)
 	})
 
 	t.Run("cannot decide", func(t *testing.T) {
 		r := newRouter(t, cfg, cat, failing(jev.ErrMalformed))
-		res := runEvalCase(ctx, r, cfg, cat, evalCase{Name: "f", Prompt: "x", Acceptable: []string{"claude-haiku-4-5"}},
+		res := runEvalCase(ctx, r, cfg, cat, evalCase{Name: "f", Prompt: "x", Acceptable: []string{"claude-haiku-5-5@low"}},
 			t.TempDir())
 		require.ErrorIs(t, res.Err, ErrCannotDecide)
 	})
 
-	t.Run("every seed case routes, and the oversized ones are split, with both encodings", func(t *testing.T) {
+	t.Run("every seed case routes, and the oversized ones are split", func(t *testing.T) {
 		cases, err := loadEvalCases(evalDir, cat)
 		require.NoError(t, err)
-		for _, enc := range []Encoding{EncodingCompact, EncodingFull} {
-			cfg, cat := embedded(t)
-			evalQuestions(cfg, enc)
-			r, err := New(cfg, cat, evalMock("claude-opus-5-5@high"), enc)
-			require.NoError(t, err)
-			for _, c := range cases {
-				res := runEvalCase(ctx, r, cfg, cat, c, t.TempDir())
-				require.NoError(t, res.Err, "%s %s", enc, c.Name)
-				assert.Equal(t, strings.HasPrefix(c.Name, "oversized") || strings.HasPrefix(c.Name, "distant"), res.Split,
-					"%s %s", enc, c.Name)
+		r, err := New(cfg, cat, evalMock("claude-opus-5-5@high"))
+		require.NoError(t, err)
+		for _, c := range cases {
+			res := runEvalCase(ctx, r, cfg, cat, c, t.TempDir())
+			require.NoError(t, res.Err, c.Name)
+			split := strings.HasPrefix(c.Name, "oversized") || strings.HasPrefix(c.Name, "distant")
+			assert.Equal(t, split, res.Split, c.Name)
+			for _, st := range res.Stages {
+				assert.Equal(t, split, st.Pooled, "%s %s", c.Name, st.Level)
+				assert.InDelta(t, 0.8, st.Confidence, 1e-9, "%s %s: pooled stages report the chunk mean", c.Name, st.Level)
 			}
 		}
 	})
 }
 
+func TestEvalStages(t *testing.T) {
+	a := catalog.Option{ID: "m1@low", CLI: "c1", Section: "m1", Effort: "low"}
+	b := catalog.Option{ID: "m1@high", CLI: "c1", Section: "m1", Effort: "high"}
+	c := catalog.Option{ID: "m2", CLI: "c2", Section: "m2"}
+	asked := func(level, choice string, confidence float64) Stage {
+		return Stage{Level: level, Choice: choice, Answer: &jev.Answer{Confidence: confidence}}
+	}
+	pooled := Stage{Level: LevelEffort, Choice: "high", Pooled: &Pooled{Chunks: []ChunkResult{{Confidence: 0.2}, {Confidence: 0.6}}}}
+
+	tests := map[string]struct {
+		stages     []Stage
+		acceptable []catalog.Option
+		want       []evalStage
+	}{
+		"all asked and right": {
+			stages:     []Stage{asked(LevelCLI, "c1", 0.9), asked(LevelModel, "m1", 0.5), asked(LevelEffort, "low", 0.3)},
+			acceptable: []catalog.Option{a, c},
+			want: []evalStage{{Level: LevelCLI, Confidence: 0.9, Correct: true},
+				{Level: LevelModel, Confidence: 0.5, Correct: true}, {Level: LevelEffort, Confidence: 0.3, Correct: true}},
+		},
+		"a wrong stage makes every later stage wrong": {
+			stages:     []Stage{asked(LevelCLI, "c1", 0.9), asked(LevelModel, "m1", 0.5), asked(LevelEffort, "low", 0.3)},
+			acceptable: []catalog.Option{c},
+			want: []evalStage{{Level: LevelCLI, Confidence: 0.9}, {Level: LevelModel, Confidence: 0.5},
+				{Level: LevelEffort, Confidence: 0.3}},
+		},
+		"skipped stages narrow but are not reported; pooled stages report the chunk mean": {
+			stages: []Stage{{Level: LevelCLI, Choice: "c1", Skipped: true}, {Level: LevelModel, Choice: "m1", Skipped: true},
+				pooled},
+			acceptable: []catalog.Option{a, b},
+			want:       []evalStage{{Level: LevelEffort, Confidence: 0.4, Pooled: true, Correct: true}},
+		},
+		"the effort of the wrong option": {
+			stages:     []Stage{asked(LevelEffort, "high", 0.7)},
+			acceptable: []catalog.Option{a},
+			want:       []evalStage{{Level: LevelEffort, Confidence: 0.7}},
+		},
+		"no stages": {acceptable: []catalog.Option{a}},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := evalStages(tt.stages, tt.acceptable)
+			require.Len(t, got, len(tt.want))
+			for i := range tt.want {
+				assert.Equal(t, tt.want[i].Level, got[i].Level)
+				assert.InDelta(t, tt.want[i].Confidence, got[i].Confidence, 1e-9)
+				assert.Equal(t, tt.want[i].Pooled, got[i].Pooled)
+				assert.Equal(t, tt.want[i].Correct, got[i].Correct)
+			}
+		})
+	}
+}
+
 func TestScoreEval(t *testing.T) {
 	results := []evalResult{
-		{Case: "a", Chosen: "x", Correct: true, Confidence: 0.95},
-		{Case: "b", Chosen: "x", Correct: true, Confidence: 1},
-		{Case: "c", Chosen: "y", Confidence: 0.42},
-		{Case: "d", Chosen: "x", Correct: true, Split: true},
-		{Case: "e", Err: errors.New("timeout")},
-		{Case: "f", Chosen: "x", Correct: true, Confidence: 0.9, Project: "6.9"},
+		{Case: "a", Chosen: "x", Correct: true, Duration: time.Second,
+			Stages: []evalStage{{Level: LevelCLI, Confidence: 0.95, Correct: true}, {Level: LevelModel, Confidence: 0.45, Correct: true}}},
+		{Case: "b", Chosen: "x", Correct: true, Stages: []evalStage{{Level: LevelModel, Confidence: 1, Correct: true}}},
+		{Case: "c", Chosen: "y", Duration: 2 * time.Second,
+			Stages: []evalStage{{Level: LevelCLI, Confidence: 0.97, Correct: true}, {Level: LevelModel, Confidence: 0.42}}},
+		{Case: "d", Chosen: "x", Correct: true, Split: true,
+			Stages: []evalStage{{Level: LevelEffort, Confidence: 0.3, Pooled: true, Correct: true}}},
+		{Case: "e", Err: errors.New("timeout"), Duration: 3 * time.Second},
+		{Case: "f", Chosen: "x", Correct: true, Project: "6.9"},
 		{Case: "g", Err: errors.New("cannot decide"), Project: "2.0"},
 	}
 	rep := scoreEval(results)
 	assert.Equal(t, 7, rep.Total)
 	assert.Equal(t, 4, rep.Correct)
 	assert.Equal(t, 2, rep.Errors)
+	assert.Equal(t, 6*time.Second, rep.Duration)
 	assert.InDelta(t, 4.0/7, rep.Accuracy(), 1e-9)
-	assert.Equal(t, 3, rep.CorrectBuckets[9], "1.0 falls in the top decile")
-	assert.Equal(t, 1, rep.WrongBuckets[4])
-	assert.Equal(t, "accuracy 4/7 (57.1%), 2 error(s)\nconfidence  correct  wrong\n"+
-		"0.4-0.5         0      1\n0.9-1.0         3      0\n", rep.String())
+	assert.Equal(t, 2, rep.Levels[LevelCLI].Correct[9])
+	assert.Equal(t, 1, rep.Levels[LevelModel].Correct[9], "1.0 falls in the top decile")
+	assert.Equal(t, 1, rep.Levels[LevelModel].Wrong[4])
+	assert.Equal(t, "accuracy 4/7 (57.1%), 2 error(s), latency 6s total, 857ms per case\n"+
+		"cli confidence (conditional)  correct  wrong\n"+
+		"  0.9-1.0         2      0\n"+
+		"model confidence (conditional)  correct  wrong\n"+
+		"  0.4-0.5         1      1\n"+
+		"  0.9-1.0         1      0\n"+
+		"effort confidence (conditional)  correct  wrong\n"+
+		"  0.3-0.4         1      0\n", rep.String())
 	assert.Zero(t, evalReport{}.Accuracy())
+	assert.Equal(t, "accuracy 0/0 (0.0%), 0 error(s), latency 0s total\n", evalReport{}.String())
 
 	assert.Equal(t, []string{
-		"ERROR e: timeout",
-		"ERROR g: cannot decide",
-		"WRONG c: y confidence 0.420 in 0s",
-		"ok    a: x confidence 0.950 in 0s",
-		"ok    b: x confidence 1.000 in 0s",
-		"ok    d: x (split) in 0s",
-		"ok    f: x confidence 0.900 in 0s, project 6.9",
+		"ERROR e: timeout in 3s",
+		"ERROR g: cannot decide in 0s",
+		"WRONG c: y, cli 0.970, model 0.420 in 2s",
+		"ok    a: x, cli 0.950, model 0.450 in 1s",
+		"ok    b: x, model 1.000 in 0s",
+		"ok    d: x, effort 0.300 (split) in 0s",
+		"ok    f: x in 0s, project 6.9",
 	}, resultLines(results))
-}
-
-func TestEvalQuestions(t *testing.T) {
-	cfg, _ := embedded(t)
-	q := cfg.Agrouter.Question
-	evalQuestions(cfg, EncodingCompact)
-	assert.Equal(t, q, cfg.Agrouter.Question)
-
-	evalQuestions(cfg, EncodingFull)
-	assert.NotContains(t, cfg.Agrouter.Question, "Look up")
-	assert.NotContains(t, cfg.Agrouter.ChunkQuestion, "Look up")
-	assert.True(t, strings.HasPrefix(q, cfg.Agrouter.Question))
 }

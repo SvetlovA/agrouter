@@ -24,10 +24,17 @@
           "alpha": {
             "description": "Alpha agent.",
             "models": {
-              "unknown-model": {
-                "description": "not in the catalog: passed through as given",
+              "strong": {
+                "description": "Strong model.",
                 "efforts": [
-                  "the CLI's default"
+                  "low",
+                  "high"
+                ]
+              },
+              "fast": {
+                "description": "Fast model.",
+                "efforts": [
+                  "none (not supported)"
                 ]
               }
             }
@@ -35,16 +42,26 @@
           "beta": {
             "description": "Beta agent.",
             "models": {
-              "unknown-model": {
-                "description": "not in the catalog: passed through as given",
+              "worker": {
+                "description": "Worker model.",
                 "efforts": [
-                  "the CLI's default"
+                  "low",
+                  "high"
                 ]
               }
             }
           }
         },
-        "efforts": {}
+        "efforts": {
+          "alpha": {
+            "low": "Quick reasoning.",
+            "high": "Deep reasoning."
+          },
+          "beta": {
+            "low": "Quick reasoning.",
+            "high": "Deep reasoning."
+          }
+        }
       },
       "criteria": {
         "alpha": {

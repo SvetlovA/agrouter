@@ -152,14 +152,24 @@ func (c *evalCase) readExplicit(dir string) error {
 
 // evalResult is how one case was routed.
 type evalResult struct {
-	Case       string
-	Chosen     string
-	Correct    bool
-	Split      bool    // pooled over chunks: no confidence
-	Confidence float64 // Jev's, for a state sent whole
-	Project    string  // the project complexity, formatted, when the case has docs
-	Duration   time.Duration
-	Err        error
+	Case     string
+	Chosen   string
+	Correct  bool
+	Split    bool        // some stage was pooled over chunks
+	Stages   []evalStage // the stages asked, in order; skipped ones are left out
+	Project  string      // the project complexity, formatted, when the case has docs
+	Duration time.Duration
+	Err      error
+}
+
+// evalStage is one asked routing stage. Its confidence is conditional on the stages before it.
+type evalStage struct {
+	Level      string
+	Confidence float64 // the whole-state answer's, or the mean of the chunk confidences when pooled
+	Pooled     bool
+	// Correct is whether the choice leads towards an acceptable option, given the stages before it;
+	// after a wrong stage none is left, so every later stage is wrong too.
+	Correct bool
 }
 
 // evalTimeout bounds each case. It is longer than [agrouter] timeout because the evaluation
@@ -213,29 +223,75 @@ func runEvalCase(ctx context.Context, r *Router, cfg *config.Config, cat *catalo
 	}
 	res.Chosen = d.OptionID
 	res.Correct = slices.Contains(c.Acceptable, d.OptionID)
-	res.Split = d.Pooled != nil
 	if d.Complexity != nil {
 		res.Project = fmt.Sprintf("%.1f", d.Complexity.Complexity)
 	}
-	if d.Answer != nil {
-		res.Confidence = d.Answer.Confidence
-	}
+	res.Stages = evalStages(d.Stages, acceptableOptions(cat, c.Acceptable))
+	res.Split = slices.ContainsFunc(res.Stages, func(st evalStage) bool { return st.Pooled })
 	res.Duration = time.Since(start)
 	return res
 }
 
-// evalReport summarizes results: accuracy over all cases, and the confidence distribution of the
-// cases sent whole (split cases have no confidence and count towards accuracy only).
+// acceptableOptions are the catalog options with the given ids.
+func acceptableOptions(cat *catalog.Catalog, ids []string) []catalog.Option {
+	var out []catalog.Option
+	for _, o := range cat.Options {
+		if slices.Contains(ids, o.ID) {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// evalStages scores the asked stages against the acceptable options, narrowing them at every stage,
+// skipped ones included, the way routing narrows the eligible options.
+func evalStages(stages []Stage, acceptable []catalog.Option) []evalStage {
+	var out []evalStage
+	for _, st := range stages {
+		i := slices.IndexFunc(routeLevels[:], func(lv level) bool { return lv.name == st.Level })
+		if i < 0 {
+			continue
+		}
+		label := routeLevels[i].label
+		acceptable = slices.DeleteFunc(slices.Clone(acceptable), func(o catalog.Option) bool { return label(o) != st.Choice })
+		if st.Skipped {
+			continue
+		}
+		es := evalStage{Level: st.Level, Pooled: st.Pooled != nil, Correct: len(acceptable) > 0}
+		switch {
+		case st.Answer != nil:
+			es.Confidence = st.Answer.Confidence
+		case st.Pooled != nil && len(st.Pooled.Chunks) > 0:
+			for _, c := range st.Pooled.Chunks {
+				es.Confidence += c.Confidence
+			}
+			es.Confidence /= float64(len(st.Pooled.Chunks))
+		}
+		out = append(out, es)
+	}
+	return out
+}
+
+// evalReport summarizes results: accuracy over all cases, latency, and per routing level the
+// distribution of the asked stages' confidence, which is conditional on the stages before.
 type evalReport struct {
 	Total, Correct, Errors int
-	// Buckets counts whole-state answers by confidence decile (0.0-0.1 … 0.9-1.0), correct and wrong.
-	CorrectBuckets, WrongBuckets [10]int
+	Duration               time.Duration // all cases, errors included
+	// Levels counts each level's asked stages by confidence decile (0.0-0.1 … 0.9-1.0), correct and
+	// wrong; a pooled stage counts with the mean of its chunk confidences.
+	Levels map[string]*levelBuckets
+}
+
+// levelBuckets counts one level's stages by confidence decile.
+type levelBuckets struct {
+	Correct, Wrong [10]int
 }
 
 func scoreEval(results []evalResult) evalReport {
-	var rep evalReport
+	rep := evalReport{Levels: map[string]*levelBuckets{}}
 	for _, r := range results {
 		rep.Total++
+		rep.Duration += r.Duration
 		switch {
 		case r.Err != nil:
 			rep.Errors++
@@ -243,14 +299,18 @@ func scoreEval(results []evalResult) evalReport {
 		case r.Correct:
 			rep.Correct++
 		}
-		if r.Split {
-			continue
-		}
-		b := min(int(r.Confidence*10), 9)
-		if r.Correct {
-			rep.CorrectBuckets[b]++
-		} else {
-			rep.WrongBuckets[b]++
+		for _, st := range r.Stages {
+			lb := rep.Levels[st.Level]
+			if lb == nil {
+				lb = &levelBuckets{}
+				rep.Levels[st.Level] = lb
+			}
+			b := min(int(st.Confidence*10), 9)
+			if st.Correct {
+				lb.Correct[b]++
+			} else {
+				lb.Wrong[b]++
+			}
 		}
 	}
 	return rep
@@ -266,13 +326,24 @@ func (r evalReport) Accuracy() float64 {
 
 func (r evalReport) String() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "accuracy %d/%d (%.1f%%), %d error(s)\n", r.Correct, r.Total, 100*r.Accuracy(), r.Errors)
-	b.WriteString("confidence  correct  wrong\n")
-	for i := range r.CorrectBuckets {
-		if r.CorrectBuckets[i] == 0 && r.WrongBuckets[i] == 0 {
+	fmt.Fprintf(&b, "accuracy %d/%d (%.1f%%), %d error(s), latency %s total", r.Correct, r.Total, 100*r.Accuracy(),
+		r.Errors, r.Duration.Round(time.Millisecond))
+	if r.Total > 0 {
+		fmt.Fprintf(&b, ", %s per case", (r.Duration / time.Duration(r.Total)).Round(time.Millisecond))
+	}
+	b.WriteString("\n")
+	for _, lv := range routeLevels {
+		lb := r.Levels[lv.name]
+		if lb == nil {
 			continue
 		}
-		fmt.Fprintf(&b, "%.1f-%.1f   %7d  %5d\n", float64(i)/10, float64(i+1)/10, r.CorrectBuckets[i], r.WrongBuckets[i])
+		fmt.Fprintf(&b, "%s confidence (conditional)  correct  wrong\n", lv.name)
+		for i := range lb.Correct {
+			if lb.Correct[i] == 0 && lb.Wrong[i] == 0 {
+				continue
+			}
+			fmt.Fprintf(&b, "  %.1f-%.1f   %7d  %5d\n", float64(i)/10, float64(i+1)/10, lb.Correct[i], lb.Wrong[i])
+		}
 	}
 	return b.String()
 }
@@ -284,12 +355,18 @@ func resultLines(results []evalResult) []string {
 		var line string
 		switch {
 		case r.Err != nil:
-			line = fmt.Sprintf("ERROR %s: %v", r.Case, r.Err)
-		case r.Split:
-			line = fmt.Sprintf("%-5s %s: %s (split) in %s", mark(r.Correct), r.Case, r.Chosen, r.Duration.Round(time.Millisecond))
+			line = fmt.Sprintf("ERROR %s: %v in %s", r.Case, r.Err, r.Duration.Round(time.Millisecond))
 		default:
-			line = fmt.Sprintf("%-5s %s: %s confidence %.3f in %s", mark(r.Correct), r.Case, r.Chosen, r.Confidence,
-				r.Duration.Round(time.Millisecond))
+			var b strings.Builder
+			fmt.Fprintf(&b, "%-5s %s: %s", mark(r.Correct), r.Case, r.Chosen)
+			for _, st := range r.Stages {
+				fmt.Fprintf(&b, ", %s %.3f", st.Level, st.Confidence)
+				if st.Pooled {
+					b.WriteString(" (split)")
+				}
+			}
+			fmt.Fprintf(&b, " in %s", r.Duration.Round(time.Millisecond))
+			line = b.String()
 		}
 		if r.Err == nil && r.Project != "" {
 			line += ", project " + r.Project
@@ -305,17 +382,4 @@ func mark(ok bool) string {
 		return "ok"
 	}
 	return "WRONG"
-}
-
-// evalQuestions adapts the configured questions to enc: the full encoding has no instructions
-// object to look options up in, so the sentence pointing there is dropped.
-func evalQuestions(cfg *config.Config, enc Encoding) {
-	if enc != EncodingFull {
-		return
-	}
-	for _, q := range []*string{&cfg.Agrouter.Question, &cfg.Agrouter.ChunkQuestion} {
-		if i := strings.Index(*q, " Look up each option"); i >= 0 {
-			*q = (*q)[:i]
-		}
-	}
 }

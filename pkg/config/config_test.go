@@ -16,9 +16,8 @@ const baseConfig = `
 api_key   =
 jev_model = jev-latest
 timeout   = 10s
-question  = Which option? Look up ` + "`models`" + `; answer "well".
-complexity_question = How complex is the project?
-complexity_evidence = Does the text describe the project?
+routing_policy    = Prefer the cheapest option; compare ` + "`models`" + ` "well".
+complexity_policy = Judge the whole codebase.
 
 [cli.alpha]
 command     = alpha
@@ -97,12 +96,11 @@ func TestLoad_Embedded(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, Agrouter{
-		APIKeySource:       LayerEmbedded,
-		JevModel:           "jev-latest",
-		Timeout:            10 * time.Second,
-		Question:           "Which option? Look up `models`; answer \"well\".",
-		ComplexityQuestion: "How complex is the project?",
-		ComplexityEvidence: "Does the text describe the project?",
+		APIKeySource:     LayerEmbedded,
+		JevModel:         "jev-latest",
+		Timeout:          10 * time.Second,
+		RoutingPolicy:    "Prefer the cheapest option; compare `models` \"well\".",
+		ComplexityPolicy: "Judge the whole codebase.",
 	}, cfg.Agrouter)
 
 	require.Len(t, cfg.CLIs, 2)
@@ -146,6 +144,7 @@ func TestLoad_Layering(t *testing.T) {
 [agrouter]
 api_key = global-key
 timeout = 20s
+routing_policy = Prefer the strongest option.
 
 [cli.alpha.args]
 print = ["--print"]
@@ -157,6 +156,7 @@ description = Global description.
 	local := `
 [agrouter]
 timeout = 30s
+complexity_policy = Judge only the architecture.
 
 [cli.alpha.args]
 model = ["--use-model", "{model}"]
@@ -175,6 +175,8 @@ name = local-new
 	assert.Equal(t, "global-key", cfg.Agrouter.APIKey)
 	assert.Equal(t, LayerGlobal, cfg.Agrouter.APIKeySource)
 	assert.Equal(t, "jev-latest", cfg.Agrouter.JevModel, "untouched keys keep the embedded value")
+	assert.Equal(t, "Prefer the strongest option.", cfg.Agrouter.RoutingPolicy, "global overrides a policy")
+	assert.Equal(t, "Judge only the architecture.", cfg.Agrouter.ComplexityPolicy, "local overrides a policy")
 
 	alpha, _ := cfg.CLIByName("alpha")
 	assert.Equal(t, []string{"--print"}, alpha.Args["print"], "global overrides one args key")
@@ -266,6 +268,37 @@ func TestLoad_Errors(t *testing.T) {
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.want)
 		})
+	}
+}
+
+func TestLoad_RemovedQuestionKeys(t *testing.T) {
+	tests := []struct {
+		key  string
+		hint string
+	}{
+		{"question", "removed; set routing_policy instead"},
+		{"chunk_question", "removed; set routing_policy instead"},
+		{"relevance", "no longer configurable; tune routing_policy instead"},
+		{"complexity_question", "removed; set complexity_policy instead"},
+		{"complexity_evidence", "no longer configurable; tune complexity_policy instead"},
+	}
+	for _, tc := range tests {
+		for _, layer := range []string{LayerGlobal, LayerLocal} {
+			t.Run(tc.key+"/"+layer, func(t *testing.T) {
+				dir := t.TempDir()
+				path := writeFile(t, dir, layer+"/config", "[agrouter]\n"+tc.key+" = Which option? sk-secret\n")
+				src := Sources{Embedded: []byte(baseConfig)}
+				if layer == LayerGlobal {
+					src.GlobalPath = path
+				} else {
+					src.LocalPath = path
+				}
+				_, err := Load(src)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "[agrouter] "+tc.key+" ("+layer+" "+path+"): "+tc.hint)
+				assert.NotContains(t, err.Error(), "sk-secret", "the old value is left out")
+			})
+		}
 	}
 }
 

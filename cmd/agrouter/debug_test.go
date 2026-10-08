@@ -38,12 +38,14 @@ func TestDebug_Redaction(t *testing.T) {
 	require.Equal(t, 0, r.code, r.stderr)
 
 	lines := debugLines(r.stderr)
-	require.Len(t, lines, 5)
+	require.Len(t, lines, 7)
 	assert.Equal(t, "api key: from env", lines[0])
 	assert.Regexp(t, `^eligible: [1-9][0-9]* option\(s\) on claude$`, lines[1])
 	assert.Equal(t, "dropped codex: --cli claude", lines[2])
-	assert.True(t, strings.HasPrefix(lines[3], "jev: choice "+e.jev.pick+", confidence 0.900, top ["+e.jev.pick+" 1.000"))
-	assert.Equal(t, "command: claude -p --model claude-sonnet-5-5 --effort low <2 raw argument(s)> -- <prompt>", lines[4])
+	assert.Equal(t, "stage cli: skipped (claude)", lines[3])
+	assert.True(t, strings.HasPrefix(lines[4], "stage model: choice claude-sonnet-5-5, confidence 0.900, top [claude-sonnet-5-5 1.000"), lines[4])
+	assert.True(t, strings.HasPrefix(lines[5], "stage effort: choice low, confidence 0.900, top [low 1.000"), lines[5])
+	assert.Equal(t, "command: claude -p --model claude-sonnet-5-5 --effort low <2 raw argument(s)> -- <prompt>", lines[6])
 	assert.NotContains(t, r.stderr, secret)
 	assert.NotContains(t, r.stderr, "raw-two")
 	assert.NotContains(t, r.stderr, testKey)
@@ -75,11 +77,12 @@ func TestDebug_JevFailureEchoingKey(t *testing.T) {
 	r := e.run([]string{"--cli=codex", "--jev-api-key=flag-secret-key", "fix it"}, nil)
 	require.Equal(t, 0, r.code, r.stderr)
 	lines := debugLines(r.stderr)
-	require.Len(t, lines, 5, r.stderr)
+	require.Len(t, lines, 6, r.stderr)
 	assert.Equal(t, "api key: from flag", lines[0])
-	assert.True(t, strings.HasPrefix(lines[3], "jev failed: route request: "), lines[3])
-	assert.Contains(t, lines[3], "running codex with the caller's fixed values")
-	assert.Equal(t, "command: codex exec -- <prompt>", lines[4])
+	assert.Equal(t, "stage cli: skipped (codex)", lines[3], "the stage completed before the failure")
+	assert.True(t, strings.HasPrefix(lines[4], "jev failed: model stage: route request: "), lines[4])
+	assert.Contains(t, lines[4], "running codex with the caller's fixed values")
+	assert.Equal(t, "command: codex exec -- <prompt>", lines[5])
 	assert.NotContains(t, r.stderr, "flag-secret-key")
 	assert.NotContains(t, r.stdout, "flag-secret-key")
 }
@@ -119,6 +122,50 @@ func TestDebug_Docs(t *testing.T) {
 	assert.NotContains(t, r.stderr, "SECRET DOC TEXT")
 }
 
+func TestDebug_StagesBeforeAFailureWithTwoCLIs(t *testing.T) {
+	for _, mode := range []string{"decision", "exec"} {
+		t.Run(mode, func(t *testing.T) {
+			e := newSyntheticEnv(t)
+			t.Setenv(envDebug, "1")
+			e.jev.pick = "fast@low"
+			e.jev.failStage = "model"
+			argv := []string{"--verbose", "fix it"}
+			if mode == "exec" {
+				argv = append([]string{"exec"}, argv...)
+			}
+			r := e.run(argv, nil)
+
+			assert.Equal(t, exitUsage, r.code)
+			assert.Empty(t, r.stdout)
+			assert.Equal(t, []string{"cli"}, e.jev.asked(), "the cli stage was answered")
+			lines := debugLines(r.stderr)
+			require.Len(t, lines, 4, r.stderr)
+			assert.Equal(t, "eligible: 6 option(s) on alpha, beta", lines[1])
+			assert.Equal(t, "stage cli: choice alpha, confidence 0.900, top [alpha 1.000, beta 0.000]", lines[2])
+			assert.True(t, strings.HasPrefix(lines[3], "no decision: jev cannot decide between alpha, beta: model stage: "), lines[3])
+			assert.Contains(t, lines[3], "model stage rejected")
+			assert.True(t, strings.HasSuffix(r.stderr, "\nagrouter: "+strings.TrimPrefix(lines[3], "no decision: ")+"\n"),
+				"the one error line follows the debug lines: %s", r.stderr)
+		})
+	}
+}
+
+func TestDebug_FailureBeforeRoutingPrintsNoStage(t *testing.T) {
+	e := newSyntheticEnv(t)
+	t.Setenv(envDebug, "1")
+	r := e.run([]string{"--prompt-file", filepath.Join(t.TempDir(), "missing.md")}, nil)
+
+	assert.Equal(t, exitUsage, r.code)
+	assert.Empty(t, r.stdout)
+	assert.Empty(t, e.jev.asked())
+	lines := debugLines(r.stderr)
+	require.NotEmpty(t, lines, r.stderr)
+	for _, line := range lines {
+		assert.False(t, strings.HasPrefix(line, "stage ") || strings.HasPrefix(line, "one option"), line)
+	}
+	assert.True(t, strings.HasPrefix(lines[len(lines)-1], "no decision: "), r.stderr)
+}
+
 func TestDebugLog(t *testing.T) {
 	t.Run("nil prints nothing", func(t *testing.T) {
 		var l *debugLog
@@ -142,16 +189,20 @@ func TestDebugLog(t *testing.T) {
 		l := newDebugLog("1", &buf)
 		l.eligibility(&router.Eligibility{Options: []catalog.Option{{ID: "x", CLI: "made-up"}},
 			ModelPassthrough: true, EffortPassthrough: true})
-		l.decision(router.Decision{OptionID: "b", Pooled: &router.Pooled{
-			Chunks: []router.ChunkResult{{Field: "prompt", Index: 1, Of: 2, Relevance: 0.8, Confidence: 0.6,
-				Top: []router.Score{{ID: "b", Score: 0.6}, {ID: "a", Score: 0.4}}}},
-			Top: []router.Score{{ID: "b", Score: 0.55}},
+		l.decision(router.Decision{OptionID: "b", Stages: []router.Stage{
+			{Level: "cli", Choice: "made-up", Skipped: true},
+			{Level: "model", Choice: "b", Pooled: &router.Pooled{
+				Chunks: []router.ChunkResult{{Field: "prompt", Index: 1, Of: 2, Relevance: 0.8, Confidence: 0.6,
+					Top: []router.Score{{ID: "b", Score: 0.6}, {ID: "a", Score: 0.4}}}},
+				Top: []router.Score{{ID: "b", Score: 0.55}},
+			}},
 		}})
 		assert.Equal(t, `agrouter debug: eligible: 1 option(s) on made-up
 agrouter debug: model: passed through
 agrouter debug: effort: passed through
-agrouter debug: chunk prompt 1/2: relevance 0.800, confidence 0.600, top [b 0.600, a 0.400]
-agrouter debug: pooled: choice b, top [b 0.550]
+agrouter debug: stage cli: skipped (made-up)
+agrouter debug: stage model chunk prompt 1/2: relevance 0.800, confidence 0.600, top [b 0.600, a 0.400]
+agrouter debug: stage model: pooled choice b, confidence 0.600, top [b 0.550]
 `, buf.String())
 	})
 
@@ -168,6 +219,17 @@ agrouter debug: jev failed: boom; running made-up with the caller's fixed values
 `, buf.String())
 	})
 
+	t.Run("stages completed before a failure, and a pool without chunks", func(t *testing.T) {
+		var buf bytes.Buffer
+		newDebugLog("1", &buf).decision(router.Decision{Stages: []router.Stage{
+			{Level: "cli", Choice: "made-up", Skipped: true},
+			{Level: "model", Choice: "b", Pooled: &router.Pooled{}},
+		}})
+		assert.Equal(t, `agrouter debug: stage cli: skipped (made-up)
+agrouter debug: stage model: pooled choice b, confidence none, top []
+`, buf.String(), "no decision: neither the one-option line nor a jev failure")
+	})
+
 	t.Run("top probabilities: highest first, ties by id, at most three", func(t *testing.T) {
 		got := topProbabilities(map[string]float64{"d": 0.1, "c": 0.3, "a": 0.3, "b": 0.2, "e": 0.1})
 		assert.Equal(t, "[a 0.300, c 0.300, b 0.200]", got)
@@ -176,8 +238,8 @@ agrouter debug: jev failed: boom; running made-up with the caller's fixed values
 
 	t.Run("answer", func(t *testing.T) {
 		var buf bytes.Buffer
-		newDebugLog("1", &buf).decision(router.Decision{Answer: &jev.Answer{Choice: "a", Confidence: 0.5,
-			Probabilities: map[string]float64{"a": 0.5, "b": 0.5}}})
-		assert.Equal(t, "agrouter debug: jev: choice a, confidence 0.500, top [a 0.500, b 0.500]\n", buf.String())
+		newDebugLog("1", &buf).decision(router.Decision{OptionID: "a", Stages: []router.Stage{{Level: "cli",
+			Choice: "a", Answer: &jev.Answer{Choice: "a", Confidence: 0.5, Probabilities: map[string]float64{"a": 0.5, "b": 0.5}}}}})
+		assert.Equal(t, "agrouter debug: stage cli: choice a, confidence 0.500, top [a 0.500, b 0.500]\n", buf.String())
 	})
 }

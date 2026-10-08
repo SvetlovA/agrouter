@@ -2,7 +2,6 @@ package router
 
 import (
 	"context"
-	"encoding/json"
 	goflag "flag"
 	"fmt"
 	"os"
@@ -30,10 +29,8 @@ func requestFixture(t *testing.T) (*config.Config, *catalog.Catalog) {
 	t.Helper()
 	cfg := &config.Config{
 		Agrouter: config.Agrouter{JevModel: "test-jev", Timeout: time.Second,
-			Question: "Choose an option for state.", ChunkQuestion: "Choose an option for anchor and chunk.",
-			Relevance:          "Does chunk add requirements beyond anchor?",
-			ComplexityQuestion: "Rate the project the docs describe.",
-			ComplexityEvidence: "Does the text describe the project?"},
+			RoutingPolicy:    "Prefer the cheapest option that can do the task.",
+			ComplexityPolicy: "Judge the codebase as a whole."},
 		CLIs: []config.CLI{
 			{Name: "alpha", Command: "alpha", Description: "Alpha agent."},
 			{Name: "beta", Command: "beta", Description: "Beta agent."},
@@ -57,17 +54,9 @@ func requestFixture(t *testing.T) (*config.Config, *catalog.Catalog) {
 
 func newRouter(t *testing.T, cfg *config.Config, cat *catalog.Catalog, client JevClient) *Router {
 	t.Helper()
-	r, err := New(cfg, cat, client, EncodingCompact)
+	r, err := New(cfg, cat, client)
 	require.NoError(t, err)
 	return r
-}
-
-// answering returns a mock that chooses id with certainty.
-func answering(id string) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: func(context.Context, jev.Request) (map[string]jev.Answer, error) {
-		return map[string]jev.Answer{questionRoute: {Type: jev.TypeChoice, Choice: id,
-			Probabilities: map[string]float64{id: 1}, Confidence: 0.9}}, nil
-	}}
 }
 
 func failing(err error) *mocks.JevClientMock {
@@ -91,7 +80,9 @@ func TestRouteSingleOptionSkipsJev(t *testing.T) {
 
 	d, err := r.Route(context.Background(), el, req, captured("fix the flaky test"))
 	require.NoError(t, err)
-	assert.Equal(t, Decision{CLI: "claude", Model: "claude-opus-5-5", Effort: "high", OptionID: "claude-opus-5-5@high"}, d)
+	assert.Equal(t, Decision{CLI: "claude", Model: "claude-opus-5-5", Effort: "high", OptionID: "claude-opus-5-5@high",
+		Stages: []Stage{{Level: LevelCLI, Choice: "claude", Skipped: true}, {Level: LevelModel, Choice: "claude-opus-5-5", Skipped: true},
+			{Level: LevelEffort, Choice: "high", Skipped: true}}}, d)
 	assert.Empty(t, client.AskCalls())
 }
 
@@ -103,14 +94,16 @@ func TestRouteSingleOptionPassthrough(t *testing.T) {
 	el := Eligible(cfg, cat, req)
 	d, err := r.Route(context.Background(), el, req, captured("x"))
 	require.NoError(t, err)
-	assert.Equal(t, Decision{CLI: "codex", Model: "gpt-9", Effort: "turbo", OptionID: "codex", Pinned: true}, d)
+	assert.Equal(t, Decision{CLI: "codex", Model: "gpt-9", Effort: "turbo", OptionID: "codex", Pinned: true,
+		Stages: []Stage{{Level: LevelCLI, Choice: "codex", Skipped: true}, {Level: LevelModel, Choice: "gpt-9", Skipped: true},
+			{Level: LevelEffort, Choice: "turbo", Skipped: true}}}, d)
 	assert.Equal(t, []string{"codex", "exec", "--model", "gpt-9", "-c", `model_reasoning_effort="turbo"`},
 		args.Build(mustCLI(t, cfg, d.CLI), req, d.Choice()).Argv)
 }
 
 func TestRouteJevChoice(t *testing.T) {
 	cfg, cat := embedded(t)
-	client := answering("gpt-6.1-sol@medium")
+	client := choosing("gpt-6.1-sol@medium")
 	r := newRouter(t, cfg, cat, client)
 
 	req := &args.Request{}
@@ -121,120 +114,80 @@ func TestRouteJevChoice(t *testing.T) {
 	assert.Equal(t, "gpt-6.1-sol", d.Model)
 	assert.Equal(t, "medium", d.Effort)
 	assert.Equal(t, "gpt-6.1-sol@medium", d.OptionID)
-	require.NotNil(t, d.Answer)
-	assert.InDelta(t, 0.9, d.Answer.Confidence, 1e-9)
+	require.Len(t, d.Stages, 3)
+	for _, st := range d.Stages {
+		require.NotNil(t, st.Answer, st.Level)
+		assert.InDelta(t, 0.9, st.Answer.Confidence, 1e-9)
+	}
 	require.NoError(t, d.Undecided)
 
-	require.Len(t, client.AskCalls(), 1)
+	require.Len(t, client.AskCalls(), 3)
 	sent := client.AskCalls()[0].Req
 	assert.Equal(t, cfg.Agrouter.JevModel, sent.Model)
 	assert.Equal(t, prompt.State{Prompt: "fix it"}, sent.State)
-	assert.Equal(t, ids(el.Options), sent.Questions[questionRoute].Criteria.Names())
+	assert.Equal(t, el.CLIs(), sent.Questions[LevelCLI].Criteria.Names())
 }
 
 func TestRouteGoldenRequest(t *testing.T) {
 	cfg, cat := requestFixture(t)
+	// the golden is the first stage request each case asks
 	tests := []struct {
 		name   string
 		req    *args.Request
 		choice string
-		enc    Encoding
+		stage  string
 	}{
-		{name: "all", req: &args.Request{}, choice: "fast"},
-		{name: "full_cli_beta", req: &args.Request{CLI: "beta"}, choice: "worker@low", enc: EncodingFull},
-		{name: "full_effort_passthrough", req: &args.Request{CLI: "alpha", Effort: "turbo", EffortSource: args.SourceFlag},
-			choice: "fast", enc: EncodingFull},
-		{name: "cli_alpha", req: &args.Request{CLI: "alpha"}, choice: "fast"},
+		{name: "stage_cli", req: &args.Request{}, choice: "fast", stage: LevelCLI},
+		{name: "stage_model", req: &args.Request{CLI: "alpha"}, choice: "strong@high", stage: LevelModel},
+		{name: "stage_effort", req: &args.Request{Model: "strong-model", ModelSource: args.SourceFlag},
+			choice: "strong@high", stage: LevelEffort},
 		{name: "effort_passthrough", req: &args.Request{CLI: "alpha", Effort: "turbo", EffortSource: args.SourceFlag},
-			choice: "fast"},
-		{name: "model_passthrough", req: &args.Request{Model: "unknown-model", ModelSource: args.SourceFlag}, choice: "beta"},
-		{name: "full_model_passthrough", req: &args.Request{Model: "unknown-model", ModelSource: args.SourceFlag},
-			choice: "beta", enc: EncodingFull},
+			choice: "fast", stage: LevelModel},
+		{name: "model_passthrough", req: &args.Request{Model: "unknown-model", ModelSource: args.SourceFlag},
+			choice: "beta", stage: LevelCLI},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			client := answering(tc.choice)
-			r, err := New(cfg, cat, client, tc.enc)
+			client := choosing(tc.choice)
+			r, err := New(cfg, cat, client)
 			require.NoError(t, err)
 			el := Eligible(cfg, cat, tc.req)
 			captured := &prompt.Result{Prompt: "fix the flaky test in pkg/foo/foo_test.go", Files: []string{"package foo\n"},
 				Attachments: []prompt.Attachment{{Source: "mentioned", Type: "image/png", Bytes: 48213}}}
 			_, err = r.Route(context.Background(), el, tc.req, captured)
 			require.NoError(t, err)
-			require.Len(t, client.AskCalls(), 1)
-
-			got, err := json.MarshalIndent(client.AskCalls()[0].Req, "", "  ")
-			require.NoError(t, err)
-			golden := filepath.Join("testdata", "request_"+tc.name+".json")
-			if *update {
-				require.NoError(t, os.WriteFile(golden, append(got, '\n'), 0o600))
-			}
-			want, err := os.ReadFile(golden) //nolint:gosec // test fixture path
-			require.NoError(t, err)
-			assert.Equal(t, string(want), string(got)+"\n")
+			require.NotEmpty(t, client.AskCalls())
+			first := client.AskCalls()[0].Req
+			require.Contains(t, first.Questions, tc.stage)
+			assertGolden(t, tc.name, first)
 		})
 	}
 }
 
-func TestRouteQuestionContents(t *testing.T) {
-	cfg, cat := embedded(t)
-	req := &args.Request{CLI: "claude"}
-	el := Eligible(cfg, cat, req)
-	q := routeQuestion(cfg, "Q?", el.Options, "", EncodingCompact)
-
-	in, ok := q.Instructions.(routeInstructions)
-	require.True(t, ok)
-	assert.Equal(t, "Q?", in.Question)
-	assert.Equal(t, []string{"claude"}, in.CLIs.Names(), "only the remaining CLIs")
-	assert.NotContains(t, in.Models.Names(), "gpt-6.1-sol")
-	assert.Equal(t, []string{"claude"}, in.Efforts.Names())
-	for _, c := range q.Criteria {
-		if c.Name == "claude-haiku-4-5" {
-			assert.Equal(t, routeCriterion{CLI: "claude", Model: "claude-haiku-4-5", Effort: effortNone}, c.Value)
-		}
-	}
-}
-
-func TestFullEncodingCriteria(t *testing.T) {
-	cfg, cat := embedded(t)
-	el := Eligible(cfg, cat, &args.Request{})
-	q := routeQuestion(cfg, "Q?", el.Options, "", EncodingFull)
-
-	assert.Equal(t, "Q?", q.Instructions)
-	assert.Equal(t, ids(el.Options), q.Criteria.Names())
-	for _, c := range q.Criteria {
-		desc, ok := c.Value.(string)
-		require.True(t, ok)
-		assert.Contains(t, desc, "CLI ")
-		assert.Contains(t, desc, "Model ")
-		if c.Name == "claude-haiku-4-5" {
-			assert.Contains(t, desc, "Effort: "+effortNone)
-		}
-	}
-	assert.Equal(t, "full", EncodingFull.String())
-	assert.Equal(t, "compact", EncodingCompact.String())
-
-	// the full encoding is larger but still fits the budget over the whole catalog
-	_, err := New(cfg, cat, &mocks.JevClientMock{}, EncodingFull)
-	require.NoError(t, err)
-	assert.Greater(t, questionLen(questionRoute, routeQuestion(cfg, "Q?", cat.Options, "", EncodingFull)),
-		questionLen(questionRoute, routeQuestion(cfg, "Q?", cat.Options, "", EncodingCompact)))
-}
-
 func TestNewQuestionOverBudget(t *testing.T) {
 	long := strings.Repeat("x", 100_000)
-	for _, key := range []string{"question", "chunk_question", "relevance", "complexity_question", "complexity_evidence"} {
-		t.Run(key, func(t *testing.T) {
+	tests := []struct {
+		key  string
+		want []string // the budgets the long policy exhausts, each naming the key
+	}{
+		{"routing_policy", []string{"routing_policy leaves", "for the state", "beside the anchor"}},
+		{"complexity_policy", []string{"complexity_policy leaves", "for the doc state"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.key, func(t *testing.T) {
 			local := filepath.Join(t.TempDir(), "config")
-			require.NoError(t, os.WriteFile(local, fmt.Appendf(nil, "[agrouter]\n%s = %s\n", key, long), 0o600))
+			require.NoError(t, os.WriteFile(local, fmt.Appendf(nil, "[agrouter]\n%s = %s\n", tc.key, long), 0o600))
 			cfg, err := config.Load(config.Sources{Embedded: defaults.Config, LocalPath: local})
 			require.NoError(t, err)
 			cat, err := catalog.Build(cfg)
 			require.NoError(t, err)
 
-			_, err = New(cfg, cat, &mocks.JevClientMock{}, EncodingCompact)
+			_, err = New(cfg, cat, &mocks.JevClientMock{})
 			require.ErrorIs(t, err, prompt.ErrQuestionsOverBudget)
-			assert.Contains(t, err.Error(), "config:")
+			assert.Contains(t, err.Error(), "config: [agrouter]")
+			for _, w := range tc.want {
+				assert.Contains(t, err.Error(), w)
+			}
 		})
 	}
 }
@@ -298,6 +251,10 @@ func TestRouteCannotDecide(t *testing.T) {
 				require.NoError(t, err)
 				require.ErrorIs(t, d.Undecided, cause.err)
 				d.Undecided = nil
+				for _, st := range d.Stages {
+					assert.True(t, st.Skipped, "only the stages fixed before the failing one: %s", st.Level)
+				}
+				d.Stages = nil
 				assert.Equal(t, tc.want, d)
 				assert.Equal(t, tc.argv, args.Build(mustCLI(t, cfg, d.CLI), tc.req, d.Choice()).Argv)
 				assert.Len(t, client.AskCalls(), 1)
@@ -346,8 +303,12 @@ func TestRouteMalformedAnswers(t *testing.T) {
 		name    string
 		answers map[string]jev.Answer
 	}{
-		{name: "missing route answer", answers: map[string]jev.Answer{}},
-		{name: "choice outside the options", answers: map[string]jev.Answer{questionRoute: {Choice: "gpt-6.1-sol@high"}}},
+		{name: "missing stage answer", answers: map[string]jev.Answer{}},
+		{name: "choice outside the criteria", answers: map[string]jev.Answer{LevelModel: {Choice: "gpt-6.1-sol",
+			Probabilities: map[string]float64{"claude-opus-5-5": 0.5, "claude-sonnet-5-5": 0.5, "claude-haiku-5-5": 0,
+				"claude-fable-5-1": 0}}}},
+		{name: "missing probability", answers: map[string]jev.Answer{LevelModel: {Choice: "claude-opus-5-5",
+			Probabilities: map[string]float64{"claude-opus-5-5": 1}}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -359,7 +320,8 @@ func TestRouteMalformedAnswers(t *testing.T) {
 			d, err := r.Route(context.Background(), Eligible(cfg, cat, req), req, captured("x"))
 			require.NoError(t, err)
 			require.ErrorIs(t, d.Undecided, jev.ErrMalformed)
-			assert.Equal(t, Decision{CLI: "claude", Pinned: true, Undecided: d.Undecided}, d)
+			assert.Equal(t, Decision{CLI: "claude", Pinned: true, Undecided: d.Undecided,
+				Stages: []Stage{{Level: LevelCLI, Choice: "claude", Skipped: true}}}, d)
 		})
 	}
 }

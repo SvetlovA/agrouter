@@ -230,7 +230,6 @@ func TestEligibleEffort(t *testing.T) {
 	t.Run("alone", func(t *testing.T) {
 		e := Eligible(cfg, cat, &args.Request{Effort: "high"})
 		assert.Equal(t, idsOf(cat, func(o catalog.Option) bool { return o.Effort == "high" }), ids(e.Options))
-		assert.NotContains(t, ids(e.Options), "claude-haiku-4-5")
 		assert.False(t, e.EffortPassthrough)
 		assert.Empty(t, e.Dropped)
 	})
@@ -257,10 +256,11 @@ func TestEligibleEffort(t *testing.T) {
 	})
 
 	t.Run("a model without efforts passes it through", func(t *testing.T) {
-		e := Eligible(cfg, cat, &args.Request{Model: "claude-haiku-4-5", Effort: "high"})
+		fixCfg, fixCat := requestFixture(t)
+		e := Eligible(fixCfg, fixCat, &args.Request{Model: "fast-model", Effort: "high"})
 		assert.True(t, e.EffortPassthrough)
 		require.Len(t, e.Options, 1)
-		assert.Equal(t, "claude-haiku-4-5", e.Options[0].ID)
+		assert.Equal(t, "fast", e.Options[0].ID)
 		assert.Equal(t, "high", e.EffortFor(e.Options[0]))
 	})
 
@@ -279,7 +279,8 @@ func TestEligibleEffort(t *testing.T) {
 	})
 
 	t.Run("no effort given, model without efforts emits none", func(t *testing.T) {
-		e := Eligible(cfg, cat, &args.Request{Model: "claude-haiku-4-5"})
+		fixCfg, fixCat := requestFixture(t)
+		e := Eligible(fixCfg, fixCat, &args.Request{Model: "fast-model"})
 		require.Len(t, e.Options, 1)
 		assert.Empty(t, e.EffortFor(e.Options[0]))
 	})
@@ -306,7 +307,7 @@ func TestEligibleNeverEmpty(t *testing.T) {
 	argSets := [][]args.Arg{nil, {flag("output-format", "json")}, {flag("sandbox", "read-only")},
 		{flag("output-format", "json"), flag("sandbox", "read-only")}, {flag("unknown", "")}}
 	for _, cli := range []string{"", "claude", "codex", "gemini"} {
-		for _, model := range []string{"", "opus", "gpt-6-luna", "claude-haiku-4-5", "gpt-9"} {
+		for _, model := range []string{"", "opus", "gpt-6-luna", "gpt-9"} {
 			for _, effort := range []string{"", "high", "ultra", "bogus"} {
 				for _, a := range argSets {
 					req := &args.Request{CLI: cli, Model: model, Effort: effort, Args: a}

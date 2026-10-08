@@ -10,7 +10,8 @@
     }
   ],
   "acceptable": [
-    "claude-haiku-4-5",
+    "claude-haiku-5-5@low",
+    "claude-haiku-5-5@medium",
     "claude-sonnet-5-5@low",
     "gpt-6-luna@low",
     "gpt-6-luna@medium",

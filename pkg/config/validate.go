@@ -50,8 +50,8 @@ func (a Agrouter) validate() []error {
 		errs = append(errs, fmt.Errorf("[agrouter] timeout = %s: must be positive", a.Timeout))
 	}
 	for _, q := range []struct{ key, text string }{
-		{"complexity_question", a.ComplexityQuestion},
-		{"complexity_evidence", a.ComplexityEvidence},
+		{"routing_policy", a.RoutingPolicy},
+		{"complexity_policy", a.ComplexityPolicy},
 	} {
 		if strings.TrimSpace(q.text) == "" {
 			errs = append(errs, fmt.Errorf("[agrouter] %s: must not be empty", q.key))

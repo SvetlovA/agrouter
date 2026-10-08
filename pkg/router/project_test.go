@@ -20,13 +20,13 @@ import (
 )
 
 // staged answers doc requests with docs and every routing request (single or chunk) with route.
-func staged(docs func() (map[string]jev.Answer, error), route func(state any) (map[string]jev.Answer, error)) *mocks.JevClientMock {
+func staged(docs func() (map[string]jev.Answer, error), route func(req jev.Request) (map[string]jev.Answer, error)) *mocks.JevClientMock {
 	return &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
 		switch req.State.(type) {
 		case prompt.DocsState, prompt.DocChunkState:
 			return docs()
 		}
-		return route(req.State)
+		return route(req)
 	}}
 }
 
@@ -38,10 +38,9 @@ func scored() (map[string]jev.Answer, error) {
 	}, nil
 }
 
-// routeFast answers a single routing request choosing the fixture's "fast" option.
-func routeFast(any) (map[string]jev.Answer, error) {
-	return map[string]jev.Answer{questionRoute: {Type: jev.TypeChoice, Choice: "fast",
-		Probabilities: map[string]float64{"fast": 1}, Confidence: 0.9}}, nil
+// routeFast answers a whole-state stage request towards the fixture's "fast" option.
+func routeFast(req jev.Request) (map[string]jev.Answer, error) {
+	return certain(req, "fast"), nil
 }
 
 func projectCapture() *prompt.Result {
@@ -105,8 +104,8 @@ func TestRouteProjectChunkGoldenRequest(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	req := &args.Request{CLI: "alpha"}
 	el := Eligible(cfg, cat, req)
-	client := staged(scored, func(any) (map[string]jev.Answer, error) {
-		return chunkAnswers(favoring(el.Options, "fast", 0.9), 0.5), nil
+	client := staged(scored, func(req jev.Request) (map[string]jev.Answer, error) {
+		return stageAnswers(req, "fast", 0.9, 0.5), nil
 	})
 	r := newRouter(t, cfg, cat, client)
 	// force a small state into chunks, keeping the doc budget whole
@@ -114,7 +113,8 @@ func TestRouteProjectChunkGoldenRequest(t *testing.T) {
 
 	d, err := r.Route(context.Background(), el, req, projectCapture())
 	require.NoError(t, err)
-	require.NotNil(t, d.Pooled)
+	require.Len(t, d.Stages, 3)
+	require.NotNil(t, d.Stages[1].Pooled, "the model stage")
 	require.NotNil(t, d.Complexity)
 
 	routed := routeRequests(client)
@@ -151,8 +151,10 @@ func TestRouteProjectSkippedWithoutDocText(t *testing.T) {
 			&prompt.Result{Prompt: "fix it", Docs: docs})
 		require.NoError(t, err)
 		assert.Nil(t, d.Complexity)
-		require.Len(t, client.AskCalls(), 1)
-		assert.Equal(t, prompt.State{Prompt: "fix it"}, client.AskCalls()[0].Req.State)
+		require.Len(t, client.AskCalls(), 2, "the cli and model stages")
+		for _, c := range client.AskCalls() {
+			assert.Equal(t, prompt.State{Prompt: "fix it"}, c.Req.State)
+		}
 	}
 }
 
@@ -212,7 +214,7 @@ func TestRouteProjectKeptWhenRoutingFails(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	req := &args.Request{CLI: "alpha"}
 	el := Eligible(cfg, cat, req)
-	client := staged(scored, func(any) (map[string]jev.Answer, error) {
+	client := staged(scored, func(jev.Request) (map[string]jev.Answer, error) {
 		return nil, &jev.StatusError{Status: 500}
 	})
 
@@ -249,11 +251,11 @@ func TestRouteProjectStagesInOrder(t *testing.T) {
 		order = append(order, "doc")
 		mu.Unlock()
 		return scored()
-	}, func(state any) (map[string]jev.Answer, error) {
+	}, func(req jev.Request) (map[string]jev.Answer, error) {
 		mu.Lock()
-		order = append(order, fmt.Sprintf("%T", state))
+		order = append(order, fmt.Sprintf("%T", req.State))
 		mu.Unlock()
-		return routeFast(state)
+		return routeFast(req)
 	})
 	r := newRouter(t, cfg, cat, client)
 	r.budget.Doc = 40 // split the docs into several chunks

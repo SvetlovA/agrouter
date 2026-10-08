@@ -22,56 +22,19 @@
 api_key   =
 # pin a versioned id (e.g. jev-1.13.0) to keep routing stable across Jev releases
 jev_model = jev-latest
-# total routing budget: reading stdin and files, every Jev request (all chunks at once) and retries.
+# total routing budget: reading stdin and files, the --doc complexity stage and up to three sequential
+# routing stages (cli, model, effort), each sending its chunks at once, with retries.
 # cooperative: reading and network stop at it, splitting and encoding do not. raise it for very long inputs
 timeout   = 10s
 
-# question texts refer to JSON fields sent to Jev; these names are not substituted into the text.
-# backticks mark field references for Jev. {prompt}, {model} and {value} substitutions belong
-# to [cli.*.args] templates, not these questions.
-# both routing questions receive eligible options as criteria, each with cli, model and effort.
-# clis maps CLI names to descriptions; models maps model names to descriptions and prices;
-# efforts maps each CLI name to its effort descriptions. these describe only eligible options.
-# an option's model is the model to run the task; jev_model above is the model answering the questions.
-# full encoding (used by routing evaluation) puts those descriptions directly in each criterion.
-
-# question: the routing question for a state sent whole; tune the cost/quality preference here.
-# state is the request's complete routing input:
-# state.prompt is the joined -p, positional and --prompt-file text, followed by text stdin.
-# state.files is an array of contents of readable text files mentioned in the prompt.
-# state.attachments lists binary stdin and non-text mentioned files by source, media type and byte size;
-# it contains neither their contents nor their names.
-# state.project.complexity, when present, is the --doc stage's reduced codebase score from 0 to 10.
-question  = Which coding-agent CLI, model and reasoning effort should run the task described in `state` (its `prompt`, the `files` the prompt mentions, and `attachments`, where `attachments` lists images, PDFs and other non-text inputs the task includes, by type and size only)? `project.complexity`, when present, rates the codebase the task runs in from 0 (a tiny script) to 10 (a large, constrained enterprise system): use it as context for how hard this specific task is there, not as a substitute for judging the task (a typo fix stays trivial in any codebase). Choose the option with the lowest cost that can reliably satisfy this task's requirements. Compare the supplied model prices and the effort descriptions, including their effect on token usage. Prefer cheaper options when their capabilities are sufficient. Choose a more expensive model or higher effort when it materially improves the likelihood of completing this specific task correctly. Prefer less time when cost and capability are comparable. Look up each option's `model` in `models`, its `cli` in `clis`, and its `effort` under that CLI in `efforts`.
-# chunk_question: the routing question for one chunk of a split state: same options, same preference.
-# state now contains anchor and chunk instead of the whole prompt and files.
-# anchor is shared context repeated in every chunk request: prompt and file excerpts, attachment
-# metadata and, when present, project.complexity. excerpts are whole strings or objects with head/tail.
-# anchor.attachments may merge entries of the same source/type: count is their number, bytes their total.
-# anchor.project.complexity is the same --doc score as state.project.complexity in a whole request.
-# chunk.text is this chunk's text from the prompt or one mentioned file.
-# chunk.field identifies its source as "prompt" or "files"; chunk.index is its 1-based position,
-# and chunk.of is the total number of routing chunks. Jev sees only this chunk and the shared anchor.
-chunk_question = Which coding-agent CLI, model and reasoning effort should run the task described by `anchor` and `chunk.text` together (`anchor.attachments` lists images, PDFs and other non-text inputs the task includes, by type and size only), where `chunk.text` is one part of a longer input? `anchor.project.complexity`, when present, rates the codebase the task runs in from 0 (a tiny script) to 10 (a large, constrained enterprise system): use it as context for how hard this specific task is there, not as a substitute for judging the task (a typo fix stays trivial in any codebase). Choose the option with the lowest cost that can reliably satisfy this task's requirements. Compare the supplied model prices and the effort descriptions, including their effect on token usage. Prefer cheaper options when their capabilities are sufficient. Choose a more expensive model or higher effort when it materially improves the likelihood of completing this specific task correctly. Prefer less time when cost and capability are comparable. Look up each option's `model` in `models`, its `cli` in `clis`, and its `effort` under that CLI in `efforts`.
-# relevance: asked beside chunk_question, using the same anchor and chunk.text fields.
-# its 0-to-1 answer measures how much this chunk adds task requirements beyond the anchor;
-# that answer weights this chunk's routing probabilities when all chunk answers are pooled.
-relevance = Does the text in `chunk.text` state the task to perform, its requirements, or what makes it hard, beyond what `anchor` already says?
-# complexity_question: asked of --doc text before routing when at least one doc has text.
-# state here contains only docs or doc, not the routing prompt, files, attachments or catalog.
-# state.docs is an array of all non-empty --doc file contents, in supplied order, when they fit whole.
-# state.doc.text is one chunk of one --doc file when the docs need splitting.
-# state.doc.index is its 1-based position across all doc chunks; state.doc.of is their total count.
-# Score uses ten ordered descriptions (levels 0 to 9); its numeric result is scaled to 0 to 10.
-# Choice and Score confidence is recorded in decision JSON, exec logs and debug output only;
-# it does not affect routing, relevance or the evidence weight below.
-# decision JSON and exec logs record confidence.model_selection and confidence.project_complexity: simple means
-# across the final chunks in each stage, including zero confidence, without relevance/evidence weights.
-complexity_question = How complex is the project that the docs in `state` describe (`docs`, or `doc.text` when it is one part of longer docs)? Judge the codebase as a whole: its size, architecture, dependencies and constraints, not any single task in it. Rate the project against the ordered complexity descriptions.
-# complexity_evidence: asked beside complexity_question, using the same docs or doc.text fields.
-# its 0-to-1 answer measures whether this text describes the codebase rather than only workflow/style;
-# it weights this doc chunk's score when reducing the answers to project.complexity for routing.
-complexity_evidence = Does the text in `state` (`docs` or `doc.text`) say anything about the project's size, architecture, dependencies or constraints?
+# the questions sent to Jev, and what each state field holds, are built into agrouter; these two
+# keys hold only the preference they follow. both must be non-empty. jev_model above is the model
+# answering the questions, not one of the catalog models being chosen.
+# routing_policy: the cost/quality preference for choosing the CLI, model and effort, sent with
+# every routing question, for a prompt sent whole and for each chunk of a split one.
+routing_policy = Choose the option with the lowest cost that can reliably satisfy this task's requirements. Compare the supplied model prices and the effort descriptions, including their effect on token usage. Prefer cheaper options when their capabilities are sufficient. Choose a more expensive model or higher effort when it materially improves the likelihood of completing this specific task correctly. Prefer less time when cost and capability are comparable. The project complexity, when present, rates the codebase the task runs in: use it as context for how hard this specific task is there, not as a substitute for judging the task (a typo fix stays trivial in any codebase).
+# complexity_policy: how the --doc stage judges the project the docs describe before routing.
+complexity_policy = Judge the codebase as a whole: its size, architecture, dependencies and constraints, not any single task in it.
 
 [cli.claude]
 command      = claude
@@ -134,7 +97,7 @@ output-format.text           = []
 output-format.stream-json    = ["--json"]
 verbose                      = []
 
-# Claude models. Efforts match `claude --help` in Claude Code 2.1.283.
+# Claude models. Efforts match `claude --help` in Claude Code 2.1.294.
 # Sources: https://platform.claude.com/docs/en/about-claude/models/overview
 # and https://platform.claude.com/docs/en/about-claude/models/choosing-a-model
 
@@ -162,13 +125,12 @@ efforts     = low, medium, high, xhigh, max
 description = Best combination of speed and intelligence. Everyday coding, code generation, data analysis, agentic tool use. Fast; input USD 2 / output USD 10 per million tokens.
 source      = https://platform.claude.com/docs/en/models/sonnet-5-5/overview
 
-[model.claude-haiku-4-5]
+[model.claude-haiku-5-5]
 cli         = claude
-name        = claude-haiku-4-5
-# effort is not supported: one option, no effort flag
-efforts     =
-description = Fastest model with near-frontier intelligence. Real-time and high-volume processing, cost-sensitive work, subagent tasks. 200K context. Fastest; input USD 1 / output USD 5 per million tokens.
-source      = https://platform.claude.com/docs/en/models/haiku-4-5/overview
+name        = claude-haiku-5-5
+efforts     = low, medium, high, xhigh, max
+description = Fastest model, for high-volume, latency-sensitive work: classification, extraction, routing, chat, short tool tasks, subagent tasks. Use medium for most work including agentic coding, low for simple high-volume requests, high for longer agent tasks and strict instruction following. Fastest; input USD 0.10 / output USD 0.50 per million tokens (USD 0.50 / 2.50 for prompts over 100K tokens).
+source      = https://platform.claude.com/docs/en/models/haiku-5-5/overview
 
 # Claude effort levels. Source for all: https://platform.claude.com/docs/en/build-with-claude/effort
 

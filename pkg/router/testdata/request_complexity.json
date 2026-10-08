@@ -9,7 +9,11 @@
   "questions": {
     "complexity": {
       "type": "score",
-      "instructions": "Rate the project the docs describe.",
+      "instructions": {
+        "question": "How complex is the project that the docs in `state` describe? Judge it following `policy` and rate it against the ordered complexity descriptions.",
+        "state": "`state.docs` are the project's docs, whole. When the docs are too long, `state.doc.text` is instead one part of them, and `state.doc.index` and `state.doc.of` give its position.",
+        "policy": "Judge the codebase as a whole."
+      },
       "criteria": [
         "a snippet, a single file or a small one-off script: no architecture, dependencies or constraints to speak of",
         "a small single-purpose utility or library of a few files",
@@ -25,7 +29,7 @@
     },
     "complexity_evidence": {
       "type": "noul",
-      "instructions": "Does the text describe the project?",
+      "instructions": "Does the text in `state` (`docs` or `doc.text`) say anything about the project's size, architecture, dependencies or constraints?",
       "criteria": {
         "true": "the text describes the project's size, architecture, dependencies or constraints",
         "false": "the text is only style rules, workflow instructions or other content that says nothing about the project itself"

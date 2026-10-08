@@ -16,8 +16,8 @@ import (
 const catalogConfig = `
 [agrouter]
 timeout = 10s
-complexity_question = How complex?
-complexity_evidence = Is it evidence?
+routing_policy = Prefer cheap.
+complexity_policy = Judge the codebase.
 
 [cli.alpha]
 command = alpha

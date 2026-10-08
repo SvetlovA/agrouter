@@ -14,40 +14,34 @@
     ]
   },
   "questions": {
-    "model": {
+    "effort": {
       "type": "choice",
       "instructions": {
-        "question": "Which model should run the task described in `state`? Choose following `policy`. Each option is described under its name in `models`, with its reasoning efforts described under its `cli` in `efforts`; judge a model by the best of its efforts for the task.",
+        "question": "Which reasoning effort should the model in `models` use for the task described in `state`? Choose following `policy`. Each option's `effort` is described under its CLI in `efforts`.",
         "state": "`state.prompt` is the task. `state.files` are the contents of files the prompt mentions. `state.attachments` lists images, PDFs and other non-text inputs the task includes, by type and size only. `state.project.complexity`, when present, rates the codebase the task runs in from 0 (a tiny script) to 10 (a large, constrained enterprise system).",
         "policy": "Prefer the cheapest option that can do the task.",
         "models": {
           "strong": {
             "description": "Strong model.",
             "efforts": [
-              "turbo"
-            ]
-          },
-          "fast": {
-            "description": "Fast model.",
-            "efforts": [
-              "turbo"
+              "low",
+              "high"
             ]
           }
         },
         "efforts": {
           "alpha": {
-            "turbo": "not in the catalog for this CLI: passed through as given"
+            "low": "Quick reasoning.",
+            "high": "Deep reasoning."
           }
         }
       },
       "criteria": {
-        "strong": {
-          "model": "strong-model",
-          "cli": "alpha"
+        "low": {
+          "effort": "low"
         },
-        "fast": {
-          "model": "fast-model",
-          "cli": "alpha"
+        "high": {
+          "effort": "high"
         }
       }
     }

@@ -5,7 +5,8 @@
     "sum.go": "package demo\n\nfunc Sum(xs []int) int {\n\ttmp := 0\n\tfor _, x := range xs {\n\t\ttmp += x\n\t}\n\treturn tmp\n}\n"
   },
   "acceptable": [
-    "claude-haiku-4-5",
+    "claude-haiku-5-5@low",
+    "claude-haiku-5-5@medium",
     "claude-sonnet-5-5@low",
     "gpt-6-luna@low",
     "gpt-6-luna@medium",

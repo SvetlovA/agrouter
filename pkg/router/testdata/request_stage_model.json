@@ -24,19 +24,21 @@
           "strong": {
             "description": "Strong model.",
             "efforts": [
-              "turbo"
+              "low",
+              "high"
             ]
           },
           "fast": {
             "description": "Fast model.",
             "efforts": [
-              "turbo"
+              "none (not supported)"
             ]
           }
         },
         "efforts": {
           "alpha": {
-            "turbo": "not in the catalog for this CLI: passed through as given"
+            "low": "Quick reasoning.",
+            "high": "Deep reasoning."
           }
         }
       },

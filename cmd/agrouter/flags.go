@@ -36,9 +36,10 @@ const helpText = `agrouter asks TypeSafe's Jev which (cli, model, effort) should
 Without "exec" it prints that decision as JSON; with "exec" as the
 first token it runs the chosen CLI with the arguments translated through its
 config.
-The default decision includes the selection, project complexity and average
-confidence. --verbose prints indented JSON with every chunk, option probability,
-complexity score, argv, skipped argument and a copyable command;
+The default decision includes the selection, project complexity and Jev's
+confidence at each routing stage (cli, model, effort). --verbose prints indented
+JSON with every routing stage, chunk, candidate probability, complexity score,
+argv, skipped argument and a copyable command;
 it controls agrouter's output only, never the chosen CLI's verbosity.
 
 The prompt is -p TEXT, the positional argument, the --prompt-file text and
