@@ -125,21 +125,21 @@ func assertMidText(t *testing.T, text, marker string) {
 func TestLoadEvalCase_Invalid(t *testing.T) {
 	_, cat := embedded(t)
 	tests := map[string]string{
-		"unknown field":     `{"prompt":"x","acceptable":["claude-haiku-4-5"],"extra":1}`,
+		"unknown field":     `{"prompt":"x","acceptable":["claude-haiku-5-5@low"],"extra":1}`,
 		"no acceptable":     `{"prompt":"x"}`,
 		"unknown option":    `{"prompt":"x","acceptable":["gpt-9@low"]}`,
-		"no prompt":         `{"acceptable":["claude-haiku-4-5"]}`,
-		"bad filler":        `{"prompt":"x","filler":{"text":"a","bytes":10,"position":"middle"},"acceptable":["claude-haiku-4-5"]}`,
-		"no stdin file":     `{"prompt":"x","stdin_file":"missing.txt","acceptable":["claude-haiku-4-5"]}`,
+		"no prompt":         `{"acceptable":["claude-haiku-5-5@low"]}`,
+		"bad filler":        `{"prompt":"x","filler":{"text":"a","bytes":10,"position":"middle"},"acceptable":["claude-haiku-5-5@low"]}`,
+		"no stdin file":     `{"prompt":"x","stdin_file":"missing.txt","acceptable":["claude-haiku-5-5@low"]}`,
 		"malformed json":    `{"prompt":`,
-		"empty filler txt":  `{"prompt":"x","filler":{"bytes":10,"position":"after"},"acceptable":["claude-haiku-4-5"]}`,
-		"no prompt file":    `{"prompt_file":"missing.txt","acceptable":["claude-haiku-4-5"]}`,
-		"binary prompt":     `{"prompt_file":"bin.dat","acceptable":["claude-haiku-4-5"]}`,
-		"empty prompt file": `{"prompt_file":"empty.txt","acceptable":["claude-haiku-4-5"]}`,
-		"no doc file":       `{"prompt":"x","docs":[{"file":"missing.md"}],"acceptable":["claude-haiku-4-5"]}`,
-		"binary doc":        `{"prompt":"x","docs":[{"file":"bin.dat"}],"acceptable":["claude-haiku-4-5"]}`,
-		"doc text & file":   `{"prompt":"x","docs":[{"text":"a","file":"doc.md"}],"acceptable":["claude-haiku-4-5"]}`,
-		"empty doc":         `{"prompt":"x","docs":[{}],"acceptable":["claude-haiku-4-5"]}`,
+		"empty filler txt":  `{"prompt":"x","filler":{"bytes":10,"position":"after"},"acceptable":["claude-haiku-5-5@low"]}`,
+		"no prompt file":    `{"prompt_file":"missing.txt","acceptable":["claude-haiku-5-5@low"]}`,
+		"binary prompt":     `{"prompt_file":"bin.dat","acceptable":["claude-haiku-5-5@low"]}`,
+		"empty prompt file": `{"prompt_file":"empty.txt","acceptable":["claude-haiku-5-5@low"]}`,
+		"no doc file":       `{"prompt":"x","docs":[{"file":"missing.md"}],"acceptable":["claude-haiku-5-5@low"]}`,
+		"binary doc":        `{"prompt":"x","docs":[{"file":"bin.dat"}],"acceptable":["claude-haiku-5-5@low"]}`,
+		"doc text & file":   `{"prompt":"x","docs":[{"text":"a","file":"doc.md"}],"acceptable":["claude-haiku-5-5@low"]}`,
+		"empty doc":         `{"prompt":"x","docs":[{}],"acceptable":["claude-haiku-5-5@low"]}`,
 	}
 	for name, content := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -162,7 +162,7 @@ func TestLoadEvalCase_Filler(t *testing.T) {
 	_, cat := embedded(t)
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "c.json"),
-		[]byte(`{"stdin":"REQ","filler":{"text":"ab","bytes":5,"position":"before"},"acceptable":["claude-haiku-4-5"]}`), 0o600))
+		[]byte(`{"stdin":"REQ","filler":{"text":"ab","bytes":5,"position":"before"},"acceptable":["claude-haiku-5-5@low"]}`), 0o600))
 	cases, err := loadEvalCases(dir, cat)
 	require.NoError(t, err)
 	assert.Equal(t, "ababaREQ", cases[0].Stdin)
@@ -174,7 +174,7 @@ func TestLoadEvalCase_PromptFileAndDocs(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "task.txt"), []byte("do the task\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.md"), []byte("# big system\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "c.json"), []byte(`{"prompt_file":"task.txt",`+
-		`"docs":[{"file":"a.md"},{"text":"inline doc"}],"acceptable":["claude-haiku-4-5"]}`), 0o600))
+		`"docs":[{"file":"a.md"},{"text":"inline doc"}],"acceptable":["claude-haiku-5-5@low"]}`), 0o600))
 	cases, err := loadEvalCases(dir, cat)
 	require.NoError(t, err)
 	require.Len(t, cases, 1)
@@ -189,34 +189,34 @@ func TestRunEvalCase(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("correct, with the mentioned file in the state", func(t *testing.T) {
-		client := evalMock("claude-haiku-4-5")
+		client := evalMock("claude-haiku-5-5@low")
 		r := newRouter(t, cfg, cat, client)
 		c := evalCase{Name: "typo", Prompt: "fix the typo in README.md", Files: map[string]string{"README.md": "Call get() here.\n"},
-			Acceptable: []string{"claude-haiku-4-5"}}
+			Acceptable: []string{"claude-haiku-5-5@low"}}
 		res := runEvalCase(ctx, r, cfg, cat, c, t.TempDir())
 		require.NoError(t, res.Err)
 		assert.True(t, res.Correct)
 		assert.False(t, res.Split)
 		assert.Equal(t, []evalStage{{Level: LevelCLI, Confidence: 0.8, Correct: true},
-			{Level: LevelModel, Confidence: 0.8, Correct: true}}, res.Stages, "the effort stage is skipped")
-		require.Len(t, client.AskCalls(), 2, "the cli and model stages; haiku has no efforts")
+			{Level: LevelModel, Confidence: 0.8, Correct: true}, {Level: LevelEffort, Confidence: 0.8, Correct: true}}, res.Stages)
+		require.Len(t, client.AskCalls(), 3, "the cli, model and effort stages")
 		for _, call := range client.AskCalls() {
 			assert.Equal(t, []string{"Call get() here.\n"}, call.Req.State.(prompt.State).Files)
 		}
 	})
 
 	t.Run("prompt file and docs: stage 1 scores the docs, stage 2 gets the prompt file text", func(t *testing.T) {
-		client := evalMock("claude-haiku-4-5")
+		client := evalMock("claude-haiku-5-5@low")
 		r := newRouter(t, cfg, cat, client)
 		c := evalCase{Name: "docs", Prompt: "first", PromptFile: "task.txt", FileText: "from the file",
-			DocTexts: []string{"# a large system\n"}, Acceptable: []string{"claude-haiku-4-5"}}
+			DocTexts: []string{"# a large system\n"}, Acceptable: []string{"claude-haiku-5-5@low"}}
 		res := runEvalCase(ctx, r, cfg, cat, c, t.TempDir())
 		require.NoError(t, res.Err)
 		assert.True(t, res.Correct)
 		assert.Equal(t, "10.0", res.Project, "the mock rates the docs at the last level")
 
 		calls := client.AskCalls()
-		require.Len(t, calls, 3, "the docs, then the cli and model stages")
+		require.Len(t, calls, 4, "the docs, then the cli, model and effort stages")
 		assert.Contains(t, calls[0].Req.Questions, questionComplexity)
 		state := calls[1].Req.State.(prompt.State)
 		assert.Equal(t, "first\n\nfrom the file", state.Prompt)
@@ -226,7 +226,7 @@ func TestRunEvalCase(t *testing.T) {
 
 	t.Run("wrong", func(t *testing.T) {
 		r := newRouter(t, cfg, cat, evalMock("gpt-6-astra@ultra"))
-		res := runEvalCase(ctx, r, cfg, cat, evalCase{Name: "w", Prompt: "x", Acceptable: []string{"claude-haiku-4-5"}},
+		res := runEvalCase(ctx, r, cfg, cat, evalCase{Name: "w", Prompt: "x", Acceptable: []string{"claude-haiku-5-5@low"}},
 			t.TempDir())
 		require.NoError(t, res.Err)
 		assert.False(t, res.Correct)
@@ -239,14 +239,14 @@ func TestRunEvalCase(t *testing.T) {
 
 	t.Run("jev failing with the CLI known is an error, not a guess", func(t *testing.T) {
 		r := newRouter(t, cfg, cat, failing(jev.ErrMalformed))
-		res := runEvalCase(ctx, r, cfg, cat, evalCase{Name: "f", Prompt: "x", CLI: "claude", Acceptable: []string{"claude-haiku-4-5"}},
+		res := runEvalCase(ctx, r, cfg, cat, evalCase{Name: "f", Prompt: "x", CLI: "claude", Acceptable: []string{"claude-haiku-5-5@low"}},
 			t.TempDir())
 		require.ErrorIs(t, res.Err, jev.ErrMalformed)
 	})
 
 	t.Run("cannot decide", func(t *testing.T) {
 		r := newRouter(t, cfg, cat, failing(jev.ErrMalformed))
-		res := runEvalCase(ctx, r, cfg, cat, evalCase{Name: "f", Prompt: "x", Acceptable: []string{"claude-haiku-4-5"}},
+		res := runEvalCase(ctx, r, cfg, cat, evalCase{Name: "f", Prompt: "x", Acceptable: []string{"claude-haiku-5-5@low"}},
 			t.TempDir())
 		require.ErrorIs(t, res.Err, ErrCannotDecide)
 	})

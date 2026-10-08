@@ -97,7 +97,7 @@ output-format.text           = []
 output-format.stream-json    = ["--json"]
 verbose                      = []
 
-# Claude models. Efforts match `claude --help` in Claude Code 2.1.283.
+# Claude models. Efforts match `claude --help` in Claude Code 2.1.294.
 # Sources: https://platform.claude.com/docs/en/about-claude/models/overview
 # and https://platform.claude.com/docs/en/about-claude/models/choosing-a-model
 
@@ -125,13 +125,12 @@ efforts     = low, medium, high, xhigh, max
 description = Best combination of speed and intelligence. Everyday coding, code generation, data analysis, agentic tool use. Fast; input USD 2 / output USD 10 per million tokens.
 source      = https://platform.claude.com/docs/en/models/sonnet-5-5/overview
 
-[model.claude-haiku-4-5]
+[model.claude-haiku-5-5]
 cli         = claude
-name        = claude-haiku-4-5
-# effort is not supported: one option, no effort flag
-efforts     =
-description = Fastest model with near-frontier intelligence. Real-time and high-volume processing, cost-sensitive work, subagent tasks. 200K context. Fastest; input USD 1 / output USD 5 per million tokens.
-source      = https://platform.claude.com/docs/en/models/haiku-4-5/overview
+name        = claude-haiku-5-5
+efforts     = low, medium, high, xhigh, max
+description = Fastest model, for high-volume, latency-sensitive work: classification, extraction, routing, chat, short tool tasks, subagent tasks. Use medium for most work including agentic coding, low for simple high-volume requests, high for longer agent tasks and strict instruction following. Fastest; input USD 0.10 / output USD 0.50 per million tokens (USD 0.50 / 2.50 for prompts over 100K tokens).
+source      = https://platform.claude.com/docs/en/models/haiku-5-5/overview
 
 # Claude effort levels. Source for all: https://platform.claude.com/docs/en/build-with-claude/effort
 

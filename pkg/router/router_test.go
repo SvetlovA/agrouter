@@ -305,7 +305,7 @@ func TestRouteMalformedAnswers(t *testing.T) {
 	}{
 		{name: "missing stage answer", answers: map[string]jev.Answer{}},
 		{name: "choice outside the criteria", answers: map[string]jev.Answer{LevelModel: {Choice: "gpt-6.1-sol",
-			Probabilities: map[string]float64{"claude-opus-5-5": 0.5, "claude-sonnet-5-5": 0.5, "claude-haiku-4-5": 0,
+			Probabilities: map[string]float64{"claude-opus-5-5": 0.5, "claude-sonnet-5-5": 0.5, "claude-haiku-5-5": 0,
 				"claude-fable-5-1": 0}}}},
 		{name: "missing probability", answers: map[string]jev.Answer{LevelModel: {Choice: "claude-opus-5-5",
 			Probabilities: map[string]float64{"claude-opus-5-5": 1}}}},

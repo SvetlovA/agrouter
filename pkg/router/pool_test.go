@@ -25,7 +25,7 @@ import (
 
 const (
 	optHard = "claude-opus-5-5@high"
-	optEasy = "claude-haiku-4-5"
+	optEasy = "claude-haiku-5-5@low"
 )
 
 // filler is n bytes of plain lines, the long material a task works on.
@@ -526,11 +526,11 @@ func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 			ask: func(req jev.Request) (map[string]jev.Answer, error) {
 				st, _ := req.State.(prompt.ChunkState)
 				a, err := answer(req, st)
-				id, _, _ := stageAsked(req)
+				id, _, easy := stageChoice(req, optEasy)
 				route := a[id]
 				probs := map[string]float64{}
 				for k, v := range route.Probabilities {
-					if k != optEasy { // also haiku's model section
+					if k != easy {
 						probs[k] = v
 					}
 				}

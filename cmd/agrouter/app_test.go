@@ -461,12 +461,13 @@ func TestApp_Decision(t *testing.T) {
 
 	t.Run("model without efforts: effort null", func(t *testing.T) {
 		e := newEnv(t)
-		e.jev.pick = "claude-haiku-4-5"
+		e.globalConfig(syntheticCLIs(t) + "\n[model.quick]\ncli = alpha\nname = quick-1\nefforts =\ndescription = No effort levels.\n")
+		e.jev.pick = "quick"
 		r := e.run([]string{"-p", "rename x to y"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
 		d := decision(t, r.stdout)
-		assert.Equal(t, "claude-haiku-4-5", d["model"])
+		assert.Equal(t, "quick-1", d["model"])
 		assert.Nil(t, d["effort"])
 		assert.Contains(t, r.stdout, `"effort":null`)
 	})
