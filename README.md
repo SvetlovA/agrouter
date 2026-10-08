@@ -132,7 +132,7 @@ agrouter exec --cli=claude --dangerously-skip-permissions --output-format stream
 
 On Windows with npm's `claude.cmd`/`codex.cmd` shims, pass a multi-line prompt on stdin: cmd.exe cannot carry a line break inside an argument, so a multi-line `-p`, positional or `--prompt-file` prompt fails to start (exit `127`). This includes any prompt combined from two sources, since they are joined with a blank line. Decision mode and native executables are unaffected.
 
-Before starting the child, exec mode logs one JSON line with `cli`, `model`, `effort`, any completed `project_complexity` score and the same `confidence` object as decision mode to stderr, so tools such as Ralphex can record the selection for each step. Model and effort are `null` when the CLI's defaults apply. With `--verbose` it also includes every stage and per-request confidence. This line does not include the prompt or argv.
+Before starting the child, exec mode logs one line to stderr: `agrouter: selection: ` followed by a JSON object with `cli`, `model`, `effort`, any completed `project_complexity` score and the same `confidence` object as decision mode, so tools such as Ralphex show the selection for each step. The prefix keeps the line from passing for one of the child's stream-json events when a caller merges stderr into stdout (Ralphex drops JSON lines that aren't events and prints other lines); strip it to parse the JSON. Model and effort are `null` when the CLI's defaults apply. With `--verbose` it also includes every stage and per-request confidence. This line does not include the prompt or argv.
 
 Decision JSON and the exec selection line include `confidence` when Jev answered:
 
@@ -159,7 +159,7 @@ Verbose output includes all available numeric details, without truncating chunks
 | `command` | readable command text for copying; adapt quoting to your terminal; decision mode only |
 | `stdin_required` | whether the command needs the original stdin supplied again; stdin contents are not included in the command |
 
-Stage probabilities and pooled scores are separate from Jev's Choice confidence. Verbose JSON retains zero values. The exec selection log remains one JSON line on stderr and excludes argv and command; the child's output goes to stdout.
+Stage probabilities and pooled scores are separate from Jev's Choice confidence. Verbose JSON retains zero values. The exec selection log remains one prefixed line on stderr and excludes argv and command; the child's output goes to stdout.
 
 
 The child's stdout, stderr and exit code are agrouter's. An argument the chosen CLI does not map is skipped with one `agrouter: warning:` line on stderr, never an error. Set `AGROUTER_DEBUG=1` to see eligibility, each `--doc` chunk's complexity score, evidence and confidence with the project complexity, one line per routing stage (`stage <level>: skipped (<choice>)`, or the choice, confidence and top candidates, per chunk when pooled), Jev's probabilities and the final command on stderr (prompt text and key redacted; doc text is never printed).

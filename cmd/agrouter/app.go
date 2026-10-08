@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -130,11 +131,26 @@ func (a *app) run(argv []string) int {
 	if req.Mode == args.ModeDecision {
 		return a.printDecision(d, res, cmd.verbose)
 	}
-	// selection logging is best effort, like warnings; it never includes the prompt or raw argv
-	enc := json.NewEncoder(a.stderr)
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(selectionOutput(d, cmd.verbose))
+	a.logSelection(selectionOutput(d, cmd.verbose))
 	return a.exec(res, d.captured)
+}
+
+// selectionPrefix starts the exec selection line. A bare JSON line would look like one of the
+// child's stream-json events to a caller that merges stderr into stdout, such as ralphex, which
+// drops JSON without an event type; a prefixed line is shown as text, like warnings and debug lines.
+const selectionPrefix = "agrouter: selection: "
+
+// logSelection writes the selection as one prefixed JSON line to stderr. It is best effort, like
+// warnings, and never includes the prompt or argv.
+func (a *app) logSelection(s selectionJSON) {
+	var line bytes.Buffer
+	line.WriteString(selectionPrefix)
+	enc := json.NewEncoder(&line)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(s); err != nil {
+		return
+	}
+	_, _ = a.stderr.Write(line.Bytes())
 }
 
 // setup loads and validates the config, derives the catalog and builds the router with the resolved
