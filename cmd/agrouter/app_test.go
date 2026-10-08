@@ -342,7 +342,7 @@ func TestApp_RalphexClaudeMode(t *testing.T) {
 		assert.Equal(t, map[string]any{"cli": "claude", "model": "claude-opus-5-5", "effort": "high"}, decision(t, r.stderr))
 		assert.Empty(t, r.stdout)
 		argv, stdin, _ := e.child()
-		assert.Equal(t, []string{"-p", "--dangerously-skip-permissions", "--output-format", "stream-json",
+		assert.Equal(t, []string{"-p", "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose",
 			"--model", "claude-opus-5-5", "--effort", "high"}, argv)
 		assert.Equal(t, task, string(stdin))
 		assert.Empty(t, e.jev.requests())
@@ -358,7 +358,7 @@ func TestApp_RalphexClaudeMode(t *testing.T) {
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Equal(t, map[string]any{"cli": "claude", "model": "claude-sonnet-5-5", "effort": "medium", "confidence": map[string]any{"model": 0.9, "effort": 0.9}}, decision(t, r.stderr))
 		argv, stdin, environ := e.child()
-		assert.Equal(t, []string{"-p", "--dangerously-skip-permissions", "--output-format", "stream-json",
+		assert.Equal(t, []string{"-p", "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose",
 			"--model", "claude-sonnet-5-5", "--effort", "medium"}, argv)
 		assert.Equal(t, task, string(stdin))
 		assert.Equal(t, repeated(`{"prompt":"implement task 3\nof the plan\n"}`, 2), e.jev.requests())

@@ -55,12 +55,12 @@ func idsOf(cat *catalog.Catalog, keep func(catalog.Option) bool) []string {
 	return out
 }
 
-// ralphexClaude is ralphex's Claude-mode argv (claude_command = agrouter exec --cli=claude).
+// ralphexClaude is ralphex's Claude-mode argv (claude_command = agrouter exec --cli=claude); its --verbose is agrouter's.
 func ralphexClaude() *args.Request {
 	return &args.Request{Mode: args.ModeExec, CLI: "claude", Model: "opus", ModelSource: args.SourceFlag,
 		Effort: "high", EffortSource: args.SourceFlag, Args: []args.Arg{
 			{Spelling: "--dangerously-skip-permissions", Key: "permission-mode.bypassPermissions"},
-			flag("output-format", "stream-json"), flag("verbose", ""),
+			flag("output-format", "stream-json"),
 		}}
 }
 
@@ -91,7 +91,7 @@ func TestEligibleMappedArgumentPreference(t *testing.T) {
 		{name: "no arguments", req: &args.Request{}, want: ids(cat.Options)},
 		{name: "output-format json", req: &args.Request{Args: []args.Arg{flag("output-format", "json")}},
 			want: claude, dropped: []string{"codex"}},
-		{name: "verbose, [] counts as skipped", req: &args.Request{Args: []args.Arg{flag("verbose", "")}},
+		{name: "output-format text, [] counts as skipped", req: &args.Request{Args: []args.Arg{flag("output-format", "text")}},
 			want: claude, dropped: []string{"codex"}},
 		{name: "permission-mode manual", req: &args.Request{Args: []args.Arg{flag("permission-mode", "manual")}},
 			want: claude, dropped: []string{"codex"}},

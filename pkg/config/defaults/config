@@ -59,8 +59,8 @@ permission-mode.manual       = ["--permission-mode", "manual"]
 permission-mode.dontAsk      = ["--permission-mode", "dontAsk"]
 output-format.text           = ["--output-format", "text"]
 output-format.json           = ["--output-format", "json"]
-output-format.stream-json    = ["--output-format", "stream-json"]
-verbose                      = ["--verbose"]
+# claude -p rejects stream-json without --verbose; agrouter's own --verbose never reaches the child
+output-format.stream-json    = ["--output-format", "stream-json", "--verbose"]
 
 [cli.codex]
 command      = codex
@@ -95,7 +95,6 @@ config.model_reasoning_effort         = ["-c", "{value}"]
 # default output: final message on stdout. No single-result JSON: output-format.json is absent
 output-format.text           = []
 output-format.stream-json    = ["--json"]
-verbose                      = []
 
 # Claude models. Efforts match `claude --help` in Claude Code 2.1.294.
 # Sources: https://platform.claude.com/docs/en/about-claude/models/overview

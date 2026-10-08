@@ -125,10 +125,10 @@ Add `--verbose` for indented JSON with every stage, chunk and option, plus a rea
 Exec mode, with the prompt on stdin and the output format fixed by pinning the CLI:
 
 ```sh
-agrouter exec --cli=claude --dangerously-skip-permissions --output-format stream-json --verbose -- --verbose < prompt.txt
+agrouter exec --cli=claude --dangerously-skip-permissions --output-format stream-json --verbose < prompt.txt
 ```
 
-The first `--verbose` requests full agrouter selection details; the raw `--verbose` after `--` enables child verbosity.
+`--verbose` requests full agrouter selection details. Claude's stream-json mapping adds the child's own `--verbose`, which `claude -p` requires for that format.
 
 On Windows with npm's `claude.cmd`/`codex.cmd` shims, pass a multi-line prompt on stdin: cmd.exe cannot carry a line break inside an argument, so a multi-line `-p`, positional or `--prompt-file` prompt fails to start (exit `127`). This includes any prompt combined from two sources, since they are joined with a blank line. Decision mode and native executables are unaffected.
 
@@ -212,13 +212,7 @@ The old question keys are config errors that name their replacement, for example
 
 ## ralphex
 
-Claude mode (`--cli=claude` keeps ralphex's stream-json parser working). Since agrouter's `--verbose` now controls only its own output, include child verbosity in the global agrouter config for Ralphex's stream-json requests:
-
-```ini
-# ~/.config/agrouter/config
-[cli.claude.args]
-output-format.stream-json = ["--output-format", "stream-json", "--verbose"]
-```
+Claude mode (`--cli=claude` keeps ralphex's stream-json parser working). Ralphex's `--verbose` is consumed by agrouter; the embedded `output-format.stream-json` mapping gives `claude` the `--verbose` it needs. A global config that copies `[cli.claude.args]` must keep `--verbose` in that mapping, or `claude` fails with `--output-format=stream-json requires --verbose`.
 
 Ralphex config:
 
