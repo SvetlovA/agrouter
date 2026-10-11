@@ -46,10 +46,10 @@ Dependencies point one way: `config` <- `catalog` <- `router`; `prompt` depends 
 
 ```sh
 make test       # locally without -race (no cgo on the dev machine); CI runs make test RACE=-race
-make lint       # golangci-lint v2.13.0 (CI pin); override with GOLANGCI_LINT=<path>
+make lint       # golangci-lint v2.14.0 (CI pin); override with GOLANGCI_LINT=<path>
 make build      # .bin/agrouter on master; .bin/agrouter.<branch> otherwise (with .exe for Windows builds)
 make generate   # moq mocks
 make fmt        # needs goimports: go install golang.org/x/tools/cmd/goimports@latest
 ```
 
-Older golangci-lint builds (e.g. 2.12.2) cannot typecheck the Go 1.27 stdlib and silently skip packages; use v2.13.0 built with the local Go (`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.0`). Check lint for `GOOS=linux` and `GOOS=darwin` too, and with `--build-tags=eval`.
+Older golangci-lint builds, including v2.13.0, cannot decode the Go 1.27.2 stdlib export data (version 5) and fail typechecking; use v2.14.0 (`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0`). Rebuilding v2.13.0 with the local Go does not fix its export-data reader. Check lint for `GOOS=linux` and `GOOS=darwin` too, and with `--build-tags=eval`.
