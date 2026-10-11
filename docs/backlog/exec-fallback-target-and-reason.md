@@ -33,5 +33,5 @@ Requirements:
 Cover successful routing, failure before routing, failure at each stage,
 preserved caller constraints, known and unresolved child defaults, and failure
 with multiple CLIs. Coordinate with
-[concise exec logs](concise-exec-selection-log.md) and
+[native argument passthrough and concise exec logs](raw-cli-arguments-after-separator.md) and
 [CLI readiness checks](exec-cli-readiness-before-jev.md).
