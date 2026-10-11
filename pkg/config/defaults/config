@@ -18,6 +18,8 @@
 [agrouter]
 # TypeSafe API key for Jev. Empty = no key. Prefer the env var or the global config;
 # never put it in a local .agrouter/config that may be committed.
+# before using Jev routing, uncomment [agrouter] and api_key in the generated global
+# config and enter your TypeSafe API key, or set TYPESAFE_API_KEY in the environment.
 # precedence: --jev-api-key > non-empty TYPESAFE_API_KEY > local > global > embedded.
 api_key   =
 # pin a versioned id (e.g. jev-1.13.0) to keep routing stable across Jev releases

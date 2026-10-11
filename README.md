@@ -24,7 +24,16 @@ make -f WMakefile build
 
 Both makefiles name the executable `.bin/agrouter` on `master` and `.bin/agrouter.<branch>` on other branches, with `.exe` appended for Windows builds and filename-unsafe branch characters (including `/`) replaced by `-`. For example, branch `feature/example` produces `.bin/agrouter.feature-example.exe` on Windows; a detached HEAD uses `HEAD`. `WMakefile` also supports `test`, `lint`, `fmt`, `generate` and `eval-routing`.
 
-Routing needs a TypeSafe API key for Jev:
+On the first routing invocation, agrouter creates `~/.config/agrouter/config` (or the directory selected by `AGROUTER_CONFIG_DIR`) as a commented template. `go install` only installs the executable; `--help` and `--version` do not create config.
+
+Before using Jev routing, edit the global config, uncomment `[agrouter]` and `api_key`, and set your TypeSafe API key. Creating the template leaves the key empty:
+
+```ini
+[agrouter]
+api_key = your-typesafe-api-key
+```
+
+You can also supply the key through the environment:
 
 ```sh
 export TYPESAFE_API_KEY=...
@@ -174,6 +183,8 @@ INI files, merged per section and per key, later layers winning:
 2. global `~/.config/agrouter/config` (directory overridable with `AGROUTER_CONFIG_DIR`);
 3. local `.agrouter/config` in the working directory;
 4. environment (`TYPESAFE_API_KEY`, `AGROUTER_CLI`).
+
+The global config is installed with every setting and section commented out. Uncomment the section header and settings you want to customize. Missing, empty or comment-only files are refreshed from the current embedded defaults on each routing invocation; files with any active content are preserved. New directories use permissions `0700` and new files `0600`. Local `.agrouter/config` files are never created automatically.
 
 A local file can change one key without redefining the catalog; `enabled = false` removes a section (a disabled `[cli.*]` also drops its models). Comments must be on their own lines: inline `;` becomes part of the value. For example:
 

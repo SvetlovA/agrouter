@@ -160,6 +160,9 @@ func (a *app) setup(req *args.Request) (*config.Config, *catalog.Catalog, *route
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("config: %w", err)
 	}
+	if err = config.InstallDefaults(global, a.embedded); err != nil {
+		return nil, nil, nil, configError{err}
+	}
 	cfg, err := config.Load(config.Sources{Embedded: a.embedded, GlobalPath: global, LocalPath: local})
 	if err != nil {
 		return nil, nil, nil, configError{err}

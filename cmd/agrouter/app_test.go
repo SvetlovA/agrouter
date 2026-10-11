@@ -1222,6 +1222,56 @@ func TestApp_HelpHasKeyCautions(t *testing.T) {
 	}
 }
 
+func TestApp_InstallsConfig(t *testing.T) {
+	t.Run("first run", func(t *testing.T) {
+		e := newEnv(t)
+		// passthrough values fix all stages without relying on the shipped model catalog
+		r := e.run([]string{"--cli", defaultsCLI(t), "--model=custom-model", "--effort=custom-effort", "do it"}, nil)
+		require.Equal(t, exitOK, r.code, r.stderr)
+		assert.Empty(t, r.stderr)
+		assert.True(t, json.Valid([]byte(r.stdout)))
+
+		path := filepath.Join(e.configDir, "config")
+		data, err := os.ReadFile(path) //nolint:gosec // isolated test config
+		require.NoError(t, err)
+		assert.NotEmpty(t, data)
+		for line := range strings.SplitSeq(string(data), "\n") {
+			trimmed := strings.TrimSpace(line)
+			assert.True(t, trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";"), line)
+		}
+		assert.NoDirExists(t, filepath.Join(e.workDir, ".agrouter"))
+	})
+	for _, flag := range []string{"--help", "--version"} {
+		t.Run(flag, func(t *testing.T) {
+			e := newEnv(t)
+			r := e.run([]string{flag}, nil)
+			require.Equal(t, exitOK, r.code, r.stderr)
+			assert.NoFileExists(t, filepath.Join(e.configDir, "config"))
+		})
+	}
+	t.Run("installation error", func(t *testing.T) {
+		e := newEnv(t)
+		blocked := filepath.Join(e.configDir, "blocked")
+		require.NoError(t, os.WriteFile(blocked, []byte("file"), 0o600))
+		t.Setenv(config.EnvConfigDir, blocked)
+		r := e.run([]string{"do it"}, nil)
+		assert.Equal(t, exitUsage, r.code)
+		assert.Empty(t, r.stdout)
+		assert.True(t, strings.HasPrefix(r.stderr, "agrouter: config: create global config directory:"), r.stderr)
+		assert.Equal(t, 1, strings.Count(r.stderr, "\n"))
+		assert.Empty(t, e.jev.requests())
+	})
+}
+
+// defaultsCLI picks an enabled CLI without pinning the contents of the embedded catalog.
+func defaultsCLI(t *testing.T) string {
+	t.Helper()
+	cfg, err := config.Load(config.Sources{Embedded: defaults.Config})
+	require.NoError(t, err)
+	require.NotEmpty(t, cfg.CLIs)
+	return cfg.CLIs[0].Name
+}
+
 func TestStdinReader(t *testing.T) {
 	assert.Nil(t, stdinReader(nil))
 	r := strings.NewReader("x")
