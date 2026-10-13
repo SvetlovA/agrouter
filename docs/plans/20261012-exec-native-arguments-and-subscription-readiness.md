@@ -367,12 +367,18 @@ Exec processing flow: parse → load config → validate operand/flags/conflicts
 - Create: `pkg/readiness/rpc.go`, `pkg/readiness/rpc_test.go`, `pkg/readiness/testdata/rpc/*.jsonl`.
 - Modify: `pkg/config/defaults/config`.
 
-- [ ] Implement initialization, read requests, correlation, notifications, pagination, and bounded shutdown; reject thread/turn and other mutating methods.
-- [ ] Normalize multiple buckets, server-provided durations, resets, and explicit usage-permission/limit-reached/spend-control denials.
-- [ ] Configure the embedded Codex check and its quota error prefix/message.
-- [ ] ⚠️ Investigate the app-server read that returns the effective configuration (model and reasoning effort as resolved for this working directory and profile); normalize it as `defaults` evidence and never treat the model list's default flag alone as verified. Record the finding here.
-- [ ] Write tests: both windows, scoped buckets, denial despite low percentages, missing/null permission, credits as unknown, API-key/custom provider, hidden/paginated models, RPC errors, effective-config defaults present/absent, model-list default without effective config staying unknown; assert no thread/turn or mutating actions.
-- [ ] ⚠️ Measure cold-start latency once and record it; run `make test`.
+- [x] Implement initialization, read requests, correlation, notifications, pagination, and bounded shutdown; reject thread/turn and other mutating methods.
+- [x] Normalize multiple buckets, server-provided durations, resets, and explicit usage-permission/limit-reached/spend-control denials.
+- [x] Configure the embedded Codex check and its quota error prefix/message.
+- [x] ⚠️ Investigate the app-server read that returns the effective configuration (model and reasoning effort as resolved for this working directory and profile); normalize it as `defaults` evidence and never treat the model list's default flag alone as verified. Record the finding here.
+- [x] Write tests: both windows, scoped buckets, denial despite low percentages, missing/null permission, credits as unknown, API-key/custom provider, hidden/paginated models, RPC errors, effective-config defaults present/absent, model-list default without effective config staying unknown; assert no thread/turn or mutating actions.
+- [x] ⚠️ Measure cold-start latency once and record it; run `make test`.
+- ➕ Findings (codex-cli 0.162.1, prompt-free, 2026-10-13):
+  - Messages sent: `initialize` (its `userAgent` is `<client>/<version> ...`, the version source for `min_version`), the `initialized` notification, then `account/read`, `account/rateLimits/read` (with `excludeResetCreditDetails`) and `config/read` (with `cwd` = the real working directory) together, and `model/list` (`includeHidden`, paged by `nextCursor`, at most 20 pages) only when needed. A fixed allow-list of these reads is enforced in code; server notifications, server requests and other response ids are skipped. The server exits when its stdin closes; one that lingers is killed after 1s.
+  - Account: `requiresOpenaiAuth` false (custom provider) or a non-subscription account type is quota `not_applicable`; a null account with auth required is auth `unavailable` (`auth_failed`); a subscription account adds auth `available`.
+  - Rate limits: the top-level `rateLimits` bucket is account-wide and always reports both windows (unknown when missing); other `rateLimitsByLimitId` buckets are scoped to `normalModelSlug`, else `limitName`, else the limit id (Task 7 matches the label). Windows are named by `windowDurationMins` (300 five-hour, 10080 weekly, anything else unnamed), never by position. `ordinaryUsageAllowed` false is an account-wide `quota_denied`, null/missing is unknown `usage_permission_not_reported`; a bucket's `rateLimitReachedType` or `spendControlReached` is `quota_denied` for its scope whatever the percentages; credits (`hasCredits`/`unlimited`) turn a full window into unknown `extra_usage_enabled`. A read error with the `rateLimitExceeded` error info or an HTTP 429 status in its data is `probe_throttled`.
+  - Defaults: `config/read` with `cwd` returns the effective `model` and `model_reasoning_effort` for that directory and the default profile; they are normalized as `defaults` evidence. A configured model without an effort takes that model's `defaultReasoningEffort` from the model list (hidden models included). With no configured model both stay unknown and the model list is not read, so its `isDefault` flag is never taken as the child's default. Native `-c`/`--profile` overrides are covered by the selection conflict check and `context_flags`.
+  - Cold start: about 0.5s through the checker (well inside the 5s check timeout).
 
 ### Task 7: Evaluate evidence against eligible combinations
 

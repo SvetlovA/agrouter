@@ -1,0 +1,2 @@
+{"on":"initialize","reply":{"result":{"userAgent":"agrouter/1.2.3 (os 1; arch) term/1 (agrouter; 0)","platformFamily":"unix","platformOs":"os"}}}
+{"on":"account/read","reply":{"result":{"account":{"type":"chatgpt","email":null,"planType":"plan-a"},"requiresOpenaiAuth":true}}}

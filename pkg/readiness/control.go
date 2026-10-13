@@ -32,10 +32,25 @@ var controlReads = []string{controlInitialize, controlVersion, controlUsage, con
 // throttleCodes are control error codes that mean the usage read itself was rate limited.
 var throttleCodes = []string{"rate_limit_error", "rate_limited", "throttled"}
 
-// controlError is a control-stream exchange that ended without usable evidence, with its reason code.
-type controlError struct{ reason string }
+// exchangeError is a probe exchange that ended without usable evidence, with its reason code.
+type exchangeError struct{ reason string }
 
-func (e *controlError) Error() string { return "control stream: " + e.reason }
+func (e *exchangeError) Error() string { return "probe exchange: " + e.reason }
+
+// exchangeReason is the unknown reason for an exchange under ctx that failed with err.
+func exchangeReason(ctx context.Context, err error) string {
+	var ee *exchangeError
+	switch {
+	case errors.Is(err, runner.ErrProbeResponseTooLarge):
+		return ReasonProbeResponseTooLarge
+	case errors.As(err, &ee):
+		return ee.reason
+	case ctx.Err() != nil:
+		return ReasonProbeTimeout
+	default:
+		return ReasonProbeFailed
+	}
+}
 
 // controlRequest is one line the transport writes to the probe's stdin.
 type controlRequest struct {
@@ -126,29 +141,12 @@ func (c Checker) runControl(ctx context.Context, cli config.CLI, check config.Ch
 		p.Kill()
 	}
 	_, _ = p.Wait() // the replies, not the exit, decide: a read exits 0 even with quota exhausted
-	var ce *controlError
-	switch {
-	case err == nil:
-	case errors.Is(err, runner.ErrProbeResponseTooLarge):
-		r.add(unknownQuota(check.Name, ReasonProbeResponseTooLarge, c.now()))
-		return
-	case errors.As(err, &ce):
-		r.add(unknownQuota(check.Name, ce.reason, c.now()))
-		return
-	case ctx.Err() != nil:
-		r.add(unknownQuota(check.Name, ReasonProbeTimeout, c.now()))
-		return
-	default:
-		r.add(unknownQuota(check.Name, ReasonProbeFailed, c.now()))
+	if err != nil {
+		r.add(unknownQuota(check.Name, exchangeReason(ctx, err), c.now()))
 		return
 	}
 	r.add(evidence...)
-	if defaults.Model != nil {
-		r.Defaults.Model = defaults.Model
-	}
-	if defaults.Effort != nil {
-		r.Defaults.Effort = defaults.Effort
-	}
+	r.setDefaults(defaults)
 }
 
 func (c Checker) controlExchange(s *controlSession, check config.Check) ([]Evidence, Defaults, error) {
@@ -161,10 +159,10 @@ func (c Checker) controlExchange(s *controlSession, check config.Check) ([]Evide
 		return nil, Defaults{}, err
 	}
 	if res[controlInitialize].Subtype != "success" {
-		return nil, Defaults{}, &controlError{ReasonProbeFailed}
+		return nil, Defaults{}, &exchangeError{ReasonProbeFailed}
 	}
 	if check.MinVersion != "" && !versionSupported(res[controlVersion], check.MinVersion) {
-		return nil, Defaults{}, &controlError{ReasonVersionUnsupported}
+		return nil, Defaults{}, &exchangeError{ReasonVersionUnsupported}
 	}
 
 	res, err = s.call(
@@ -177,13 +175,13 @@ func (c Checker) controlExchange(s *controlSession, check config.Check) ([]Evide
 	usage := res[controlUsage]
 	switch {
 	case usage.Subtype == "error" && slices.Contains(throttleCodes, usage.ErrorCode):
-		return nil, Defaults{}, &controlError{ReasonProbeThrottled}
+		return nil, Defaults{}, &exchangeError{ReasonProbeThrottled}
 	case usage.Subtype != "success":
-		return nil, Defaults{}, &controlError{ReasonProbeFailed}
+		return nil, Defaults{}, &exchangeError{ReasonProbeFailed}
 	}
 	evidence, err := usageEvidence(usage.Response, check.Name, c.now())
 	if err != nil {
-		return nil, Defaults{}, &controlError{ReasonProbeMalformed}
+		return nil, Defaults{}, &exchangeError{ReasonProbeMalformed}
 	}
 	return evidence, settingsDefaults(res[controlSettings]), nil
 }

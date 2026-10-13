@@ -39,7 +39,8 @@ func TestMain(m *testing.M) {
 //   - isolation: reports auth available only when stdin is empty, the Jev key is absent from the
 //     environment and the working directory is $READINESS_HELPER_WANT_DIR; otherwise unavailable with
 //     the reason that failed;
-//   - control: a stream-json control peer, see controlHelper.
+//   - control: a stream-json control peer, see controlHelper;
+//   - rpc: a stdio JSON-RPC peer, see rpcHelper.
 func helper() int {
 	switch os.Getenv(helperMode) {
 	case "print":
@@ -51,6 +52,8 @@ func helper() int {
 		return 0
 	case "control":
 		return controlHelper()
+	case "rpc":
+		return rpcHelper()
 	case "isolation":
 		reason := ""
 		stdin, _ := io.ReadAll(os.Stdin)
@@ -137,8 +140,8 @@ func TestCheck_Unknown(t *testing.T) {
 		{name: "no availability section", mutate: func(c *config.CLI) { c.Availability = nil }, reason: ReasonNotConfigured},
 		{name: "no checks", mutate: func(c *config.CLI) { c.Availability.Checks = nil }, reason: ReasonNotConfigured},
 		{name: "disabled", mutate: func(c *config.CLI) { c.Availability.Enabled = false }, reason: ReasonDisabled},
-		{name: "transport without a decoder yet",
-			mutate: func(c *config.CLI) { c.Availability.Checks[0].Transport = config.TransportJSONRPCRateLimit },
+		{name: "transport without a decoder",
+			mutate: func(c *config.CLI) { c.Availability.Checks[0].Transport = "unknown-v9" },
 			reason: ReasonTransportUnsupported},
 		{name: "missing probe command",
 			mutate: func(c *config.CLI) { c.Availability.Checks[0].Command = filepath.Join(os.TempDir(), "no-such-probe-x") },
@@ -205,7 +208,7 @@ func TestCheck_ProbeIsolation(t *testing.T) {
 
 func TestCheck_MultipleChecks(t *testing.T) {
 	cli := helperCLI(
-		config.Check{Name: "usage", Transport: config.TransportJSONRPCRateLimit},
+		config.Check{Name: "usage", Transport: "unknown-v9"},
 		config.Check{Name: "status", Transport: config.TransportJSONHelper},
 	)
 	out := `{"schema":"agrouter.readiness/v1","quota":[{"window":"weekly","status":"available"}]}`

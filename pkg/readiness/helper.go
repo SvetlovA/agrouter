@@ -65,12 +65,7 @@ func (c Checker) runHelper(ctx context.Context, cli config.CLI, check config.Che
 		return
 	}
 	r.add(evidence...)
-	if defaults.Model != nil {
-		r.Defaults.Model = defaults.Model
-	}
-	if defaults.Effort != nil {
-		r.Defaults.Effort = defaults.Effort
-	}
+	r.setDefaults(defaults)
 }
 
 // parseHelper decodes and validates one json-helper response. The error never quotes the response.

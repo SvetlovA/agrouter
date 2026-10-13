@@ -56,10 +56,11 @@ const (
 	ReasonQuotaExhausted        = "quota_exhausted"
 	ReasonAuthFailed            = "auth_failed"
 	ReasonUnsupportedModel      = "unsupported_model"
-	ReasonQuotaDenied           = "quota_denied"        // the backend refuses the window whatever its usage
-	ReasonExtraUsageEnabled     = "extra_usage_enabled" // a full window that paid overage may still cover
-	ReasonNotSubscription       = "not_subscription"    // API-key or other-provider auth: no subscription windows
-	ReasonVersionUnsupported    = "version_unsupported" // older than the check's min_version, or no version reported
+	ReasonQuotaDenied           = "quota_denied"                  // the backend refuses the window whatever its usage
+	ReasonExtraUsageEnabled     = "extra_usage_enabled"           // a full window that paid overage may still cover
+	ReasonNotSubscription       = "not_subscription"              // API-key or other-provider auth: no subscription windows
+	ReasonVersionUnsupported    = "version_unsupported"           // older than the check's min_version, or no version reported
+	ReasonPermissionUnknown     = "usage_permission_not_reported" // the backend did not say whether usage is allowed
 )
 
 // Scope is what a piece of evidence applies to: the whole account when Models is empty, otherwise
@@ -132,6 +133,8 @@ func (c Checker) Check(ctx context.Context, cli config.CLI) Report {
 			c.runHelper(ctx, cli, check, &r)
 		case config.TransportSDKControlUsage:
 			c.runControl(ctx, cli, check, &r)
+		case config.TransportJSONRPCRateLimit:
+			c.runRPC(ctx, cli, check, &r)
 		default:
 			r.add(unknownQuota(check.Name, ReasonTransportUnsupported, c.now()))
 		}
@@ -184,6 +187,16 @@ func (c Checker) now() time.Time {
 }
 
 func (r *Report) add(e ...Evidence) { r.Evidence = append(r.Evidence, e...) }
+
+// setDefaults keeps the defaults d reports, leaving the others as earlier checks found them.
+func (r *Report) setDefaults(d Defaults) {
+	if d.Model != nil {
+		r.Defaults.Model = d.Model
+	}
+	if d.Effort != nil {
+		r.Defaults.Effort = d.Effort
+	}
+}
 
 func (r *Report) has(d Dimension) bool {
 	for _, e := range r.Evidence {

@@ -93,6 +93,21 @@ config_flags          = -c, --config
 selection_config_keys = model, model_reasoning_effort
 context_flags         = --profile, -p, --oss, --local-provider, --ignore-user-config
 
+[cli.codex.availability]
+checks              = limits
+timeout             = 5s
+unknown             = allow
+quota_error_message = You've hit your usage limit
+
+# stdio app-server reads only (initialize, account, rate limits, effective config for the working
+# directory, model list): never a thread or a turn, so no inference, no login and no config write.
+# The rate limits come from the CLI's own login, which it refreshes itself; API-key and custom
+# provider setups report no subscription windows. measured cold start: about 0.5s (0.162.1).
+[cli.codex.availability.limits]
+transport   = jsonrpc-ratelimits-v1
+args        = ["app-server"]
+min_version = 0.162.1
+
 # Claude models. Efforts match `claude --help` in Claude Code 2.1.294.
 # Sources: https://platform.claude.com/docs/en/about-claude/models/overview
 # and https://platform.claude.com/docs/en/about-claude/models/choosing-a-model
