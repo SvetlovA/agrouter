@@ -52,7 +52,7 @@ Every user-visible change, applied (with README and `CLAUDE.md` updates) in the 
 | Exec exit 127 broadened: missing executable, authentication failure, or exhausted subscription quota found during preflight | 8 |
 | Exec exit 2 for a strict-policy unknown availability block | 8 |
 | Exec quota block prints one configured native-compatible line, which may start with a configured severity prefix before `agrouter:` (narrow exception to the `agrouter:` prefix rule) | 8 |
-| Exec JSON gains `fallback` and `effective` (including `verified_child_default`); a fallback whose verified delegated default is quota-blocked exits 127 without starting the child | 9 |
+| Exec JSON gains `fallback` and `effective` (including `verified_child_default`) and a fallback prints one `agrouter: warning:` line naming the fallen-back fields and their defaults; a fallback whose verified delegated default is quota-blocked exits 127 without starting the child | 9 |
 
 ## Context
 
@@ -193,11 +193,25 @@ Illustrative decision JSON after a model-stage timeout with a fixed synthetic CL
 
 ### Exec fallback metadata
 
-- Exec-only `fallback` when `Undecided` is set: the allowed action (run the fixed CLI with caller-fixed values, delegate the rest), alongside the shared `reason`.
+- **A fallback must be unmistakable.** When Jev routing fails in exec, the output must say that something went wrong, which values fell back to the child's defaults, what those defaults are when known, and that they are not a Jev selection. Values Jev did select before the failure (for example the model when only the effort stage failed) and caller-fixed values keep their own source and are not reported as fallbacks.
+- **Fallback warning line:** exactly one `agrouter: warning:` line on stderr before the selection line, readable without parsing JSON or `--verbose`. It names the failing stage and reason code, lists only the fallen-back fields, and gives each one's verified default or says it is unknown with a short reason:
+
+  ```text
+  agrouter: warning: Jev routing failed at the model stage (jev_timeout); model and effort fall back to tool-a defaults, not a Jev selection: model m-2 (verified child default), effort unknown (child did not report it)
+  ```
+
+- Exec-only `fallback` when `Undecided` is set: `action` (`child_defaults`), `fields` (the fallen-back fields), and a controlled `message` matching the warning, alongside the shared `reason`.
 - Exec-only `effective` for model and effort: `value`, `source` (`router`, `caller`, `verified_child_default`, `child_default_unknown`), optional reason. Top-level nulls stay null when agrouter emitted no selection flag, even when `effective` shows a verified default.
 - **Default evidence:** the same preflight probe connection reads the child's effective default model/effort when its protocol reports the value the child would use in this working directory with its settings, profile, and provider. Decoders and `json-helper` report `defaults` evidence; anything weaker (catalog default, a model list's recommended/default flag without effective-config backing) is unknown. A configured `context_flags` spelling in the native tail makes defaults unknown, as for quota. Decision mode never reads defaults.
 - **Defaults and blocks:** a verified default model is checked against model-scoped quota blocks. If the delegated default is known blocked, the fallback is blocked: no child starts, the quota line is printed, and exec exits 127 (the same as a preflight block). An unknown delegated model stays unknown under the unknown policy.
 - A compact readiness summary (excluded combination count by reason, unknown warning code) when exclusions affected the selection.
+- Illustrative exec stderr for the warning above (the selection line remains the last agrouter line before the child starts):
+
+  ```text
+  agrouter: selection: {"cli":"tool-a","model":null,"effort":null,"reason":{"code":"jev_timeout","stage":"model","message":"Jev model selection timed out"},"null_reasons":{"model":{"code":"routing_failed","message":"Model delegated to the child after routing failed"},"effort":{"code":"routing_failed","message":"Effort delegated to the child after routing failed"}},"fallback":{"action":"child_defaults","fields":["model","effort"],"message":"Model and effort fall back to the child's defaults, not a Jev selection"},"effective":{"model":{"value":"m-2","source":"verified_child_default"},"effort":{"value":null,"source":"child_default_unknown","reason":{"code":"default_not_reported"}}}}
+  ```
+
+  Top-level `model`/`effort` stay null because agrouter passed no selection flag; `effective` and the warning carry the value the child will use.
 - The selection line stays one prefixed line with `cli`, `model`, `effort`, completed project complexity, stage confidence summaries, and the new fields; no options, stage records, probabilities, chunks, prompt, docs, argv, or command.
 
 ## Technical details
@@ -376,8 +390,9 @@ Exec processing flow: parse → load config → validate operand/flags/conflicts
 
 - [ ] Add `fallback` when `Undecided` is set and `effective` model/effort with `router`/`caller`/`verified_child_default`/`child_default_unknown` sources, using preflight `defaults` evidence.
 - [ ] Check a verified delegated default model against model-scoped blocks; block the fallback (quota line, exit 127, no child) when it is known blocked.
+- [ ] Emit the fallback warning line (failing stage, reason code, fallen-back fields only, each verified default or "unknown" with its reason, "not a Jev selection") before the selection line.
 - [ ] Add the compact readiness summary to the selection line when exclusions or unknown warnings applied.
-- [ ] Write tests: success, failure at each stage, caller-fixed values, verified and unknown delegated defaults, defaults unknown with a context flag, blocked verified default, readiness-filtered fallback, chunked routing, no fallback for intentional omissions, line stays single and concise.
+- [ ] Write tests: success (no warning, no `fallback`), failure at each stage, effort-stage failure keeping Jev's model with `source: router` and warning only about effort, caller-fixed values never listed as fallbacks, warning text with verified and unknown defaults, exactly one warning and one selection line, verified and unknown delegated defaults, defaults unknown with a context flag, blocked verified default, readiness-filtered fallback, chunked routing, no fallback for intentional omissions, line stays single and concise.
 - [ ] Update README exec output section; run `make test`.
 
 ### Task 10: Verify acceptance criteria
