@@ -69,6 +69,32 @@ func TestParseArgs_Mode(t *testing.T) {
 	}
 }
 
+// TestParseArgs_DocumentedExamples parses the invocation shapes README and --help document, with
+// synthetic CLI names: the parser never reads the catalog.
+func TestParseArgs_DocumentedExamples(t *testing.T) {
+	tests := []struct {
+		name string
+		argv []string
+		want args.Request
+	}{
+		{"decision with -p", []string{"-p", "fix the flaky test"}, args.Request{
+			Mode: args.ModeDecision, PromptFlag: positional("fix the flaky test")}},
+		{"decision with docs", []string{"--doc", "AGENTS.md", "--doc", "docs/architecture.md", "-p", "refactor"}, args.Request{
+			Mode: args.ModeDecision, PromptFlag: positional("refactor"), Docs: []string{"AGENTS.md", "docs/architecture.md"}}},
+		{"exec with stdin prompt and native args", []string{"exec", "tool-a", "--", "--yes", "--format", "stream", "--verbose"}, args.Request{
+			Mode: args.ModeExec, CLI: "tool-a", Raw: []string{"--yes", "--format", "stream", "--verbose"}}},
+		{"caller args ending in -- with an appended native flag", []string{"exec", "tool-a", "--doc=AGENTS.md", "--", "--yes", "--print"}, args.Request{
+			Mode: args.ModeExec, CLI: "tool-a", Docs: []string{"AGENTS.md"}, Raw: []string{"--yes", "--print"}}},
+		{"wrapper forwarding its arguments after --", []string{"exec", "tool-b", "--doc=AGENTS.md", "--", "--json", "-"}, args.Request{
+			Mode: args.ModeExec, CLI: "tool-b", Docs: []string{"AGENTS.md"}, Raw: []string{"--json", "-"}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, *parseOK(t, tc.argv))
+		})
+	}
+}
+
 func TestParseArgs_ExecCLI(t *testing.T) {
 	t.Run("redundant --cli accepted", func(t *testing.T) {
 		req := parseOK(t, []string{"exec", "tool-a", "--cli=tool-a", "x"})
@@ -146,6 +172,7 @@ func TestParseArgs_OwnFlags(t *testing.T) {
 		assert.NotContains(t, cmd.help, "/cli")
 		assert.NotContains(t, cmd.help, "--config")
 		assert.NotContains(t, cmd.help, "AGROUTER_CLI")
+		assert.NotContains(t, cmd.help, "skipped")
 	})
 	t.Run("--version", func(t *testing.T) {
 		cmd, err := parseArgs([]string{"--version"})

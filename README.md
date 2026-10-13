@@ -310,6 +310,109 @@ When `prompt_args` puts the prompt after `--` and the native tokens already hold
 
 The former `[cli.<name>.args]` mapping sections are config errors that name the replacement keys. `[cli.<name>.availability]` sections configure the exec readiness checks.
 
+### Availability checks
+
+Each CLI's exec readiness checks live under its own `[cli.<name>]` section, so a new CLI needs only config. A CLI without an availability section gets the executable check only.
+
+```text
+[cli.<name>.availability]            policy: which checks, timeout, unknown policy, quota line
+  └── [cli.<name>.availability.<check>]   one probe: transport, command, args, min_version
+```
+
+**Note:** the policy section lists its checks by name; each named check has its own subsection. Subsections not listed in `checks` are ignored, so a local layer can replace the list.
+
+| `[cli.<name>.availability]` key | Meaning |
+|---|---|
+| `enabled` | `false` skips every check except the executable |
+| `checks` | comma-separated check names, run in order |
+| `timeout` | bound for each probe (default `5s`); `[agrouter] timeout` bounds them too |
+| `unknown` | `allow` (default) runs with one warning when a check cannot verify; `block` exits `2` instead |
+| `quota_error_prefix` | start of the quota line (default `agrouter: `) |
+| `quota_error_message` | text after the prefix, for example a caller's limit pattern |
+
+| `[cli.<name>.availability.<check>]` key | Meaning |
+|---|---|
+| `transport` | `json-helper`, `sdk-control-usage-v1` (stream-json control reads) or `jsonrpc-ratelimits-v1` (stdio JSON-RPC rate-limit reads); required |
+| `command` | the probe executable; the CLI's own `command` when unset |
+| `args` | the probe's arguments, a JSON array |
+| `min_version` | for the two built-in transports: a CLI older than this, or one that reports no version, is unknown (`version_unsupported`) |
+
+Every probe runs in the real working directory, with the user's real settings and login, its own stdin, a 1 MiB response limit, and without the Jev key in its environment. A probe never sends a prompt or a user message, so it starts no inference. When it exits, times out or overflows, agrouter kills its whole process tree (a process group on Unix, a Job Object on Windows).
+
+**A third CLI with `json-helper`.** A helper is any executable that prints one JSON object on stdout and reads nothing from stdin. Every section is optional; a missing one is unknown:
+
+```ini
+# .agrouter/config
+[cli.tool-x]
+command     = tool-x
+description = Example agent CLI.
+exec_args   = ["run"]
+model_args  = ["--model", "{model}"]
+prompt_args = ["--", "{prompt}"]
+selection_flags = --model
+
+[cli.tool-x.availability]
+checks = ready
+
+[cli.tool-x.availability.ready]
+transport = json-helper
+command   = tool-x-ready
+
+[model.tool-x-large]
+cli         = tool-x
+name        = tool-x-large
+description = The example CLI's large model.
+```
+
+```json
+{
+  "schema": "agrouter.readiness/v1",
+  "auth": {"status": "available"},
+  "quota": [
+    {"window": "five_hour", "status": "available"},
+    {"window": "weekly", "status": "unavailable", "reset_at": "2026-10-20T09:00:00Z"},
+    {"window": "weekly", "status": "unavailable", "models": ["tool-x-large"], "reset_at": "2026-10-18T09:00:00Z"}
+  ],
+  "capability": {"unsupported_models": []},
+  "defaults": {"model": "tool-x-large", "effort": null}
+}
+```
+
+**Note:** `status` is `available`, `unavailable`, `unknown` or `not_applicable` (for example quota under API-key auth). `window` is `five_hour` or `weekly`; `models` scopes a window to some models (matched against model names, sections and aliases, ignoring case); `reason` is an optional lowercase code. `defaults` are what the child would use without selection flags; leave a value `null` when unknown. Output that does not match this schema, extra fields included, is unknown (`probe_malformed`).
+
+Limitations:
+
+- The built-in transports read experimental, undocumented CLI protocols. `min_version` guards the versions they were checked against; when a CLI upgrade changes the protocol, the check reports unknown (or stops exec under `unknown = block`). agrouter never falls back to an inference probe or to an auth-only check.
+- A `json-helper` has no `min_version` check: the helper decides what it supports.
+- A probe cannot see native options after `--`. Options in `context_flags` switch the child's provider, profile or settings, so with one of them exec checks only the executable.
+- Evidence is not cached: every exec probes again.
+
+To see what the stream-json control check reads, send the same prompt-free requests on stdin yourself. Nothing here is a user message, so the CLI answers from its login and settings without asking a model:
+
+```sh
+printf '%s\n' \
+  '{"type":"control_request","request_id":"1","request":{"subtype":"initialize"}}' \
+  '{"type":"control_request","request_id":"2","request":{"subtype":"get_usage","skip_behaviors":true}}' |
+  claude -p --input-format stream-json --output-format stream-json --verbose \
+    --no-session-persistence --strict-mcp-config --settings '{"disableAllHooks":true}'
+```
+
+Each request gets one `control_response` line with the same `request_id`; the second holds the subscription windows.
+
+### Migrating from mapped arguments
+
+agrouter no longer translates child options. Pass them after `--` with exec instead.
+
+| Removed | Replacement |
+|---|---|
+| `agrouter exec --cli=NAME ...` | `agrouter exec NAME ...` |
+| `AGROUTER_CLI` | `exec <cli>`, or `--cli=NAME` in decision mode; when set it is ignored with a warning |
+| `--permission-mode`, `--dangerously-*`, `--output-format`, `--sandbox`, `-c`/`--config` | the CLI's own spelling after `--`: `agrouter exec <cli> -- --output-format stream-json` |
+| native `--model`/`--effort` or `-c model=...` after `--` | agrouter's `--model`/`--effort` before `--` (a native selection is exit `2`) |
+| `[cli.<name>.args]` sections | `exec_args`, `model_args`, `effort_args`, `prompt_args` and the native flag lists in `[cli.<name>]` |
+| `skipped` in decision JSON and its skip warnings | none: nothing is mapped, so nothing is skipped |
+| raw tokens after `--` in decision mode | none: decision mode rejects `--` |
+
 The questions sent to Jev and the description of every state field are built into agrouter. Config holds only the preference they follow, in two `[agrouter]` keys that must be non-empty:
 
 | Key | Preference |
@@ -330,6 +433,8 @@ The old question keys are config errors that name their replacement, for example
 
 ## ralphex
 
+*User-owned setup.* The config, wrapper and agrouter overrides below live in your Ralphex and agrouter configs, not in this repository; adapt them to your Ralphex version.
+
 Ralphex passes the prompt on stdin and appends only native flags, so its arguments must land after agrouter's `--`. Claude mode: `claude_args` ends with `--`, and Ralphex's appended `--print` goes to `claude` unchanged.
 
 Ralphex config:
@@ -345,7 +450,17 @@ claude_command = agrouter
 claude_args    = exec claude --doc=CLAUDE.md -- --dangerously-skip-permissions --output-format stream-json --verbose
 ```
 
-Codex mode (`executor = codex`) and the external Codex review. `codex_command` accepts only an executable, and Ralphex prepends Codex's own `exec`, so point it at a small wrapper that drops that `exec` and runs `agrouter exec codex --doc=CLAUDE.md -- "$@"`:
+Codex mode (`executor = codex`) and the external Codex review. `codex_command` accepts only an executable, and Ralphex prepends Codex's own `exec`, so point it at a small wrapper that drops that `exec` (an executable `agrouter-codex` on `PATH`):
+
+```sh
+#!/bin/sh
+if [ "$1" != exec ]; then
+    printf '%s\n' 'agrouter: expected native exec subcommand' >&2
+    exit 2
+fi
+shift
+exec agrouter exec codex --doc=CLAUDE.md -- "$@"
+```
 
 ```ini
 # ~/.config/ralphex/config
@@ -353,7 +468,29 @@ codex_command          = agrouter-codex
 # empty, so Jev chooses; ralphex's defaults would otherwise fix both
 codex_model            =
 codex_reasoning_effort =
+# wait for a recognized limit to pass, then retry; without it ralphex stops
+wait_on_limit          = 15m
 ```
+
+When a subscription quota is exhausted, exec prints one quota line and exits `127`, and Ralphex's own limit patterns decide whether to wait and retry. Each retry probes again, without asking Jev, until the quota is back; a weekly block outlasts a five-hour reset. Ralphex's Claude executor matches limit patterns on any line, while its Codex executor matches them only on `ERROR:`, `FATAL:` or `PANIC:` lines, so the Codex line needs a severity prefix:
+
+```ini
+# ~/.config/agrouter/config
+[cli.claude.availability]
+quota_error_prefix  = "agrouter: "
+quota_error_message = You've hit your limit
+
+[cli.codex.availability]
+quota_error_prefix  = "ERROR: agrouter: "
+quota_error_message = Rate limit exceeded
+```
+
+```text
+agrouter: You've hit your limit; weekly subscription quota exhausted; resets at 2026-10-13T15:00:00Z
+ERROR: agrouter: Rate limit exceeded; weekly subscription quota exhausted; resets at 2026-10-13T15:00:00Z
+```
+
+**Note:** only the exec CLI's own line is printed. An authentication failure or an unknown availability never uses this wording, so Ralphex does not mistake it for a limit.
 
 Leave `task_model`, `review_model`, `plan_model`, `codex_model` and `codex_reasoning_effort` empty to let Jev choose: a model or effort Ralphex appends after `--` goes to the child, not to routing.
 

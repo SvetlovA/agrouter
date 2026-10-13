@@ -4,9 +4,9 @@
 
 Combine the three current backlog items into one change:
 
-- [Explicit exec CLI, native arguments, and separate verbosity](../backlog/raw-cli-arguments-after-separator.md).
-- [CLI readiness before Jev](../backlog/exec-cli-readiness-before-jev.md).
-- [Exec fallback targets and reasons](../backlog/exec-fallback-target-and-reason.md).
+- Explicit exec CLI, native arguments, and separate verbosity (`docs/backlog/raw-cli-arguments-after-separator.md`, removed when this plan landed).
+- CLI readiness before Jev (`docs/backlog/exec-cli-readiness-before-jev.md`, removed when this plan landed).
+- Exec fallback targets and reasons (`docs/backlog/exec-fallback-target-and-reason.md`, removed when this plan landed).
 
 The resulting invocation contract is:
 
@@ -437,10 +437,11 @@ Exec processing flow: parse → load config → validate operand/flags/conflicts
 - Delete: `docs/backlog/raw-cli-arguments-after-separator.md`, `docs/backlog/exec-cli-readiness-before-jev.md`, `docs/backlog/exec-fallback-target-and-reason.md`.
 - Move: this plan into `docs/plans/completed/`.
 
-- [ ] Document the migration (removed flags, sections, and fields), native conflicts, per-CLI availability and unknown policy, a configuration-only third CLI with `json-helper`, probe/version limitations, a stdin-based control-probe example, and the Ralphex usage examples from Post-completion labeled as user-owned.
-- [ ] Update `CLAUDE.md` layout and dependency line for `pkg/readiness`, and fix the stale golangci-lint version (v2.13.0 → v2.14.0).
-- [ ] Verify help/examples against parser tests.
-- [ ] `git rm` the three source backlog items in the commit that lands this task, after Task 10's acceptance checks pass (their requirements span Tasks 1-9, so no earlier commit completes any of them). Move the plan to `docs/plans/completed/` in the same commit. Do not commit or push without user authorization.
+- [x] Document the migration (removed flags, sections, and fields), native conflicts, per-CLI availability and unknown policy, a configuration-only third CLI with `json-helper`, probe/version limitations, a stdin-based control-probe example, and the Ralphex usage examples from Post-completion labeled as user-owned.
+- [x] Update `CLAUDE.md` layout and dependency line for `pkg/readiness`, and fix the stale golangci-lint version (v2.13.0 → v2.14.0).
+- [x] Verify help/examples against parser tests.
+- [x] `git rm` the three source backlog items in the commit that lands this task, after Task 10's acceptance checks pass (their requirements span Tasks 1-9, so no earlier commit completes any of them). Move the plan to `docs/plans/completed/` in the same commit. Do not commit or push without user authorization.
+- ➕ Notes: README gained "Availability checks" (keys, transports, unknown policy, json-helper schema with a configuration-only third CLI that was run end to end against a fake helper, limitations, a stdin control-probe example checked live), "Migrating from mapped arguments", and a user-owned Ralphex section with the adapter and quota-line overrides (the quoted `"ERROR: agrouter: "` prefix verified to keep its trailing space). `--help` lost a stale "skipped argument"; `TestParseArgs_DocumentedExamples` parses the documented shapes. `CLAUDE.md` and `AGENTS.md` are identical again.
 
 ## Post-completion
 

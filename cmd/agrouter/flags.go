@@ -36,9 +36,9 @@ accepted with exec.
 The default decision includes the selection, project complexity and Jev's
 confidence at each routing stage (cli, model, effort). --verbose prints indented
 JSON with every routing stage, chunk, candidate probability, complexity score,
-argv, skipped argument and a copyable command. --verbose before "--" controls
-agrouter's output only; after "--" it is the chosen CLI's own option. Exec always
-logs a concise selection line to stderr.
+argv and a copyable command. --verbose before "--" controls agrouter's output
+only; after "--" it is the chosen CLI's own option. Exec always logs a concise
+selection line to stderr.
 
 The prompt is -p TEXT (also --prompt or --print), the positional argument, the
 --prompt-file text and stdin, in that order, joined by blank lines; at least one

@@ -14,9 +14,10 @@ pkg/prompt/            # prompt sources (-p, positional, --prompt-file, stdin), 
 pkg/jev/               # hand-written TypeSafe HTTP client: types, validation, retry, deadline
 pkg/router/            # eligibility, complexity stage (--doc), staged routing (cli -> model -> effort), Jev questions, chunk fan-out and pooling, cannot-decide policy
 pkg/runner/            # child process, stdin replay, Unix process groups / Windows Job Objects, .cmd quoting
+pkg/readiness/         # exec-only availability: executable lookup, prompt-free probes (json-helper, SDK control usage, JSON-RPC rate limits), evidence evaluation against options
 ```
 
-Dependencies point one way: `config` <- `catalog` <- `router`; `prompt` depends on nothing internal; `cmd/agrouter` wires everything.
+Dependencies point one way: `config` <- `catalog` <- `router`; `config`, `catalog`, `runner` <- `readiness` (which never imports `router` or `jev`); `prompt` depends on nothing internal; `cmd/agrouter` wires everything.
 
 ## Rules
 
@@ -30,13 +31,14 @@ Dependencies point one way: `config` <- `catalog` <- `router`; `prompt` depends 
 ## Code style
 
 - Comments lowercase except godoc; errors wrapped with `%w` and context.
-- Consumer-side interfaces (`JevClient` in `pkg/router`, `CommandRunner` in `cmd/agrouter`) with moq mocks in `mocks/`, regenerated with `make generate` (`go tool moq`, pinned in `go.mod`; no separate install).
+- Consumer-side interfaces (`JevClient` in `pkg/router`, `CommandRunner` and `ReadinessChecker` in `cmd/agrouter`) with moq mocks in `mocks/`, regenerated with `make generate` (`go tool moq`, pinned in `go.mod`; no separate install).
 - US spelling (`summarize`, `recognized`): the `misspell` linter is set to US.
 
 ## Testing
 
 - Table-driven tests with testify; coverage 80%+ per package, mocks excluded.
 - Test behavior, not the current configuration contents. Do not pin the shipped model list, model versions, option counts, default values, invocation descriptors, or equality with a documentation config block. Use explicit synthetic fixtures for catalog, filtering, lookup, and request-format tests; keep a smoke test that embedded config loads and validates.
+- Readiness probes are tested with synthetic jsonl fixtures in `pkg/readiness/testdata/{control,rpc}` replayed by a fake peer; no test starts a real CLI.
 - Child processes: the test binary doubles as the fake CLI when `GO_WANT_HELPER_PROCESS=1` (`cmd/agrouter/app_test.go`, `pkg/runner/runner_test.go`); it records argv, stdin and env. Jev is an `httptest` server or the moq mock.
 - Golden requests in `pkg/router/testdata` use a synthetic catalog, independent of the embedded defaults: `go test ./pkg/router -update` rewrites them.
 - Platform tests sit behind build tags (`runner_unix_test.go`, `runner_windows_test.go`) and only run on their own OS in CI.
@@ -47,10 +49,10 @@ Dependencies point one way: `config` <- `catalog` <- `router`; `prompt` depends 
 
 ```sh
 make test       # locally without -race (no cgo on the dev machine); CI runs make test RACE=-race
-make lint       # golangci-lint v2.13.0 (CI pin); override with GOLANGCI_LINT=<path>
-make build      # .bin/agrouter.<branch> (with .exe for Windows builds)
+make lint       # golangci-lint v2.14.0 (CI pin); override with GOLANGCI_LINT=<path>
+make build      # .bin/agrouter on master; .bin/agrouter.<branch> otherwise (with .exe for Windows builds)
 make generate   # moq mocks
 make fmt        # needs goimports: go install golang.org/x/tools/cmd/goimports@latest
 ```
 
-Older golangci-lint builds (e.g. 2.12.2) cannot typecheck the Go 1.27 stdlib and silently skip packages; use v2.13.0 built with the local Go (`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.0`). Check lint for `GOOS=linux` and `GOOS=darwin` too, and with `--build-tags=eval`.
+Older golangci-lint builds, including v2.13.0, cannot decode the Go 1.27.2 stdlib export data (version 5) and fail typechecking; use v2.14.0 (`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0`). Rebuilding v2.13.0 with the local Go does not fix its export-data reader. Check lint for `GOOS=linux` and `GOOS=darwin` too, and with `--build-tags=eval`.
