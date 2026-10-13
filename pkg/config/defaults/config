@@ -60,6 +60,25 @@ prompt_args     = ["--", "{prompt}"]
 selection_flags = --model, --effort
 context_flags   = --settings, --setting-sources
 
+# exec-only, prompt-free availability check before routing. unknown = allow runs the CLI with one
+# warning when the check cannot verify; block exits 2 instead. enabled = false skips the check.
+# quota_error_message starts the one line printed when a subscription window is exhausted
+# (after quota_error_prefix, default "agrouter: "); it matches Ralphex's limit patterns.
+[cli.claude.availability]
+checks              = usage
+timeout             = 5s
+unknown             = allow
+quota_error_message = You've hit your limit
+
+# stream-json control reads only (initialize, version, usage, settings): never a user message, so no
+# inference. Runs in the real working directory with the real settings and login, so API-key and
+# provider settings still apply; only hooks, MCP servers and session persistence are turned off.
+# no --bare: it skips the OAuth/keychain login. measured cold start: about 1.6s (2.1.296).
+[cli.claude.availability.usage]
+transport   = sdk-control-usage-v1
+args        = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config", "--settings", "{\"disableAllHooks\":true}"]
+min_version = 2.1.296
+
 [cli.codex]
 command               = codex
 description           = Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.

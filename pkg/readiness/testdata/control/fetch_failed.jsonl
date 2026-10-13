@@ -1,0 +1,4 @@
+{"on":"initialize","reply":{"subtype":"success","response":{"models":[],"pid":1}}}
+{"on":"get_binary_version","reply":{"subtype":"success","response":{"version":"2.1.296"}}}
+{"on":"get_usage","reply":{"subtype":"success","response":{"session":{"total_cost_usd":0},"subscription_type":"plan-a","rate_limits_available":true,"rate_limits":null,"behaviors":null}}}
+{"on":"get_settings","reply":{"subtype":"success","response":{"effective":{},"sources":[],"applied":{"model":"m-2","effort":"e-1"}}}}

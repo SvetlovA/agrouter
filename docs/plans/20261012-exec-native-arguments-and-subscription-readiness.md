@@ -347,12 +347,19 @@ Exec processing flow: parse → load config → validate operand/flags/conflicts
 - Create: `pkg/readiness/control.go`, `pkg/readiness/control_test.go`, `pkg/readiness/testdata/control/*.jsonl`.
 - Modify: `pkg/config/defaults/config`.
 
-- [ ] Implement initialization, the usage control request, correlation, and unrelated-message handling; never emit a user event.
-- [ ] Normalize five-hour, weekly, model-scoped, and extra-usage evidence; map non-subscription auth to `not_applicable`; enforce `min_version` plus shape validation.
-- [ ] Configure the embedded Claude check (real working directory, hooks/MCP/persistence suppressed, no `--bare`) and its quota error prefix/message.
-- [ ] ⚠️ Investigate whether the control protocol's initialization or a read-only control request reports the effective default model/effort for the session; if it does, normalize it as `defaults` evidence, otherwise report defaults unknown and record the finding here.
-- [ ] Write tests with synthetic fixtures: quota available, weekly exhausted with five-hour available, both exhausted with different resets, missing/null windows, unsupported version, unknown shape, throttling, API-key context; assert every message the fake receives contains no prompt, user event, or inference action.
-- [ ] ⚠️ Measure cold-start latency of the real probe once (prompt-free) and record it here; run `make test`.
+- [x] Implement initialization, the usage control request, correlation, and unrelated-message handling; never emit a user event.
+- [x] Normalize five-hour, weekly, model-scoped, and extra-usage evidence; map non-subscription auth to `not_applicable`; enforce `min_version` plus shape validation.
+- [x] Configure the embedded Claude check (real working directory, hooks/MCP/persistence suppressed, no `--bare`) and its quota error prefix/message.
+- [x] ⚠️ Investigate whether the control protocol's initialization or a read-only control request reports the effective default model/effort for the session; if it does, normalize it as `defaults` evidence, otherwise report defaults unknown and record the finding here.
+- [x] Write tests with synthetic fixtures: quota available, weekly exhausted with five-hour available, both exhausted with different resets, missing/null windows, unsupported version, unknown shape, throttling, API-key context; assert every message the fake receives contains no prompt, user event, or inference action.
+- [x] ⚠️ Measure cold-start latency of the real probe once (prompt-free) and record it here; run `make test`.
+- ➕ Findings (Claude Code 2.1.296, prompt-free, 2026-10-13):
+  - Requests sent, in order, each waiting for its correlated `control_response`: `initialize`, `get_binary_version` (only with `min_version`; its `{"version"}` avoids the init field whose name contains the CLI name, which the guard test rejects), then `get_usage` with `skip_behaviors: true` and `get_settings`. A fixed allow-list of these four reads is enforced in code; other stdout lines and other request ids are skipped.
+  - Defaults: the read-only `get_settings` reports `applied.model` and `applied.effort`, the values the session would send after env overrides, settings and model-support downgrades. They are normalized as `defaults` evidence (a resolved model id, which Task 9 must match against catalog values/aliases); a failed or malformed settings read leaves defaults unknown without affecting quota.
+  - Usage: `subscription_type` null with `rate_limits_available` false is `not_applicable` (`not_subscription`); `rate_limits` null otherwise is unknown. `five_hour`/`seven_day` are always reported (unknown when null). A non-null `locked_reason` is `quota_denied` whatever the utilization; a full window with `extra_usage.is_enabled` and no `spend_limit_reached` is unknown (`extra_usage_enabled`). `model_scoped[]` windows are weekly and scoped to the server's `display_name` label (Task 7 matches the label case-insensitively against catalog names/aliases); the legacy per-family keys are ignored so no model family is hardcoded. A successful usage read adds auth `available`.
+  - Throttling is recognized only from a control error `error_code` (`rate_limit_error`, `rate_limited`, `throttled`); a usage fetch failure that the CLI answers with null `rate_limits` is unknown `not_reported`.
+  - Not verified: whether a logged-out CLI answers with null `subscription_type` (it would then read as `not_applicable` and the child's own login error surfaces).
+  - Cold start: about 1.6s for the bare CLI exchange and 1.8s through the checker (well inside the 5s check timeout; about 18% of the default 10s `[agrouter] timeout`, which Task 8 revisits).
 
 ### Task 6: JSON-RPC rate-limit decoder
 

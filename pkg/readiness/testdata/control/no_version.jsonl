@@ -1,0 +1,4 @@
+{"on":"initialize","reply":{"subtype":"success","response":{"models":[],"pid":1}}}
+{"on":"get_binary_version","reply":{"subtype":"error","error":"unknown subtype"}}
+{"on":"get_usage","reply":{"subtype":"success","response":{"session":{"total_cost_usd":0},"subscription_type":"plan-a","rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":1,"resets_at":"2026-10-13T15:00:00.123456+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null,"locked_reason":null},"seven_day":{"utilization":1,"resets_at":"2026-10-18T09:00:00+00:00","limit_dollars":null,"used_dollars":null,"remaining_dollars":null,"locked_reason":null},"extra_usage":{"is_enabled":false,"spend_limit_reached":false},"limits":[]},"behaviors":null}}}
+{"on":"get_settings","reply":{"subtype":"success","response":{"effective":{},"sources":[],"applied":{"model":"m-2","effort":"e-1"}}}}

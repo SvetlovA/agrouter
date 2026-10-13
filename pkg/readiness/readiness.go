@@ -56,6 +56,10 @@ const (
 	ReasonQuotaExhausted        = "quota_exhausted"
 	ReasonAuthFailed            = "auth_failed"
 	ReasonUnsupportedModel      = "unsupported_model"
+	ReasonQuotaDenied           = "quota_denied"        // the backend refuses the window whatever its usage
+	ReasonExtraUsageEnabled     = "extra_usage_enabled" // a full window that paid overage may still cover
+	ReasonNotSubscription       = "not_subscription"    // API-key or other-provider auth: no subscription windows
+	ReasonVersionUnsupported    = "version_unsupported" // older than the check's min_version, or no version reported
 )
 
 // Scope is what a piece of evidence applies to: the whole account when Models is empty, otherwise
@@ -126,6 +130,8 @@ func (c Checker) Check(ctx context.Context, cli config.CLI) Report {
 		switch check.Transport {
 		case config.TransportJSONHelper:
 			c.runHelper(ctx, cli, check, &r)
+		case config.TransportSDKControlUsage:
+			c.runControl(ctx, cli, check, &r)
 		default:
 			r.add(unknownQuota(check.Name, ReasonTransportUnsupported, c.now()))
 		}
@@ -139,16 +145,7 @@ func (c Checker) Check(ctx context.Context, cli config.CLI) Report {
 // probe runs check's command (the CLI's own when unset) with stdin as its whole input. A probe that
 // cannot run, times out, overflows or exits nonzero returns its unknown reason instead of a response.
 func (c Checker) probe(ctx context.Context, cli config.CLI, check config.Check, stdin []byte) ([]byte, string) {
-	command := check.Command
-	if command == "" {
-		command = cli.Command
-	}
-	res, err := runner.RunProbe(ctx, runner.ProbeCommand{
-		Argv:        append([]string{command}, check.Args...),
-		Env:         c.Env,
-		Dir:         c.Dir,
-		MaxResponse: c.MaxResponse,
-	}, stdin)
+	res, err := runner.RunProbe(ctx, c.probeCommand(cli, check), stdin)
 	var startErr *runner.StartError
 	switch {
 	case err != nil && ctx.Err() != nil:
@@ -163,6 +160,20 @@ func (c Checker) probe(ctx context.Context, cli config.CLI, check config.Check, 
 		return nil, ReasonProbeFailed
 	}
 	return res.Stdout, ""
+}
+
+// probeCommand is check's command (the CLI's own when unset) with its arguments.
+func (c Checker) probeCommand(cli config.CLI, check config.Check) runner.ProbeCommand {
+	command := check.Command
+	if command == "" {
+		command = cli.Command
+	}
+	return runner.ProbeCommand{
+		Argv:        append([]string{command}, check.Args...),
+		Env:         c.Env,
+		Dir:         c.Dir,
+		MaxResponse: c.MaxResponse,
+	}
 }
 
 func (c Checker) now() time.Time {

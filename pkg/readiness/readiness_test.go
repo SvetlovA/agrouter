@@ -22,6 +22,8 @@ const (
 	helperStdout  = "READINESS_HELPER_STDOUT"
 	helperExit    = "READINESS_HELPER_EXIT"
 	helperWantDir = "READINESS_HELPER_WANT_DIR"
+	helperFixture = "READINESS_HELPER_FIXTURE"
+	helperRecord  = "READINESS_HELPER_RECORD"
 )
 
 func TestMain(m *testing.M) {
@@ -36,7 +38,8 @@ func TestMain(m *testing.M) {
 //   - sleep: sleeps for a minute;
 //   - isolation: reports auth available only when stdin is empty, the Jev key is absent from the
 //     environment and the working directory is $READINESS_HELPER_WANT_DIR; otherwise unavailable with
-//     the reason that failed.
+//     the reason that failed;
+//   - control: a stream-json control peer, see controlHelper.
 func helper() int {
 	switch os.Getenv(helperMode) {
 	case "print":
@@ -46,6 +49,8 @@ func helper() int {
 	case "sleep":
 		time.Sleep(time.Minute)
 		return 0
+	case "control":
+		return controlHelper()
 	case "isolation":
 		reason := ""
 		stdin, _ := io.ReadAll(os.Stdin)
@@ -200,7 +205,7 @@ func TestCheck_ProbeIsolation(t *testing.T) {
 
 func TestCheck_MultipleChecks(t *testing.T) {
 	cli := helperCLI(
-		config.Check{Name: "usage", Transport: config.TransportSDKControlUsage},
+		config.Check{Name: "usage", Transport: config.TransportJSONRPCRateLimit},
 		config.Check{Name: "status", Transport: config.TransportJSONHelper},
 	)
 	out := `{"schema":"agrouter.readiness/v1","quota":[{"window":"weekly","status":"available"}]}`
