@@ -423,11 +423,12 @@ Exec processing flow: parse → load config → validate operand/flags/conflicts
 **Files:**
 - Modify: integration tests and synthetic fixtures under `cmd/agrouter`, `pkg/readiness`, `pkg/router`, `pkg/runner` as needed.
 
-- [ ] Verify every source backlog requirement and the decisions above; add missing cross-feature regressions (separate exec invocations never calling Jev while blocked; decision mode independent of availability).
-- [ ] Confirm every changed file belongs to agrouter.
-- [ ] Run `make test`, check 80%+ per-package coverage excluding mocks, run `make build`.
-- [ ] Run `make lint` (golangci-lint v2.14.0) for the host, `GOOS=linux`, `GOOS=darwin`, `GOOS=windows`, and `--build-tags=eval`; check guard tests and generated mocks.
-- [ ] Confirm no test invokes real inference or `make eval-routing`.
+- [x] Verify every source backlog requirement and the decisions above; add missing cross-feature regressions (separate exec invocations never calling Jev while blocked; decision mode independent of availability).
+- [x] Confirm every changed file belongs to agrouter.
+- [x] Run `make test`, check 80%+ per-package coverage excluding mocks, run `make build`.
+- [x] Run `make lint` (golangci-lint v2.14.0) for the host, `GOOS=linux`, `GOOS=darwin`, `GOOS=windows`, and `--build-tags=eval`; check guard tests and generated mocks.
+- [x] Confirm no test invokes real inference or `make eval-routing`.
+- ➕ Notes: added `TestApp_ExecBlockedAcrossInvocations` (three blocked exec runs each probe afresh, print the same quota line, exit 127 and make no Jev request; routing resumes once the probe reports headroom) and `TestApp_DecisionIndependentOfAvailability` (a blocking strict availability config leaves decision output and Jev requests byte-identical while the same config blocks exec). Per-package coverage 90.6-100% excluding mocks; lint clean with v2.14.0 on host, linux, darwin, windows and `eval`; `make generate` leaves mocks unchanged; every changed file is in this repository; the only real-Jev tests are the `eval`-tagged ones and no test starts a real CLI.
 
 ### Task 11: [Final] Documentation and backlog closure
 

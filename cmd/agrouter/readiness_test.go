@@ -295,6 +295,61 @@ func TestApp_DecisionNeverChecksReadiness(t *testing.T) {
 	assert.Equal(t, "alpha", decision(t, r.stdout)["cli"])
 }
 
+func TestApp_ExecBlockedAcrossInvocations(t *testing.T) {
+	e := newEnv(t)
+	e.globalConfig(syntheticCLIs(t) + availability("quota_error_message = Limit reached"))
+	blocked := true
+	checker := reportChecker(func(cli config.CLI) readiness.Report {
+		if blocked {
+			return withQuota(cli, free(readiness.WindowFiveHour), exhausted(readiness.WindowWeekly, 24*time.Hour))
+		}
+		return readyReport(cli)
+	})
+	e.checker = checker
+	e.jev.pick = "fast@high"
+
+	const line = "agrouter: Limit reached; weekly subscription quota exhausted; resets at 2026-10-14T12:00:00Z\n"
+	for i := range 3 {
+		r := e.runWithRunner([]string{"exec", "alpha", "fix it"}, nil, noChild(t))
+		assert.Equal(t, runner.ExitStartFailure, r.code, "retry %d", i)
+		assert.Equal(t, line, r.stderr, "retry %d", i)
+		assert.Len(t, checker.CheckCalls(), i+1, "every invocation probes afresh")
+	}
+	assert.Empty(t, e.jev.requests(), "no Jev request while the block persists")
+
+	blocked = false
+	r := e.run([]string{"exec", "alpha", "fix it"}, nil)
+	require.Equal(t, 0, r.code, r.stderr)
+	assert.Len(t, checker.CheckCalls(), 4)
+	assert.NotEmpty(t, e.jev.requests(), "routing resumes once the probe reports headroom")
+	assert.Equal(t, "fast-1", selectionLog(t, r.stderr)["model"])
+}
+
+func TestApp_DecisionIndependentOfAvailability(t *testing.T) {
+	blocking := availability("checks = usage", "unknown = block", "quota_error_message = Limit reached") +
+		"\n[cli.alpha.availability.usage]\ntransport = json-helper\nargs = [\"" + helperProbeArg + "\"]\n"
+	t.Setenv(helperProbe, `{"schema":"agrouter.readiness/v1","auth":{"status":"unavailable","reason":"auth_failed"}}`)
+
+	run := func(t *testing.T, extra string, argv ...string) (result, []string) {
+		e := newEnv(t)
+		e.globalConfig(syntheticCLIs(t) + extra)
+		e.checker = readiness.Checker{Dir: e.workDir}
+		e.jev.pick = "fast@high"
+		return e.runWithRunner(append(argv, "fix it"), nil, noChild(t)), e.jev.requests()
+	}
+	plain, plainRequests := run(t, "")
+	gated, gatedRequests := run(t, blocking)
+	execGated, execRequests := run(t, blocking, "exec", "alpha")
+
+	assert.Equal(t, "agrouter: alpha unavailable: auth_failed\n", execGated.stderr, "the same config blocks exec")
+	assert.Empty(t, execRequests)
+
+	require.Equal(t, 0, plain.code, plain.stderr)
+	assert.Equal(t, plain, gated, "availability config never changes a decision")
+	assert.Equal(t, plainRequests, gatedRequests)
+	assert.Equal(t, "alpha", decision(t, gated.stdout)["cli"])
+}
+
 func TestApp_ExecPreflightWithJSONHelper(t *testing.T) {
 	probe := func(weekly string) string {
 		return `{"schema":"agrouter.readiness/v1","auth":{"status":"available"},"quota":[` +
