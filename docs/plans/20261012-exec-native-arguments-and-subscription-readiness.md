@@ -333,12 +333,13 @@ Exec processing flow: parse → load config → validate operand/flags/conflicts
 - Create: `pkg/readiness/readiness.go`, `pkg/readiness/readiness_test.go`, `pkg/readiness/helper.go`, `pkg/readiness/helper_test.go`, `pkg/runner/probe.go`, `pkg/runner/probe_test.go`, `pkg/runner/probe_unix.go`, `pkg/runner/probe_windows.go`.
 - Modify: `pkg/config/config.go`, `pkg/config/load.go`, `pkg/config/validate.go`, `pkg/config/*_test.go`, `pkg/runner/runner_unix_test.go`, `pkg/runner/runner_windows_test.go`.
 
-- [ ] Define evidence types, status/reason codes, and scopes; decode and validate `[cli.<name>.availability]` and check subsections (transport names, timeout, unknown policy, prefix/message without newline/control characters, `min_version`).
-- [ ] Add executable resolution and bounded probe I/O: own stdin, response byte limit, environment without the Jev key, real working directory, timeout.
-- [ ] Add `Setpgid` group kill on Unix and a probe Job Object on Windows, leaving the real child's process handling unchanged.
-- [ ] Implement the `json-helper` transport and normalized schema parsing.
-- [ ] Write tests: missing/nonexecutable command, timeout, response limit, key removal from env, stdin isolation, descendant cleanup (platform test files), malformed helper output as unknown, a third synthetic CLI configured entirely in a local layer.
-- [ ] Run `make test` (keep identifiers and comments free of CLI names and effort literals for the guard test).
+- [x] Define evidence types, status/reason codes, and scopes; decode and validate `[cli.<name>.availability]` and check subsections (transport names, timeout, unknown policy, prefix/message without newline/control characters, `min_version`).
+- [x] Add executable resolution and bounded probe I/O: own stdin, response byte limit, environment without the Jev key, real working directory, timeout.
+- [x] Add `Setpgid` group kill on Unix and a probe Job Object on Windows, leaving the real child's process handling unchanged.
+- [x] Implement the `json-helper` transport and normalized schema parsing.
+- [x] Write tests: missing/nonexecutable command, timeout, response limit, key removal from env, stdin isolation, descendant cleanup (platform test files), malformed helper output as unknown, a third synthetic CLI configured entirely in a local layer.
+- [x] Run `make test` (keep identifiers and comments free of CLI names and effort literals for the guard test).
+- ➕ Notes: a check without `command` probes the CLI's own command; the SDK-control and JSON-RPC transport names are accepted by config now and report quota unknown (`transport_unsupported`) until Tasks 5-6; check sections not listed in `checks` are ignored so a layer can replace the list; `quota_error_prefix` defaults to `"agrouter: "`, `quota_error_message` to empty (Task 8 formats the line).
 
 ### Task 5: SDK control-stream usage decoder
 

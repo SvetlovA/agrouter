@@ -46,6 +46,8 @@ func TestMain(m *testing.M) {
 //   - sleep: writes its pid to $RUNNER_HELPER_OUT/pid, then sleeps;
 //   - spawn-wait, spawn-exit: starts a sleeping grandchild (pid in $RUNNER_HELPER_OUT/grandchild), then
 //     sleeps or exits 0;
+//   - cat: copies stdin to stdout; env-out, pwd: write the environment as JSON or the working directory
+//     to stdout; flood: writes $RUNNER_HELPER_EXIT bytes to stdout;
 //   - trap: catches SIGINT/SIGTERM/SIGHUP/SIGQUIT, writes its pid to $RUNNER_HELPER_OUT/pid, and on a
 //     signal writes its name to $RUNNER_HELPER_OUT/signal and exits 42.
 func helper() int {
@@ -62,6 +64,20 @@ func helper() int {
 		return code
 	case "exit":
 		return code
+	case "cat":
+		_, _ = io.Copy(os.Stdout, os.Stdin)
+		return 0
+	case "env-out":
+		env, _ := json.Marshal(os.Environ())
+		_, _ = os.Stdout.Write(env)
+		return 0
+	case "pwd":
+		wd, _ := os.Getwd()
+		_, _ = os.Stdout.WriteString(wd)
+		return 0
+	case "flood":
+		_, _ = os.Stdout.Write(bytes.Repeat([]byte("x"), code))
+		return 0
 	case "echo":
 		_, _ = os.Stdout.WriteString("out")
 		_, _ = os.Stderr.WriteString("err")

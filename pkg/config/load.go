@@ -158,6 +158,13 @@ func (m *merged) decode() (*Config, error) {
 			return nil, err
 		}
 	}
+	for i := range cfg.CLIs {
+		avail, err := m.decodeAvailability(cfg.CLIs[i].Name)
+		if err != nil {
+			return nil, err
+		}
+		cfg.CLIs[i].Availability = avail
+	}
 
 	// a disabled CLI takes its models and effort descriptions with it
 	models := cfg.Models[:0]
@@ -278,8 +285,86 @@ func checkCLISubsection(name, cliName, sub string, disabled map[string]bool) err
 	if _, known := disabled[cliName]; !known {
 		return fmt.Errorf("[%s]: no [cli.%s] section", name, cliName)
 	}
-	// decoded with readiness checks; accepted as is until then
+	if check, ok := strings.CutPrefix(sub, "availability."); ok && check == "" {
+		return fmt.Errorf("[%s]: availability check sections are named [cli.%s.availability.<check>]", name, cliName)
+	}
+	// decoded with their CLI by decodeAvailability
 	return nil
+}
+
+// decodeAvailability decodes [cli.<name>.availability] and the check sections its checks key lists.
+// Check sections it does not list are ignored, so a layer can replace the list without removing the
+// sections of a lower layer. It returns nil when the CLI has no availability section.
+func (m *merged) decodeAvailability(cliName string) (*Availability, error) {
+	prefix := "cli." + cliName + ".availability"
+	s, ok := m.sections[prefix]
+	if !ok {
+		return nil, nil //nolint:nilnil // no section is no availability config, not an error
+	}
+	a := &Availability{Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow, QuotaErrorPrefix: DefaultQuotaErrorPrefix}
+	var checks []string
+	for _, k := range s.keys {
+		v := s.values[k].value
+		var err error
+		switch k {
+		case "enabled":
+		case "checks":
+			checks = splitList(v)
+		case "timeout":
+			a.Timeout, err = time.ParseDuration(v)
+		case "unknown":
+			a.Unknown = v
+		case "quota_error_prefix":
+			a.QuotaErrorPrefix = v
+		case "quota_error_message":
+			a.QuotaErrorMessage = v
+		default:
+			return nil, s.unknownKey(k)
+		}
+		if err != nil {
+			return nil, s.keyError(k, err)
+		}
+	}
+	var err error
+	if a.Enabled, err = s.enabled(); err != nil {
+		return nil, err
+	}
+	for _, name := range checks {
+		cs, ok := m.sections[prefix+"."+name]
+		if !ok {
+			return nil, fmt.Errorf("[%s] checks: no [%s.%s] section", prefix, prefix, name)
+		}
+		check, err := cs.decodeCheck(name)
+		if err != nil {
+			return nil, err
+		}
+		a.Checks = append(a.Checks, check)
+	}
+	return a, nil
+}
+
+func (s *section) decodeCheck(name string) (Check, error) {
+	c := Check{Name: name}
+	for _, k := range s.keys {
+		v := s.values[k].value
+		var err error
+		switch k {
+		case "transport":
+			c.Transport = v
+		case "command":
+			c.Command = v
+		case "args":
+			c.Args, err = parseTemplate(v)
+		case "min_version":
+			c.MinVersion = v
+		default:
+			return Check{}, s.unknownKey(k)
+		}
+		if err != nil {
+			return Check{}, s.keyError(k, err)
+		}
+	}
+	return c, nil
 }
 
 func (s *section) decodeCLI() (CLI, error) {

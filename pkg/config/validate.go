@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 // EndOfOptions ends option parsing in the child. When prompt_args puts it before {prompt}, prompt text
@@ -63,6 +64,49 @@ func (cli CLI) validate(models []Model) []error {
 	hasEfforts := slices.ContainsFunc(models, func(m Model) bool { return m.CLI == cli.Name && len(m.Efforts) > 0 })
 	cli.validateTemplates(hasEfforts, add)
 	cli.validateFlags(add)
+	if cli.Availability != nil {
+		errs = append(errs, cli.Availability.validate(section+".availability")...)
+	}
+	return errs
+}
+
+// versionRe is a dotted numeric version such as 2.1 or 0.162.1.
+var versionRe = regexp.MustCompile(`^\d+(\.\d+)*$`)
+
+// validate checks the availability policy, the quota line parts and every listed check.
+func (a *Availability) validate(section string) []error {
+	var errs []error
+	add := func(section, key, format string, args ...any) {
+		errs = append(errs, fmt.Errorf("[%s] %s: %s", section, key, fmt.Sprintf(format, args...)))
+	}
+	if a.Timeout <= 0 {
+		add(section, "timeout", "must be positive")
+	}
+	if a.Unknown != UnknownAllow && a.Unknown != UnknownBlock {
+		add(section, "unknown", "must be %s or %s", UnknownAllow, UnknownBlock)
+	}
+	for _, f := range []struct{ key, value string }{
+		{"quota_error_prefix", a.QuotaErrorPrefix},
+		{"quota_error_message", a.QuotaErrorMessage},
+	} {
+		if strings.ContainsFunc(f.value, unicode.IsControl) {
+			add(section, f.key, "must not contain a newline or control character")
+		}
+	}
+	for _, c := range a.Checks {
+		cs := section + "." + c.Name
+		switch c.Transport {
+		case TransportJSONHelper, TransportSDKControlUsage, TransportJSONRPCRateLimit:
+		case "":
+			add(cs, "transport", "required")
+		default:
+			add(cs, "transport", "unknown transport %q (want %s, %s or %s)", c.Transport,
+				TransportJSONHelper, TransportSDKControlUsage, TransportJSONRPCRateLimit)
+		}
+		if c.MinVersion != "" && !versionRe.MatchString(c.MinVersion) {
+			add(cs, "min_version", "%q is not a dotted numeric version", c.MinVersion)
+		}
+	}
 	return errs
 }
 

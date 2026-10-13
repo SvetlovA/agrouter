@@ -106,3 +106,41 @@ func TestRun_SignalExitCode(t *testing.T) {
 		t.Fatal("Run did not return")
 	}
 }
+
+func TestRunProbe_OwnProcessGroup(t *testing.T) {
+	c, dir := probeCommand(t, "sleep")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p, err := StartProbe(ctx, c)
+	require.NoError(t, err)
+	pid := waitPid(t, filepath.Join(dir, "pid"))
+	// unlike the real child, a probe leads its own group, so killing it never reaches agrouter
+	pgid, err := syscall.Getpgid(pid)
+	require.NoError(t, err)
+	assert.Equal(t, pid, pgid)
+	assert.NotEqual(t, syscall.Getpgrp(), pgid)
+	cancel()
+	_, err = p.Wait()
+	require.ErrorIs(t, err, context.Canceled)
+	assert.True(t, gone(pid, 10*time.Second), "the probe survived cancellation")
+}
+
+func TestRunProbe_KillsDescendants(t *testing.T) {
+	tests := []struct {
+		mode    string
+		timeout time.Duration
+	}{
+		{mode: "spawn-exit"}, // the probe exits, its grandchild is left behind
+		{mode: "spawn-wait", timeout: 500 * time.Millisecond}, // the probe times out with its grandchild
+	}
+	for _, tt := range tests {
+		t.Run(tt.mode, func(t *testing.T) {
+			c, dir := probeCommand(t, tt.mode)
+			c.Timeout = tt.timeout
+			_, _ = RunProbe(context.Background(), c, nil)
+			gc := waitPid(t, filepath.Join(dir, "grandchild"))
+			t.Cleanup(func() { _ = syscall.Kill(gc, syscall.SIGKILL) })
+			assert.True(t, gone(gc, 10*time.Second), "the grandchild survived the probe")
+		})
+	}
+}

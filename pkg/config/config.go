@@ -51,6 +51,49 @@ type CLI struct {
 	SelectionConfigKeys []string
 	// ContextFlags are native spellings that change the child's provider, profile or settings context.
 	ContextFlags []string
+	// Availability is the [cli.<name>.availability] section; nil when the CLI has none.
+	Availability *Availability
+}
+
+// Unknown availability policies: run combinations whose availability cannot be verified, or block them.
+const (
+	UnknownAllow = "allow"
+	UnknownBlock = "block"
+)
+
+// Probe transports a check may name. Each is named after its wire protocol, never after a CLI.
+const (
+	TransportJSONHelper       = "json-helper"           // stdout is agrouter's normalized evidence JSON
+	TransportSDKControlUsage  = "sdk-control-usage-v1"  // stream-json control request for subscription usage
+	TransportJSONRPCRateLimit = "jsonrpc-ratelimits-v1" // stdio JSON-RPC rate-limit reads
+)
+
+// DefaultAvailabilityTimeout bounds one CLI's availability checks when timeout is unset.
+const DefaultAvailabilityTimeout = 5 * time.Second
+
+// DefaultQuotaErrorPrefix starts the quota block line when quota_error_prefix is unset.
+const DefaultQuotaErrorPrefix = "agrouter: "
+
+// Availability is a [cli.<name>.availability] section with its checks: how exec verifies, before any
+// Jev request, that the CLI can run.
+type Availability struct {
+	Enabled bool          // false skips every check, leaving availability unknown
+	Checks  []Check       // in the order the checks key lists them
+	Timeout time.Duration // bounds all of the CLI's checks together
+	Unknown string        // UnknownAllow or UnknownBlock
+	// QuotaErrorPrefix and QuotaErrorMessage start the one line printed when quota blocks exec, so a
+	// caller can match it as the child's own limit message. Configured whitespace is preserved.
+	QuotaErrorPrefix  string
+	QuotaErrorMessage string
+}
+
+// Check is a [cli.<name>.availability.<check>] section: one prompt-free probe.
+type Check struct {
+	Name       string // the section name after "availability."
+	Transport  string // one of the Transport* names
+	Command    string // the probe executable; empty runs the CLI's own command
+	Args       []string
+	MinVersion string // the oldest CLI version whose response shape the transport knows; empty for any
 }
 
 // Model is a [model.<section>] section.
