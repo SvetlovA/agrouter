@@ -92,7 +92,7 @@ type decisionJSON struct {
 // run executes the pipeline: parse, config, catalog, then under the routing deadline capture, route
 // and build the argv; then print the decision or run the child. It returns the exit code.
 func (a *app) run(argv []string) int {
-	cmd, err := parseArgs(argv, a.getenv)
+	cmd, err := parseArgs(argv)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -106,10 +106,20 @@ func (a *app) run(argv []string) int {
 	}
 	req := cmd.req
 	a.debug = newDebugLog(a.getenv(envDebug), a.stderr)
+	if a.getenv(legacyCLIEnv) != "" {
+		fmt.Fprintf(a.stderr, "agrouter: warning: %s is ignored: use exec CLI to run a CLI, or --cli=NAME to restrict a decision\n",
+			legacyCLIEnv)
+	}
 
 	cfg, cat, rt, err := a.setup(req)
 	if err != nil {
 		return a.fail(err)
+	}
+	if req.Mode == args.ModeExec {
+		// a CLI without catalog options would fall back to routing across every CLI
+		if len(catalog.ByCLI(cat.Options, req.CLI)) == 0 {
+			return a.fail(fmt.Errorf("exec %s: not a configured, enabled CLI", req.CLI))
+		}
 	}
 
 	d, err := a.route(cfg, cat, rt, req)
@@ -131,7 +141,8 @@ func (a *app) run(argv []string) int {
 	if req.Mode == args.ModeDecision {
 		return a.printDecision(d, res, cmd.verbose)
 	}
-	a.logSelection(selectionOutput(d, cmd.verbose))
+	// --verbose is agrouter's decision detail; the exec selection line stays concise
+	a.logSelection(selectionOutput(d, false))
 	return a.exec(res, d.captured)
 }
 

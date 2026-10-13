@@ -292,14 +292,14 @@ Exec processing flow: parse → load config → validate operand/flags/conflicts
 **Files:**
 - Modify: `cmd/agrouter/flags.go`, `cmd/agrouter/flags_test.go`, `cmd/agrouter/app.go`, `cmd/agrouter/app_test.go`, `pkg/args/request.go`, `pkg/config/defaults/config` (comments only), `README.md`, `CLAUDE.md`.
 
-- [ ] Parse `exec <cli>`; validate missing/unknown/disabled operands and redundant/conflicting `--cli` before Jev.
-- [ ] Remove `AGROUTER_CLI` from `flags.go`, `pkg/args/request.go`, the embedded config comments, and README's environment layer; warn once when it is set.
-- [ ] Track separator presence; reject `--` in decision mode; forward the native tail as-is for exec (via the existing raw passthrough path).
-- [ ] Make `--print TEXT` a long alias of `-p`/`--prompt` (counted as the same flag for the "second `-p`" usage error) and update its help text.
-- [ ] Remove child-option flags (`--permission-mode`, `--dangerously-*`, `--output-format`, `--sandbox`, `-c`) and `-c` constraint extraction; mapping code goes dead but still compiles.
-- [ ] Always log the concise exec selection (`selectionOutput(d, false)`).
-- [ ] Write tests: operand errors, removed flags as usage errors, `--print TEXT` equal to `-p TEXT` in both modes, `-p a --print b` as a second-prompt error, bare `--print` before `--` as a usage error, `--print` after `--` forwarded to the child, `AGROUTER_CLI` ignored with a warning in both modes, stdin prompt replayed byte-for-byte with appended native flags after `--` (no prompt in argv), prompt text after `--` not used for routing, separator with empty tail, exact native forwarding (empty tokens, spaces, repeated flags, later `--`), and all four agrouter/child verbosity combinations.
-- [ ] Update end-to-end calls, README invocation/help sections, and `CLAUDE.md` for the new contract; run `make test`.
+- [x] Parse `exec <cli>`; validate missing/unknown/disabled operands and redundant/conflicting `--cli` before Jev.
+- [x] Remove `AGROUTER_CLI` from `flags.go`, `pkg/args/request.go`, the embedded config comments, and README's environment layer; warn once when it is set.
+- [x] Track separator presence; reject `--` in decision mode; forward the native tail as-is for exec (via the existing raw passthrough path).
+- [x] Make `--print TEXT` a long alias of `-p`/`--prompt` (counted as the same flag for the "second `-p`" usage error) and update its help text.
+- [x] Remove child-option flags (`--permission-mode`, `--dangerously-*`, `--output-format`, `--sandbox`, `-c`) and `-c` constraint extraction; mapping code goes dead but still compiles.
+- [x] Always log the concise exec selection (`selectionOutput(d, false)`).
+- [x] Write tests: operand errors, removed flags as usage errors, `--print TEXT` equal to `-p TEXT` in both modes, `-p a --print b` as a second-prompt error, bare `--print` before `--` as a usage error, `--print` after `--` forwarded to the child, `AGROUTER_CLI` ignored with a warning in both modes, stdin prompt replayed byte-for-byte with appended native flags after `--` (no prompt in argv), prompt text after `--` not used for routing, separator with empty tail, exact native forwarding (empty tokens, spaces, repeated flags, later `--`), and all four agrouter/child verbosity combinations.
+- [x] Update end-to-end calls, README invocation/help sections, and `CLAUDE.md` for the new contract; run `make test`.
 
 ### Task 2: Replace mappings with invocation descriptors
 

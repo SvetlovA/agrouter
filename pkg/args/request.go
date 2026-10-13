@@ -39,7 +39,7 @@ type Optional struct {
 // Request is one parsed agrouter call.
 type Request struct {
 	Mode         Mode
-	CLI          string   // --cli or AGROUTER_CLI; empty routes across every CLI
+	CLI          string   // the exec CLI, or --cli in decision mode; empty routes across every CLI
 	APIKey       Optional // --jev-api-key; Set with an empty Value clears any other key
 	Model        string   // model constraint, as given (resolved against the catalog later)
 	ModelSource  Source
@@ -52,7 +52,7 @@ type Request struct {
 	PromptFile   Optional // --prompt-file path, as given
 	FileText     string   // the --prompt-file contents, read by the caller before capture
 	Docs         []string // --doc paths, as given, in order; routing only, never in the child's argv
-	Raw          []string // tokens after the first "--", passed through only with --cli
+	Raw          []string // exec only: native tokens after the first "--", passed to the child unchanged
 }
 
 // ArgvPrompt is the {prompt} text: the prompt texts given on the command line joined in prompt

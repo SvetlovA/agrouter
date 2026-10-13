@@ -32,25 +32,26 @@ func debugLines(stderr string) []string {
 func TestDebug_Redaction(t *testing.T) {
 	const secret = "the secret prompt text"
 	e := newEnv(t)
+	e.fakeCommands()
 	t.Setenv(envDebug, "1")
 	e.jev.pick = "claude-sonnet-5-5@low"
-	r := e.run([]string{"--cli=claude", "--verbose", secret, "--", "--raw-one", "raw-two"}, nil)
+	r := e.run([]string{"exec", "claude", "--verbose", secret, "--", "--raw-one", "raw-two"}, nil)
 	require.Equal(t, 0, r.code, r.stderr)
 
 	lines := debugLines(r.stderr)
 	require.Len(t, lines, 7)
 	assert.Equal(t, "api key: from env", lines[0])
 	assert.Regexp(t, `^eligible: [1-9][0-9]* option\(s\) on claude$`, lines[1])
-	assert.Equal(t, "dropped codex: --cli claude", lines[2])
+	assert.Equal(t, "dropped codex: --cli claude", lines[2], "the exec CLI restricts routing like --cli")
 	assert.Equal(t, "stage cli: skipped (claude)", lines[3])
 	assert.True(t, strings.HasPrefix(lines[4], "stage model: choice claude-sonnet-5-5, confidence 0.900, top [claude-sonnet-5-5 1.000"), lines[4])
 	assert.True(t, strings.HasPrefix(lines[5], "stage effort: choice low, confidence 0.900, top [low 1.000"), lines[5])
-	assert.Equal(t, "command: claude -p --model claude-sonnet-5-5 --effort low <2 raw argument(s)> -- <prompt>", lines[6])
+	assert.Equal(t, "command: "+helperCommand(t)+" -p --model claude-sonnet-5-5 --effort low <2 raw argument(s)> -- <prompt>", lines[6])
 	assert.NotContains(t, r.stderr, secret)
 	assert.NotContains(t, r.stderr, "raw-two")
 	assert.NotContains(t, r.stderr, testKey)
-	// debug goes to stderr only: stdout is still the one decision line
-	assert.Equal(t, "claude", decision(t, r.stdout)["cli"])
+	// debug goes to stderr only: stdout is the child's, empty here
+	assert.Empty(t, r.stdout)
 }
 
 func TestDebug_Off(t *testing.T) {
@@ -123,31 +124,24 @@ func TestDebug_Docs(t *testing.T) {
 }
 
 func TestDebug_StagesBeforeAFailureWithTwoCLIs(t *testing.T) {
-	for _, mode := range []string{"decision", "exec"} {
-		t.Run(mode, func(t *testing.T) {
-			e := newSyntheticEnv(t)
-			t.Setenv(envDebug, "1")
-			e.jev.pick = "fast@low"
-			e.jev.failStage = "model"
-			argv := []string{"--verbose", "fix it"}
-			if mode == "exec" {
-				argv = append([]string{"exec"}, argv...)
-			}
-			r := e.run(argv, nil)
+	// exec always names its one CLI, so only decision mode can fail with two left
+	e := newSyntheticEnv(t)
+	t.Setenv(envDebug, "1")
+	e.jev.pick = "fast@low"
+	e.jev.failStage = "model"
+	r := e.run([]string{"--verbose", "fix it"}, nil)
 
-			assert.Equal(t, exitUsage, r.code)
-			assert.Empty(t, r.stdout)
-			assert.Equal(t, []string{"cli"}, e.jev.asked(), "the cli stage was answered")
-			lines := debugLines(r.stderr)
-			require.Len(t, lines, 4, r.stderr)
-			assert.Equal(t, "eligible: 6 option(s) on alpha, beta", lines[1])
-			assert.Equal(t, "stage cli: choice alpha, confidence 0.900, top [alpha 1.000, beta 0.000]", lines[2])
-			assert.True(t, strings.HasPrefix(lines[3], "no decision: jev cannot decide between alpha, beta: model stage: "), lines[3])
-			assert.Contains(t, lines[3], "model stage rejected")
-			assert.True(t, strings.HasSuffix(r.stderr, "\nagrouter: "+strings.TrimPrefix(lines[3], "no decision: ")+"\n"),
-				"the one error line follows the debug lines: %s", r.stderr)
-		})
-	}
+	assert.Equal(t, exitUsage, r.code)
+	assert.Empty(t, r.stdout)
+	assert.Equal(t, []string{"cli"}, e.jev.asked(), "the cli stage was answered")
+	lines := debugLines(r.stderr)
+	require.Len(t, lines, 4, r.stderr)
+	assert.Equal(t, "eligible: 6 option(s) on alpha, beta", lines[1])
+	assert.Equal(t, "stage cli: choice alpha, confidence 0.900, top [alpha 1.000, beta 0.000]", lines[2])
+	assert.True(t, strings.HasPrefix(lines[3], "no decision: jev cannot decide between alpha, beta: model stage: "), lines[3])
+	assert.Contains(t, lines[3], "model stage rejected")
+	assert.True(t, strings.HasSuffix(r.stderr, "\nagrouter: "+strings.TrimPrefix(lines[3], "no decision: ")+"\n"),
+		"the one error line follows the debug lines: %s", r.stderr)
 }
 
 func TestDebug_FailureBeforeRoutingPrintsNoStage(t *testing.T) {

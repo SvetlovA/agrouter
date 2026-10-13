@@ -240,7 +240,7 @@ func newEnv(t *testing.T) *env {
 	e := &env{t: t, configDir: t.TempDir(), workDir: t.TempDir(), out: t.TempDir(), jev: newFakeJev(t)}
 	t.Setenv(config.EnvConfigDir, e.configDir)
 	t.Setenv(config.EnvAPIKey, testKey)
-	t.Setenv(cliEnv, "")
+	t.Setenv(legacyCLIEnv, "")
 	t.Setenv(envDebug, "")
 	t.Setenv(helperEnv, "1")
 	t.Setenv(helperOut, e.out)
@@ -338,20 +338,21 @@ func strs(v ...string) []any {
 }
 
 func TestApp_RalphexClaudeMode(t *testing.T) {
+	// the prompt comes on stdin and ralphex appends the CLI's own flags after "--"
 	const task = "implement task 3\nof the plan\n"
+	native := []string{"--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose", "--print"}
 
 	t.Run("model and effort fixed: no Jev call", func(t *testing.T) {
 		e := newEnv(t)
 		e.fakeCommands()
-		r := e.run([]string{"exec", "--cli=claude", "--dangerously-skip-permissions", "--output-format", "stream-json",
-			"--model", "opus", "--effort", "high", "--print"}, strings.NewReader(task))
+		r := e.run(slices.Concat([]string{"exec", "claude", "--model", "opus", "--effort", "high", "--"}, native),
+			strings.NewReader(task))
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Equal(t, map[string]any{"cli": "claude", "model": "claude-opus-5-5", "effort": "high"}, selectionLog(t, r.stderr))
 		assert.Empty(t, r.stdout)
 		argv, stdin, _ := e.child()
-		assert.Equal(t, []string{"-p", "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose",
-			"--model", "claude-opus-5-5", "--effort", "high"}, argv)
+		assert.Equal(t, slices.Concat([]string{"-p", "--model", "claude-opus-5-5", "--effort", "high"}, native), argv)
 		assert.Equal(t, task, string(stdin))
 		assert.Empty(t, e.jev.requests())
 	})
@@ -360,17 +361,15 @@ func TestApp_RalphexClaudeMode(t *testing.T) {
 		e := newEnv(t)
 		e.fakeCommands()
 		e.jev.pick = "claude-sonnet-5-5@medium"
-		r := e.run([]string{"exec", "--cli=claude", "--dangerously-skip-permissions", "--output-format", "stream-json",
-			"--print"}, strings.NewReader(task))
+		r := e.run(slices.Concat([]string{"exec", "claude", "--"}, native), strings.NewReader(task))
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Equal(t, map[string]any{"cli": "claude", "model": "claude-sonnet-5-5", "effort": "medium", "confidence": map[string]any{"model": 0.9, "effort": 0.9}}, selectionLog(t, r.stderr))
 		argv, stdin, environ := e.child()
-		assert.Equal(t, []string{"-p", "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose",
-			"--model", "claude-sonnet-5-5", "--effort", "medium"}, argv)
-		assert.Equal(t, task, string(stdin))
+		assert.Equal(t, slices.Concat([]string{"-p", "--model", "claude-sonnet-5-5", "--effort", "medium"}, native), argv)
+		assert.Equal(t, task, string(stdin), "stdin replayed byte for byte, the prompt never in argv")
 		assert.Equal(t, repeated(`{"prompt":"implement task 3\nof the plan\n"}`, 2), e.jev.requests())
-		assert.Equal(t, []string{"model", "effort"}, e.jev.asked(), "--cli fixes the cli stage")
+		assert.Equal(t, []string{"model", "effort"}, e.jev.asked(), "exec fixes the cli stage")
 		for _, kv := range environ {
 			assert.False(t, strings.HasPrefix(strings.ToUpper(kv), config.EnvAPIKey+"="), "API key reached the child")
 		}
@@ -380,64 +379,41 @@ func TestApp_RalphexClaudeMode(t *testing.T) {
 func TestApp_RalphexCodexMode(t *testing.T) {
 	const task = "review the diff"
 	desc := `agents.reviewer.description="general code review specialist; behavior driven by the task argument"`
+	native := []string{
+		"-c", "features.multi_agent=true",
+		"-c", desc,
+		"-c", `project_doc_fallback_filenames=["CLAUDE.md"]`,
+		"--dangerously-bypass-approvals-and-sandbox",
+		"--sandbox", "danger-full-access",
+		"-c", "stream_idle_timeout_ms=3600000",
+		"-c", `project_doc="/tmp/doc.md"`,
+	}
 
 	t.Run("executor", func(t *testing.T) {
 		e := newEnv(t)
 		e.fakeCommands()
 		e.jev.pick = "gpt-6.1-sol@medium"
-		r := e.run([]string{"exec",
-			"-c", "features.multi_agent=true",
-			"-c", desc,
-			"-c", `project_doc_fallback_filenames=["CLAUDE.md"]`,
-			"--dangerously-bypass-approvals-and-sandbox",
-			"--sandbox", "danger-full-access",
-			"-c", "stream_idle_timeout_ms=3600000",
-			"-c", `project_doc="/tmp/doc.md"`,
-		}, strings.NewReader(task))
+		r := e.run(slices.Concat([]string{"exec", "codex", "--"}, native), strings.NewReader(task))
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Equal(t, map[string]any{"cli": "codex", "model": "gpt-6.1-sol", "effort": "medium", "confidence": map[string]any{"model": 0.9, "effort": 0.9}}, selectionLog(t, r.stderr))
 		argv, stdin, _ := e.child()
-		assert.Equal(t, []string{"exec",
-			"-c", "features.multi_agent=true",
-			"-c", desc,
-			"-c", `project_doc_fallback_filenames=["CLAUDE.md"]`,
-			"--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check",
-			"--sandbox", "danger-full-access",
-			"-c", "stream_idle_timeout_ms=3600000",
-			"-c", `project_doc="/tmp/doc.md"`,
-			"--model", "gpt-6.1-sol", "-c", `model_reasoning_effort="medium"`,
-		}, argv)
+		assert.Equal(t, slices.Concat([]string{"exec", "--model", "gpt-6.1-sol", "-c", `model_reasoning_effort="medium"`}, native), argv)
 		assert.Equal(t, task, string(stdin))
 	})
 
-	t.Run("model constraints from -c: no Jev call", func(t *testing.T) {
+	t.Run("model and effort fixed: no Jev call", func(t *testing.T) {
 		e := newEnv(t)
 		e.fakeCommands()
-		r := e.run([]string{"exec", "-c", `model="gpt-6.1-sol"`, "-c", "model_reasoning_effort=xhigh",
-			"-c", "stream_idle_timeout_ms=3600000", "--sandbox", "workspace-write"}, strings.NewReader(task))
+		r := e.run([]string{"exec", "codex", "--model", "gpt-6.1-sol", "--effort", "xhigh",
+			"--", "-c", "stream_idle_timeout_ms=3600000", "--sandbox", "workspace-write"}, strings.NewReader(task))
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Equal(t, map[string]any{"cli": "codex", "model": "gpt-6.1-sol", "effort": "xhigh"}, selectionLog(t, r.stderr))
 		argv, _, _ := e.child()
-		assert.Equal(t, []string{"exec", "-c", "stream_idle_timeout_ms=3600000", "--sandbox", "workspace-write",
-			"--model", "gpt-6.1-sol", "-c", `model_reasoning_effort="xhigh"`}, argv)
+		assert.Equal(t, []string{"exec", "--model", "gpt-6.1-sol", "-c", `model_reasoning_effort="xhigh"`,
+			"-c", "stream_idle_timeout_ms=3600000", "--sandbox", "workspace-write"}, argv)
 		assert.Empty(t, e.jev.requests())
-	})
-
-	t.Run("external review", func(t *testing.T) {
-		e := newEnv(t)
-		e.fakeCommands()
-		e.jev.pick = "gpt-6-astra@high"
-		r := e.run([]string{"exec", "-c", "stream_idle_timeout_ms=3600000", "--sandbox", "read-only"},
-			strings.NewReader(task))
-
-		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, map[string]any{"cli": "codex", "model": "gpt-6-astra", "effort": "high", "confidence": map[string]any{"model": 0.9, "effort": 0.9}}, selectionLog(t, r.stderr))
-		argv, stdin, _ := e.child()
-		assert.Equal(t, []string{"exec", "-c", "stream_idle_timeout_ms=3600000", "--sandbox", "read-only",
-			"--model", "gpt-6-astra", "-c", `model_reasoning_effort="high"`}, argv)
-		assert.Equal(t, task, string(stdin))
 	})
 }
 
@@ -482,13 +458,12 @@ func TestApp_Decision(t *testing.T) {
 
 	t.Run("cannot decide with the CLI known: null model and effort", func(t *testing.T) {
 		e := newEnv(t)
-		r := e.run([]string{"--verbose", "--cli=claude", "--jev-api-key=", "--output-format=json", "fix it"}, nil)
+		r := e.run([]string{"--verbose", "--cli=claude", "--jev-api-key=", "fix it"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Empty(t, r.stderr)
-		decision(t, r.stdout)
 		assert.Subset(t, decision(t, r.stdout), map[string]any{"cli": "claude", "model": nil, "effort": nil,
-			"argv": strs("claude", "-p", "--output-format", "json", "--", "fix it"), "skipped": []any{}})
+			"argv": strs("claude", "-p", "--", "fix it"), "skipped": []any{}})
 		assert.Empty(t, e.jev.requests())
 	})
 
@@ -504,31 +479,18 @@ func TestApp_Decision(t *testing.T) {
 		assert.Equal(t, strs("claude", "-p", "--effort", "high", "--", "fix it"), d["argv"])
 	})
 
-	t.Run("skipped argument: warning and skipped array", func(t *testing.T) {
+	t.Run("native tokens never reach the Jev state", func(t *testing.T) {
 		e := newEnv(t)
-		e.jev.pick = "gpt-6-luna@low"
-		r := e.run([]string{"--verbose", "--cli=codex", "--output-format", "json", "list the files"}, nil)
-
-		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, "agrouter: warning: skipped --output-format json: codex has no mapping for it\n", r.stderr)
-		assert.Subset(t, decision(t, r.stdout), map[string]any{
-			"cli": "codex", "model": "gpt-6-luna", "effort": "low",
-			"argv":    strs("codex", "exec", "--model", "gpt-6-luna", "-c", `model_reasoning_effort="low"`, "--", "list the files"),
-			"skipped": strs("--output-format json"),
-		})
-	})
-
-	t.Run("raw tokens and flags never reach the Jev state", func(t *testing.T) {
-		e := newEnv(t)
+		e.fakeCommands()
 		e.jev.pick = "claude-opus-5-5@high"
-		r := e.run([]string{"--cli", "claude", "--permission-mode", "plan", "--verbose", "plan the migration",
-			"--", "--add-dir", "RAWTOKEN"}, strings.NewReader("details on stdin"))
+		r := e.run([]string{"exec", "claude", "--verbose", "plan the migration", "--", "--add-dir", "RAWTOKEN"},
+			strings.NewReader("details on stdin"))
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Equal(t, repeated(`{"prompt":"plan the migration\n\ndetails on stdin"}`, 2), e.jev.requests())
-		d := decision(t, r.stdout)
-		assert.Equal(t, strs("claude", "-p", "--permission-mode", "plan",
-			"--model", "claude-opus-5-5", "--effort", "high", "--add-dir", "RAWTOKEN", "--", "plan the migration"), d["argv"])
+		argv, _, _ := e.child()
+		assert.Equal(t, []string{"-p", "--model", "claude-opus-5-5", "--effort", "high", "--add-dir", "RAWTOKEN",
+			"--", "plan the migration"}, argv)
 	})
 
 	t.Run("html characters are not escaped", func(t *testing.T) {
@@ -542,85 +504,105 @@ func TestApp_Decision(t *testing.T) {
 }
 
 func TestApp_VerboseOutput(t *testing.T) {
-	for _, mode := range []string{"decision", "exec"} {
-		t.Run(mode, func(t *testing.T) {
+	e := newSyntheticEnv(t)
+	e.jev.pick = "fast@low"
+	e.jev.level = "5.1"
+	require.NoError(t, os.WriteFile(filepath.Join(e.workDir, "project.md"), []byte("project doc"), 0o600))
+	var states []string
+	for _, verbose := range []bool{false, true} {
+		argv := []string{"--doc=project.md", "private task"}
+		if verbose {
+			argv = append([]string{"--verbose"}, argv...)
+		}
+		r := e.run(argv, nil)
+		require.Equal(t, 0, r.code, r.stderr)
+		assert.Empty(t, r.stderr)
+		output := r.stdout
+		d := decision(t, output)
+		assert.Equal(t, "alpha", d["cli"])
+		assert.Equal(t, "fast-1", d["model"])
+		assert.Equal(t, "low", d["effort"])
+		assert.Equal(t, "5.1/10", d["project_complexity"])
+		assert.NotContains(t, output, "project doc")
+		confidence := d["confidence"].(map[string]any)
+		for _, level := range []string{"cli", "model", "effort"} {
+			assert.InDelta(t, 0.9, confidence[level], 1e-9, level)
+		}
+		assert.InDelta(t, 0.9, confidence["project_complexity"], 1e-9)
+		if verbose {
+			assert.Contains(t, confidence, "complexity_chunks")
+			stages := confidence["stages"].([]any)
+			require.Len(t, stages, 3)
+			for i, want := range [][2]string{{"cli", "alpha"}, {"model", "fast"}, {"effort", "low"}} {
+				stage := stages[i].(map[string]any)
+				assert.Subset(t, stage, map[string]any{"level": want[0], "choice": want[1], "skipped": false, "confidence": 0.9})
+				assert.InDelta(t, 1, stage["probabilities"].(map[string]any)[want[1]], 1e-9)
+			}
+			chunks := confidence["complexity_chunks"].([]any)
+			require.Len(t, chunks, 1)
+			assert.Subset(t, chunks[0], map[string]any{"index": float64(1), "of": float64(1),
+				"project_complexity": "5.1/10", "evidence": 0.5, "confidence": 0.9})
+			assert.InDelta(t, 5.1, chunks[0].(map[string]any)["score"], 1e-9)
+			assert.Contains(t, d, "options")
+			assert.Contains(t, d, "argv")
+			assert.Equal(t, []any{}, d["skipped"])
+			assert.Equal(t, false, d["stdin_required"])
+			assert.Contains(t, d["command"], "private task")
+			assert.Contains(t, output, "\n  ")
+		} else {
+			assert.Len(t, confidence, 4)
+			assert.Len(t, d, 5)
+			assert.NotContains(t, d, "argv")
+			assert.NotContains(t, d, "skipped")
+			assert.NotContains(t, output, "private task")
+		}
+		requests := e.jev.requests()
+		if states == nil {
+			states = requests
+		} else {
+			assert.Equal(t, states, requests[len(states):], "verbosity must not affect routing requests")
+		}
+	}
+}
+
+func TestApp_ExecVerbosity(t *testing.T) {
+	// --verbose before "--" is agrouter's and never changes the concise selection line; after "--" it is
+	// the child's own option and is forwarded as given
+	tests := []struct {
+		name                   string
+		agrouterVerbose, child bool
+	}{
+		{"neither", false, false},
+		{"agrouter only", true, false},
+		{"child only", false, true},
+		{"both", true, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
 			e := newSyntheticEnv(t)
 			e.jev.pick = "fast@low"
 			e.jev.level = "5.1"
 			require.NoError(t, os.WriteFile(filepath.Join(e.workDir, "project.md"), []byte("project doc"), 0o600))
-			var states []string
-			for _, verbose := range []bool{false, true} {
-				argv := []string{"--doc=project.md", "private task"}
-				if verbose {
-					argv = append([]string{"--verbose"}, argv...)
-				}
-				if mode == "exec" {
-					argv = append([]string{"exec"}, argv...)
-				}
-				r := e.run(argv, nil)
-				require.Equal(t, 0, r.code, r.stderr)
-				output := r.stdout
-				if mode == "exec" {
-					assert.Empty(t, r.stdout)
-					output = r.stderr
-					childArgv, _, _ := e.child()
-					assert.NotContains(t, childArgv, "--verbose")
-				} else {
-					assert.Empty(t, r.stderr)
-				}
-				var d map[string]any
-				if mode == "exec" {
-					d = selectionLog(t, output)
-				} else {
-					d = decision(t, output)
-				}
-				assert.Equal(t, "alpha", d["cli"])
-				assert.Equal(t, "fast-1", d["model"])
-				assert.Equal(t, "low", d["effort"])
-				assert.Equal(t, "5.1/10", d["project_complexity"])
-				assert.NotContains(t, output, "project doc")
-				confidence := d["confidence"].(map[string]any)
-				for _, level := range []string{"cli", "model", "effort"} {
-					assert.InDelta(t, 0.9, confidence[level], 1e-9, level)
-				}
-				assert.InDelta(t, 0.9, confidence["project_complexity"], 1e-9)
-				if verbose {
-					assert.Contains(t, confidence, "complexity_chunks")
-					stages := confidence["stages"].([]any)
-					require.Len(t, stages, 3)
-					for i, want := range [][2]string{{"cli", "alpha"}, {"model", "fast"}, {"effort", "low"}} {
-						stage := stages[i].(map[string]any)
-						assert.Subset(t, stage, map[string]any{"level": want[0], "choice": want[1], "skipped": false, "confidence": 0.9})
-						assert.InDelta(t, 1, stage["probabilities"].(map[string]any)[want[1]], 1e-9)
-					}
-					chunks := confidence["complexity_chunks"].([]any)
-					require.Len(t, chunks, 1)
-					assert.Subset(t, chunks[0], map[string]any{"index": float64(1), "of": float64(1),
-						"project_complexity": "5.1/10", "evidence": 0.5, "confidence": 0.9})
-					assert.InDelta(t, 5.1, chunks[0].(map[string]any)["score"], 1e-9)
-					assert.Contains(t, d, "options")
-					if mode == "decision" {
-						assert.Contains(t, d, "argv")
-						assert.Equal(t, []any{}, d["skipped"])
-						assert.Equal(t, false, d["stdin_required"])
-						assert.Contains(t, d["command"], "private task")
-						assert.Contains(t, output, "\n  ")
-					}
-				} else {
-					assert.Len(t, confidence, 4)
-					assert.Len(t, d, 5)
-				}
-				if mode == "exec" || !verbose {
-					assert.NotContains(t, d, "argv")
-					assert.NotContains(t, d, "skipped")
-					assert.NotContains(t, output, "private task")
-				}
-				requests := e.jev.requests()
-				if states == nil {
-					states = requests
-				} else {
-					assert.Equal(t, states, requests[len(states):], "verbosity must not affect routing requests")
-				}
+			argv := []string{"exec", "alpha", "--doc=project.md", "private task"}
+			if tc.agrouterVerbose {
+				argv = append(argv, "--verbose")
+			}
+			if tc.child {
+				argv = append(argv, "--", "--verbose")
+			}
+			r := e.run(argv, nil)
+
+			require.Equal(t, 0, r.code, r.stderr)
+			assert.Empty(t, r.stdout)
+			assert.Equal(t, map[string]any{"cli": "alpha", "model": "fast-1", "effort": "low", "project_complexity": "5.1/10",
+				"confidence": map[string]any{"model": 0.9, "effort": 0.9, "project_complexity": 0.9}}, selectionLog(t, r.stderr))
+			assert.NotContains(t, r.stderr, "private task")
+			assert.NotContains(t, r.stderr, "project doc")
+			childArgv, _, _ := e.child()
+			if tc.child {
+				assert.Equal(t, []string{"-p", "--model", "fast-1", "--effort", "low", "--verbose", "--", "private task"}, childArgv)
+			} else {
+				assert.NotContains(t, childArgv, "--verbose")
 			}
 		})
 	}
@@ -638,7 +620,8 @@ func TestApp_Errors(t *testing.T) {
 	t.Run("no prompt", func(t *testing.T) {
 		e := newEnv(t)
 		oneLine(t, e.run([]string{"--verbose"}, nil), "agrouter: no prompt")
-		oneLine(t, e.run([]string{"exec", "--print"}, strings.NewReader("")), "agrouter: no prompt")
+		oneLine(t, e.run([]string{"exec", "claude"}, strings.NewReader("")), "agrouter: no prompt")
+		oneLine(t, e.run([]string{"exec", "claude", "--", "fix it"}, strings.NewReader("")), "agrouter: no prompt")
 	})
 
 	t.Run("cannot decide with the CLI unknown", func(t *testing.T) {
@@ -681,18 +664,51 @@ func TestApp_Errors(t *testing.T) {
 		assert.Equal(t, strs("--cli nope"), out["skipped"])
 	})
 
-	t.Run("eligibility skips come before argv skips", func(t *testing.T) {
-		e := newEnv(t)
-		e.jev.pick = "claude-sonnet-5-5@low"
-		// claude skips --sandbox and codex skips --output-format json, so both stay eligible
-		r := e.run([]string{"--verbose", "--cli=nope", "--sandbox", "read-only", "--output-format", "json", "fix it"}, nil)
+	t.Run("exec CLI must be configured and enabled", func(t *testing.T) {
+		e := newSyntheticEnv(t)
+		e.globalConfig(syntheticCLIs(t) + "\n[cli.beta]\nenabled = false\n")
+		for _, name := range []string{"nope", "beta"} {
+			oneLine(t, e.run([]string{"exec", name, "fix it"}, nil), "agrouter: exec "+name+": not a configured, enabled CLI")
+		}
+		assert.Empty(t, e.jev.requests())
+		assert.NoFileExists(t, filepath.Join(e.out, "argv.json"), "the child must not run")
+	})
+
+	t.Run("exec usage errors", func(t *testing.T) {
+		e := newSyntheticEnv(t)
+		oneLine(t, e.run([]string{"exec"}, nil), "agrouter: exec needs the CLI to run")
+		oneLine(t, e.run([]string{"exec", "alpha", "--cli=beta", "fix it"}, nil), "agrouter: --cli beta conflicts with exec alpha")
+		oneLine(t, e.run([]string{"exec", "alpha", "--sandbox", "read-only", "fix it"}, nil), "agrouter: unknown flag `sandbox'")
+		oneLine(t, e.run([]string{"fix it", "--"}, nil), `agrouter: "--" is only accepted with exec`)
+		assert.Empty(t, e.jev.requests())
+	})
+}
+
+func TestApp_LegacyCLIEnvIgnored(t *testing.T) {
+	const warning = "agrouter: warning: AGROUTER_CLI is ignored: use exec CLI to run a CLI, or --cli=NAME to restrict a decision\n"
+
+	t.Run("decision", func(t *testing.T) {
+		e := newSyntheticEnv(t)
+		t.Setenv(legacyCLIEnv, "beta")
+		e.jev.pick = "fast@low"
+		r := e.run([]string{"fix it"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
-		assert.Equal(t, "agrouter: warning: skipped --cli nope: not an enabled CLI; routing across every CLI\n"+
-			"agrouter: warning: skipped --sandbox read-only: claude has no mapping for it\n", r.stderr)
-		var out map[string]any
-		require.NoError(t, json.Unmarshal([]byte(r.stdout), &out))
-		assert.Equal(t, strs("--cli nope", "--sandbox read-only"), out["skipped"])
+		assert.Equal(t, warning, r.stderr)
+		assert.Equal(t, "alpha", decision(t, r.stdout)["cli"], "routing still spans every CLI")
+		assert.Equal(t, []string{"cli", "model", "effort"}, e.jev.asked())
+	})
+
+	t.Run("exec", func(t *testing.T) {
+		e := newSyntheticEnv(t)
+		t.Setenv(legacyCLIEnv, "beta")
+		e.jev.pick = "fast@low"
+		r := e.run([]string{"exec", "alpha", "fix it"}, nil)
+
+		require.Equal(t, 0, r.code, r.stderr)
+		log, ok := strings.CutPrefix(r.stderr, warning)
+		require.True(t, ok, r.stderr)
+		assert.Equal(t, "alpha", selectionLog(t, log)["cli"])
 	})
 }
 
@@ -838,7 +854,7 @@ func TestApp_PromptSources(t *testing.T) {
 	t.Run("exec: native child gets the explicit prompt in argv and stdin replayed", func(t *testing.T) {
 		e := newSyntheticEnv(t)
 		writeFile(t, e.workDir, "task.md", "line one\nline two\n")
-		r := e.run([]string{"exec", "--cli=alpha", "--model=strong", "--effort=low", "-p", "flag", "--prompt-file", "task.md"},
+		r := e.run([]string{"exec", "alpha", "--model=strong", "--effort=low", "-p", "flag", "--prompt-file", "task.md"},
 			strings.NewReader("piped\r\n"))
 
 		require.Equal(t, 0, r.code, r.stderr)
@@ -904,7 +920,7 @@ func TestApp_Docs(t *testing.T) {
 		e := newSyntheticEnv(t)
 		writeFile(t, e.workDir, "project.md", "DOC TEXT\n")
 		e.jev.failDocs = true
-		r := e.run([]string{"exec", "--cli=alpha", "--doc", "project.md", "fix it"}, nil)
+		r := e.run([]string{"exec", "alpha", "--doc", "project.md", "fix it"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
 		argv, _, _ := e.child()
@@ -930,7 +946,7 @@ func TestApp_Docs(t *testing.T) {
 		e := newEnv(t)
 		e.globalConfig(syntheticCLIs(t) + "\n[agrouter]\ntimeout = 1ns\n")
 		writeFile(t, e.workDir, "project.md", "DOC TEXT\n")
-		r := e.run([]string{"exec", "--cli=alpha", "--doc", "project.md", "fix it"}, nil)
+		r := e.run([]string{"exec", "alpha", "--doc", "project.md", "fix it"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
 		argv, _, _ := e.child()
@@ -942,7 +958,7 @@ func TestApp_Docs(t *testing.T) {
 		e := newEnv(t)
 		e.globalConfig(syntheticCLIs(t) + "\n[agrouter]\ntimeout = 1ns\n")
 		writeFile(t, e.workDir, "project.md", "DOC TEXT\n")
-		r := e.run([]string{"exec", "--cli=alpha", "--doc", "project.md", "--doc", "nope.md", "fix it"}, nil)
+		r := e.run([]string{"exec", "alpha", "--doc", "project.md", "--doc", "nope.md", "fix it"}, nil)
 
 		assert.Equal(t, 2, r.code)
 		assert.Equal(t, "agrouter: --doc: nope.md: no such file\n", r.stderr)
@@ -953,7 +969,7 @@ func TestApp_Docs(t *testing.T) {
 		e := newSyntheticEnv(t)
 		writeFile(t, e.workDir, "a.md", "DOC A\n")
 		writeFile(t, e.workDir, "b.md", "DOC B\n")
-		r := e.run([]string{"exec", "--cli=alpha", "--model=strong", "--effort=low", "--doc", "a.md", "--doc=b.md", "-p", "flag"},
+		r := e.run([]string{"exec", "alpha", "--model=strong", "--effort=low", "--doc", "a.md", "--doc=b.md", "-p", "flag"},
 			strings.NewReader("piped"))
 
 		require.Equal(t, 0, r.code, r.stderr)
@@ -973,7 +989,7 @@ func TestApp_PromptSourceErrors(t *testing.T) {
 		assert.True(t, strings.HasPrefix(r.stderr, prefix), r.stderr)
 	}
 	// model and effort fixed leave one eligible option: a bad prompt file still fails, though Jev is not asked
-	pinned := []string{"exec", "--cli=alpha", "--model=strong", "--effort=low"}
+	pinned := []string{"exec", "alpha", "--model=strong", "--effort=low"}
 
 	tests := []struct {
 		name   string
@@ -982,7 +998,7 @@ func TestApp_PromptSourceErrors(t *testing.T) {
 		prefix string
 	}{
 		{"all empty", []string{"-p", "", ""}, strings.NewReader(""), "agrouter: no prompt: give -p, a positional prompt, --prompt-file or stdin"},
-		{"second -p", []string{"-p", "a", "-p", "b"}, nil, "agrouter: -p/--prompt given more than once"},
+		{"second -p", []string{"-p", "a", "-p", "b"}, nil, "agrouter: -p/--prompt/--print given more than once"},
 		{"second --prompt-file", []string{"--prompt-file", "task.md", "--prompt-file", "task.md"}, nil,
 			"agrouter: --prompt-file given more than once"},
 		{"-p swallowing a flag", []string{"-p", "--model", "x"}, nil, "agrouter: expected argument"},
@@ -1030,7 +1046,7 @@ func TestApp_ExecSelectionBeforeChild(t *testing.T) {
 		require.NoError(t, err)
 		return 7, nil
 	}}
-	r := e.runWithRunner([]string{"exec", "--cli=acme", "--model=preferred", "--effort=thorough",
+	r := e.runWithRunner([]string{"exec", "acme", "--model=preferred", "--effort=thorough",
 		"--jev-api-key=private-api-key", "private prompt", "--", "private raw token"}, nil, child)
 	assert.Equal(t, 7, r.code)
 	assert.JSONEq(t, `{"child":"output"}`, r.stdout)
@@ -1047,7 +1063,7 @@ func TestApp_Exec(t *testing.T) {
 		e := newEnv(t)
 		e.fakeCommands()
 		t.Setenv(helperExit, "7")
-		r := e.run([]string{"exec", "--cli=claude", "--model=opus", "--effort=low", "fix it"}, nil)
+		r := e.run([]string{"exec", "claude", "--model=opus", "--effort=low", "fix it"}, nil)
 
 		assert.Equal(t, 7, r.code)
 		assert.Empty(t, r.stdout)
@@ -1061,7 +1077,7 @@ func TestApp_Exec(t *testing.T) {
 	t.Run("missing command: 127", func(t *testing.T) {
 		e := newEnv(t)
 		e.globalConfig("[cli.claude]\ncommand = agrouter-test-no-such-command\n")
-		r := e.run([]string{"exec", "--cli=claude", "--model=opus", "--effort=low", "fix it"}, nil)
+		r := e.run([]string{"exec", "claude", "--model=opus", "--effort=low", "fix it"}, nil)
 
 		assert.Equal(t, runner.ExitStartFailure, r.code)
 		assert.Empty(t, r.stdout)
@@ -1077,7 +1093,7 @@ func TestApp_Exec(t *testing.T) {
 		e.fakeCommands()
 		e.jev.pick = "claude-sonnet-5-5@low"
 		input := strings.Repeat("line of a long ralphex prompt\n", 100_000) // 3 MB, no capture limit
-		r := e.run([]string{"exec", "--verbose", "--cli=claude"}, strings.NewReader(input))
+		r := e.run([]string{"exec", "claude"}, strings.NewReader(input))
 
 		require.Equal(t, 0, r.code, r.stderr)
 		_, stdin, _ := e.child()
@@ -1088,43 +1104,33 @@ func TestApp_Exec(t *testing.T) {
 		require.True(t, ok)
 		assert.InDelta(t, 0.9, confidence["model"], 1e-9, "the mean of the chunk confidences")
 		assert.InDelta(t, 0.9, confidence["effort"], 1e-9)
-		assert.NotContains(t, confidence, "cli", "--cli fixes the cli stage")
+		assert.NotContains(t, confidence, "cli", "exec fixes the cli stage")
 		assert.NotContains(t, confidence, "project_complexity", "no document answers were recorded")
-		stages, ok := confidence["stages"].([]any)
-		require.True(t, ok)
-		require.Len(t, stages, 3)
-		assert.Equal(t, map[string]any{"level": "cli", "choice": "claude", "skipped": true}, stages[0])
-		var chunkCount int
-		for i, choice := range []string{"claude-sonnet-5-5", "low"} {
-			stage := stages[i+1].(map[string]any)
-			assert.Subset(t, stage, map[string]any{"choice": choice, "skipped": false})
-			assert.InDelta(t, 0.9, stage["confidence"], 1e-9, "the mean of the chunk confidences")
-			assert.NotContains(t, stage, "probabilities", "a pooled stage has no whole-state answer")
-			assert.Contains(t, stage, "pooled_scores")
-			chunks, ok := stage["chunks"].([]any)
-			require.True(t, ok)
-			chunkCount += len(chunks)
-			for j, chunk := range chunks {
-				assert.Subset(t, chunk, map[string]any{"field": "prompt", "index": float64(j + 1),
-					"of": float64(len(chunks)), "confidence": 0.9, "choice": choice, "relevance": 0.5})
-				probabilities := chunk.(map[string]any)["probabilities"].(map[string]any)
-				assert.InDelta(t, 1, probabilities[choice], 1e-9)
-			}
-		}
-		assert.Equal(t, len(e.jev.requests()), chunkCount, "the model and effort stages each pool every chunk")
 		assert.Subset(t, log, map[string]any{"cli": "claude", "model": "claude-sonnet-5-5", "effort": "low", "confidence": confidence})
 	})
+}
 
-	t.Run("skip warnings in exec mode", func(t *testing.T) {
-		e := newEnv(t)
-		e.fakeCommands()
-		r := e.run([]string{"exec", "--cli=codex", "--model=gpt-6-luna", "--effort=low", "--output-format=json", "fix it"}, nil)
+func TestApp_ExecNativeTail(t *testing.T) {
+	tests := []struct {
+		name   string
+		native []string
+	}{
+		{"separator with empty tail", []string{}},
+		{"empty tokens, spaces, repeats and a later --", []string{"", "two words", "-v", "-v", "--", "--print", "/abs"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newSyntheticEnv(t)
+			r := e.run(slices.Concat([]string{"exec", "alpha", "--model=strong", "--effort=low", "--"}, tc.native),
+				strings.NewReader("prompt on stdin\x00\r\n"))
 
-		require.Equal(t, 0, r.code, r.stderr)
-		log, ok := strings.CutPrefix(r.stderr, "agrouter: warning: skipped --output-format json: codex has no mapping for it\n")
-		require.True(t, ok, r.stderr)
-		assert.Equal(t, map[string]any{"cli": "codex", "model": "gpt-6-luna", "effort": "low"}, selectionLog(t, log))
-	})
+			require.Equal(t, 0, r.code, r.stderr)
+			argv, stdin, _ := e.child()
+			assert.Equal(t, slices.Concat([]string{"-p", "--model", "deep-1", "--effort", "low"}, tc.native), argv)
+			assert.Equal(t, "prompt on stdin\x00\r\n", string(stdin))
+			assert.Empty(t, e.jev.requests())
+		})
+	}
 }
 
 // madeUpConfig defines custom names in config and disables the shipped CLIs dynamically.
@@ -1143,13 +1149,10 @@ command     = COMMAND
 description = A coding agent that exists only in this test.
 
 [cli.CLI_NAME.args]
-print                     = ["run", "--quiet"]
-prompt                    = ["--", "{prompt}"]
-model                     = ["--llm", "{model}"]
-effort                    = ["--think={effort}"]
-output-format.stream-json = ["--events", "ndjson"]
-permission-mode.plan      = ["--mode", "read"]
-verbose                   = []
+print  = ["run", "--quiet"]
+prompt = ["--", "{prompt}"]
+model  = ["--llm", "{model}"]
+effort = ["--think={effort}"]
 
 [model.small]
 cli         = CLI_NAME
@@ -1171,8 +1174,6 @@ description = Custom reasoning effort.
 
 func TestApp_ConfigDrivenNames(t *testing.T) {
 	stdin := "line one\r\nline two\n\ttabbed \"quoted\" & 100%\n"
-	argv := []string{"exec", "--output-format", "stream-json", "--permission-mode", "plan", "do it now"}
-
 	tests := []struct {
 		cli     string
 		section string
@@ -1188,14 +1189,15 @@ func TestApp_ConfigDrivenNames(t *testing.T) {
 			e := newEnv(t)
 			e.globalConfig(madeUpConfig(t, tc.cli, helperCommand(t), tc.section, tc.model, tc.effort))
 			e.jev.pick = tc.section + "@" + tc.effort
-			r := e.run(argv, strings.NewReader(stdin))
+			r := e.run([]string{"exec", tc.cli, "do it now", "--", "--events", "ndjson", "--mode", "read"},
+				strings.NewReader(stdin))
 			require.Equal(t, 0, r.code, r.stderr)
 			log := r.stderr
 			assert.Equal(t, map[string]any{"cli": tc.cli, "model": tc.model, "effort": tc.effort,
 				"confidence": map[string]any{"model": 0.9, "effort": 0.9}}, selectionLog(t, log))
 			got, gotStdin, _ := e.child()
-			assert.Equal(t, []string{"run", "--quiet", "--events", "ndjson", "--mode", "read",
-				"--llm", tc.model, "--think=" + tc.effort, "--", "do it now"}, got)
+			assert.Equal(t, []string{"run", "--quiet", "--llm", tc.model, "--think=" + tc.effort,
+				"--events", "ndjson", "--mode", "read", "--", "do it now"}, got)
 			assert.Equal(t, stdin, string(gotStdin))
 			require.Len(t, e.jev.requests(), 2, "one CLI: model and effort asked")
 

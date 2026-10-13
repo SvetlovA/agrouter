@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,15 +12,9 @@ import (
 	"github.com/SvetlovA/agrouter/pkg/args"
 )
 
-func noEnv(string) string { return "" }
-
-func envOf(m map[string]string) func(string) string {
-	return func(k string) string { return m[k] }
-}
-
-func parseOK(t *testing.T, argv []string, getenv func(string) string) *args.Request {
+func parseOK(t *testing.T, argv []string) *args.Request {
 	t.Helper()
-	cmd, err := parseArgs(argv, getenv)
+	cmd, err := parseArgs(argv)
 	require.NoError(t, err)
 	require.NotNil(t, cmd.req)
 	return cmd.req
@@ -28,24 +23,22 @@ func parseOK(t *testing.T, argv []string, getenv func(string) string) *args.Requ
 func positional(v string) args.Optional { return args.Optional{Value: v, Set: true} }
 
 func TestParseArgs_FlagsAroundPositional(t *testing.T) {
-	want := []args.Arg{
-		{Spelling: "--output-format json", Key: "output-format.json"},
-		{Spelling: "--permission-mode plan", Key: "permission-mode.plan"},
-	}
 	tests := []struct {
 		name string
 		argv []string
 	}{
-		{"prompt first, split form", []string{"fix it", "--output-format", "json", "--permission-mode", "plan", "--verbose"}},
-		{"prompt last, = form", []string{"--output-format=json", "--permission-mode=plan", "--verbose", "fix it"}},
-		{"prompt in the middle, mixed", []string{"--output-format", "json", "fix it", "--permission-mode=plan", "--verbose"}},
+		{"prompt first, split form", []string{"fix it", "--model", "m", "--effort", "high", "--verbose"}},
+		{"prompt last, = form", []string{"--model=m", "--effort=high", "--verbose", "fix it"}},
+		{"prompt in the middle, mixed", []string{"--model", "m", "fix it", "--effort=high", "--verbose"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := parseOK(t, tc.argv, noEnv)
+			req := parseOK(t, tc.argv)
 			assert.Equal(t, args.ModeDecision, req.Mode)
 			assert.Equal(t, positional("fix it"), req.Prompt)
-			assert.Equal(t, want, req.Args)
+			assert.Equal(t, "m", req.Model)
+			assert.Equal(t, "high", req.Effort)
+			assert.Empty(t, req.Args)
 			assert.Empty(t, req.Raw)
 		})
 	}
@@ -56,69 +49,89 @@ func TestParseArgs_Mode(t *testing.T) {
 		name       string
 		argv       []string
 		wantMode   args.Mode
+		wantCLI    string
 		wantPrompt args.Optional
 	}{
-		{"decision, no prompt", []string{"--verbose"}, args.ModeDecision, args.Optional{}},
-		{"decision with prompt", []string{"hello"}, args.ModeDecision, positional("hello")},
-		{"exec first", []string{"exec", "hello"}, args.ModeExec, positional("hello")},
-		{"exec alone", []string{"exec"}, args.ModeExec, args.Optional{}},
-		{"later exec is the positional", []string{"--verbose", "exec"}, args.ModeDecision, positional("exec")},
-		{"exec then exec as the prompt", []string{"exec", "exec"}, args.ModeExec, positional("exec")},
-		{"empty positional is still a prompt", []string{""}, args.ModeDecision, positional("")},
+		{"decision, no prompt", []string{"--verbose"}, args.ModeDecision, "", args.Optional{}},
+		{"decision with prompt", []string{"hello"}, args.ModeDecision, "", positional("hello")},
+		{"exec CLI and prompt", []string{"exec", "tool-a", "hello"}, args.ModeExec, "tool-a", positional("hello")},
+		{"exec CLI alone", []string{"exec", "tool-a"}, args.ModeExec, "tool-a", args.Optional{}},
+		{"later exec is the positional", []string{"--verbose", "exec"}, args.ModeDecision, "", positional("exec")},
+		{"exec as the CLI operand", []string{"exec", "exec", "x"}, args.ModeExec, "exec", positional("x")},
+		{"empty positional is still a prompt", []string{""}, args.ModeDecision, "", positional("")},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := parseOK(t, tc.argv, noEnv)
+			req := parseOK(t, tc.argv)
 			assert.Equal(t, tc.wantMode, req.Mode)
+			assert.Equal(t, tc.wantCLI, req.CLI)
 			assert.Equal(t, tc.wantPrompt, req.Prompt)
 		})
 	}
 }
 
+func TestParseArgs_ExecCLI(t *testing.T) {
+	t.Run("redundant --cli accepted", func(t *testing.T) {
+		req := parseOK(t, []string{"exec", "tool-a", "--cli=tool-a", "x"})
+		assert.Equal(t, "tool-a", req.CLI)
+	})
+	t.Run("--cli in decision mode restricts routing", func(t *testing.T) {
+		req := parseOK(t, []string{"--cli", "tool-a", "x"})
+		assert.Equal(t, "tool-a", req.CLI)
+		req = parseOK(t, []string{"--cli=tool-a", "--cli=", "x"})
+		assert.Empty(t, req.CLI, "the last --cli wins, even empty")
+	})
+
+	errs := []struct {
+		name    string
+		argv    []string
+		wantErr string
+	}{
+		{"missing operand", []string{"exec"}, "exec needs the CLI to run"},
+		{"empty operand", []string{"exec", "", "x"}, "exec needs the CLI to run"},
+		{"option instead of operand", []string{"exec", "-p", "x"}, "exec needs the CLI to run"},
+		{"--cli cannot supply the operand", []string{"exec", "--cli=tool-a", "x"}, "exec needs the CLI to run"},
+		{"separator instead of operand", []string{"exec", "--", "x"}, "exec needs the CLI to run"},
+		{"conflicting --cli", []string{"exec", "tool-a", "--cli", "tool-b", "x"}, "--cli tool-b conflicts with exec tool-a"},
+		{"empty --cli conflicts", []string{"exec", "tool-a", "--cli=", "x"}, "conflicts with exec tool-a"},
+	}
+	for _, tc := range errs {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseArgs(tc.argv)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+			assert.NotContains(t, err.Error(), "\n")
+		})
+	}
+}
+
 func TestParseArgs_OwnFlags(t *testing.T) {
-	t.Run("--verbose belongs only to agrouter", func(t *testing.T) {
-		cmd, err := parseArgs([]string{"--verbose", "x"}, noEnv)
+	t.Run("--verbose before -- belongs only to agrouter", func(t *testing.T) {
+		cmd, err := parseArgs([]string{"--verbose", "x"})
 		require.NoError(t, err)
 		assert.True(t, cmd.verbose)
 		assert.Empty(t, cmd.req.Args)
-		cmd, err = parseArgs([]string{"--cli=alpha", "x", "--", "--verbose"}, noEnv)
+		cmd, err = parseArgs([]string{"exec", "tool-a", "x", "--", "--verbose"})
 		require.NoError(t, err)
 		assert.False(t, cmd.verbose)
 		assert.Equal(t, []string{"--verbose"}, cmd.req.Raw)
 	})
-	t.Run("--print accepted, never mapped", func(t *testing.T) {
-		req := parseOK(t, []string{"--print", "x"}, noEnv)
-		assert.Empty(t, req.Args)
-		assert.Equal(t, positional("x"), req.Prompt)
-	})
-	t.Run("AGROUTER_CLI used without --cli", func(t *testing.T) {
-		req := parseOK(t, []string{"x"}, envOf(map[string]string{cliEnv: "codex"}))
-		assert.Equal(t, "codex", req.CLI)
-	})
-	t.Run("--cli beats AGROUTER_CLI", func(t *testing.T) {
-		req := parseOK(t, []string{"--cli=claude", "x"}, envOf(map[string]string{cliEnv: "codex"}))
-		assert.Equal(t, "claude", req.CLI)
-	})
-	t.Run("explicit empty --cli beats AGROUTER_CLI", func(t *testing.T) {
-		req := parseOK(t, []string{"--cli=", "x"}, envOf(map[string]string{cliEnv: "codex"}))
-		assert.Empty(t, req.CLI)
-	})
 	t.Run("--jev-api-key absent", func(t *testing.T) {
-		req := parseOK(t, []string{"x"}, noEnv)
+		req := parseOK(t, []string{"x"})
 		assert.Equal(t, args.Optional{}, req.APIKey)
 	})
 	t.Run("--jev-api-key= clears", func(t *testing.T) {
-		req := parseOK(t, []string{"--jev-api-key=", "x"}, noEnv)
+		req := parseOK(t, []string{"--jev-api-key=", "x"})
 		assert.Equal(t, args.Optional{Set: true}, req.APIKey)
 	})
 	t.Run("--jev-api-key split form", func(t *testing.T) {
-		req := parseOK(t, []string{"--jev-api-key", "k-1", "x"}, noEnv)
+		req := parseOK(t, []string{"--jev-api-key", "k-1", "x"})
 		assert.Equal(t, args.Optional{Value: "k-1", Set: true}, req.APIKey)
 		assert.Empty(t, req.Args)
 	})
 	t.Run("--model and --effort are constraints, not mapped args", func(t *testing.T) {
-		req := parseOK(t, []string{"--model", "opus", "--effort=high", "x"}, noEnv)
-		assert.Equal(t, "opus", req.Model)
+		req := parseOK(t, []string{"--model", "m-1", "--effort=high", "x"})
+		assert.Equal(t, "m-1", req.Model)
 		assert.Equal(t, args.SourceFlag, req.ModelSource)
 		assert.Equal(t, "high", req.Effort)
 		assert.Equal(t, args.SourceFlag, req.EffortSource)
@@ -126,23 +139,43 @@ func TestParseArgs_OwnFlags(t *testing.T) {
 		assert.Empty(t, req.Args)
 	})
 	t.Run("--help", func(t *testing.T) {
-		cmd, err := parseArgs([]string{"--verbose", "--help"}, noEnv)
+		cmd, err := parseArgs([]string{"--verbose", "--help"})
 		require.NoError(t, err)
 		assert.Nil(t, cmd.req)
 		assert.Contains(t, cmd.help, "TYPESAFE_API_KEY")
 		assert.Contains(t, cmd.help, "process")
 		assert.Contains(t, cmd.help, "--cli=NAME")
-		assert.Contains(t, cmd.help, "-c, --config=KEY=VALUE")
+		assert.Contains(t, cmd.help, "exec CLI")
 		assert.Contains(t, cmd.help, "-p, --prompt=TEXT")
+		assert.Contains(t, cmd.help, "--print=TEXT")
 		assert.Contains(t, cmd.help, "--prompt-file=PATH")
 		assert.Contains(t, cmd.help, "--doc=PATH")
 		assert.NotContains(t, cmd.help, "/cli")
+		assert.NotContains(t, cmd.help, "--config")
+		assert.NotContains(t, cmd.help, "AGROUTER_CLI")
 	})
 	t.Run("--version", func(t *testing.T) {
-		cmd, err := parseArgs([]string{"--version"}, noEnv)
+		cmd, err := parseArgs([]string{"--version"})
 		require.NoError(t, err)
 		assert.True(t, cmd.version)
 		assert.Nil(t, cmd.req)
+	})
+}
+
+func TestParseArgs_PrintIsPromptAlias(t *testing.T) {
+	for _, mode := range [][]string{nil, {"exec", "tool-a"}} {
+		for _, spelling := range [][]string{{"--print", "fix it"}, {"--print=fix it"}} {
+			want := parseOK(t, append(slices.Clone(mode), "-p", "fix it"))
+			got := parseOK(t, append(slices.Clone(mode), spelling...))
+			assert.Equal(t, want, got, spelling)
+			assert.Equal(t, positional("fix it"), got.PromptFlag)
+			assert.False(t, got.Prompt.Set)
+		}
+	}
+	t.Run("--print after -- goes to the child", func(t *testing.T) {
+		req := parseOK(t, []string{"exec", "tool-a", "-p", "x", "--", "--print"})
+		assert.Equal(t, positional("x"), req.PromptFlag)
+		assert.Equal(t, []string{"--print"}, req.Raw)
 	})
 }
 
@@ -167,7 +200,7 @@ func TestParseArgs_PromptSources(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := parseOK(t, tc.argv, noEnv)
+			req := parseOK(t, tc.argv)
 			assert.Equal(t, tc.wantFlag, req.PromptFlag)
 			assert.Equal(t, tc.wantPos, req.Prompt)
 			assert.Equal(t, tc.wantFile, req.PromptFile)
@@ -191,7 +224,7 @@ func TestParseArgs_Docs(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := parseOK(t, tc.argv, noEnv)
+			req := parseOK(t, tc.argv)
 			assert.Equal(t, tc.want, req.Docs)
 			assert.Equal(t, positional("fix it"), req.Prompt)
 			assert.Empty(t, req.Args, "--doc is not a mapped argument")
@@ -199,130 +232,43 @@ func TestParseArgs_Docs(t *testing.T) {
 	}
 }
 
-func TestParseArgs_Config(t *testing.T) {
-	t.Run("value containing = kept whole", func(t *testing.T) {
-		req := parseOK(t, []string{"-c", `project_doc="a=b.md"`, "x"}, noEnv)
-		assert.Equal(t, []args.Arg{{
-			Spelling: `-c project_doc="a=b.md"`, Key: "config.project_doc", Value: `project_doc="a=b.md"`,
-		}}, req.Args)
-	})
-	t.Run("--config long form and no =", func(t *testing.T) {
-		req := parseOK(t, []string{"--config=approval_policy=never", "-c", "bare", "x"}, noEnv)
-		assert.Equal(t, []args.Arg{
-			{Spelling: "-c approval_policy=never", Key: "config.approval_policy", Value: "approval_policy=never"},
-			{Spelling: "-c bare", Key: "config.bare", Value: "bare"},
-		}, req.Args)
-	})
-	t.Run("-c model and effort become constraints, TOML quotes removed", func(t *testing.T) {
-		req := parseOK(t, []string{"-c", `model="gpt-6.1-sol"`, "-c", "model_reasoning_effort=high", "x"}, noEnv)
-		assert.Equal(t, "gpt-6.1-sol", req.Model)
-		assert.Equal(t, args.SourceConfig, req.ModelSource)
-		assert.Equal(t, "high", req.Effort)
-		assert.Equal(t, args.SourceConfig, req.EffortSource)
-		assert.Equal(t, "-c model_reasoning_effort=high", req.EffortSpell)
-		assert.Empty(t, req.Args)
-	})
-	t.Run("literal TOML quotes and last one wins", func(t *testing.T) {
-		req := parseOK(t, []string{"-c", "model='a'", "-c", "model=b", "x"}, noEnv)
-		assert.Equal(t, "b", req.Model)
-	})
-	t.Run("-c model beside --model stays a config.model key", func(t *testing.T) {
-		req := parseOK(t, []string{"-c", `model="gpt-6"`, "--model", "gpt-6.1-sol",
-			"-c", "model_reasoning_effort=low", "--effort", "high", "x"}, noEnv)
-		assert.Equal(t, "gpt-6.1-sol", req.Model)
-		assert.Equal(t, args.SourceFlag, req.ModelSource)
-		assert.Equal(t, "high", req.Effort)
-		assert.Equal(t, args.SourceFlag, req.EffortSource)
-		assert.Equal(t, []args.Arg{
-			{Spelling: `-c model="gpt-6"`, Key: "config.model", Value: `model="gpt-6"`},
-			{Spelling: "-c model_reasoning_effort=low", Key: "config.model_reasoning_effort", Value: "model_reasoning_effort=low"},
-		}, req.Args)
-	})
-}
-
-func TestParseArgs_BypassAliasesShareKey(t *testing.T) {
-	req := parseOK(t, []string{"--dangerously-skip-permissions", "--dangerously-bypass-approvals-and-sandbox",
-		"--permission-mode", "bypassPermissions", "x"}, noEnv)
-	require.Len(t, req.Args, 3)
-	for _, a := range req.Args {
-		assert.Equal(t, "permission-mode.bypassPermissions", a.Key)
-	}
-	assert.Equal(t, "--dangerously-bypass-approvals-and-sandbox", req.Args[1].Spelling)
-}
-
-func TestParseArgs_RalphexClaude(t *testing.T) {
-	// claude_args, then ralphex's own --model/--effort and --print, prompt on stdin
-	argv := []string{"exec", "--cli=claude", "--dangerously-skip-permissions", "--output-format", "stream-json",
-		"--verbose", "--model", "opus", "--effort", "high", "--print"}
-	req := parseOK(t, argv, noEnv)
-	assert.Equal(t, args.ModeExec, req.Mode)
-	assert.Equal(t, "claude", req.CLI)
-	assert.Equal(t, "opus", req.Model)
-	assert.Equal(t, "high", req.Effort)
-	assert.False(t, req.Prompt.Set)
-	assert.Equal(t, []args.Arg{
-		{Spelling: "--dangerously-skip-permissions", Key: "permission-mode.bypassPermissions"},
-		{Spelling: "--output-format stream-json", Key: "output-format.stream-json"},
-	}, req.Args)
-}
-
-func TestParseArgs_RalphexCodex(t *testing.T) {
-	desc := `agents.reviewer.description="general code review specialist; behavior driven by the task argument"`
-	argv := []string{"exec",
-		"-c", "features.multi_agent=true",
-		"-c", desc,
-		"-c", `project_doc_fallback_filenames=["CLAUDE.md"]`,
-		"--dangerously-bypass-approvals-and-sandbox",
-		"--sandbox", "danger-full-access",
-		"-c", `model="gpt-6.1-sol"`,
-		"-c", "model_reasoning_effort=xhigh",
-		"-c", "stream_idle_timeout_ms=3600000",
-		"-c", `project_doc="/tmp/doc.md"`,
-	}
-	req := parseOK(t, argv, noEnv)
-	assert.Equal(t, args.ModeExec, req.Mode)
-	assert.Empty(t, req.CLI)
-	assert.False(t, req.Prompt.Set)
-	assert.Equal(t, "gpt-6.1-sol", req.Model)
-	assert.Equal(t, args.SourceConfig, req.ModelSource)
-	assert.Equal(t, "xhigh", req.Effort)
-	assert.Equal(t, args.SourceConfig, req.EffortSource)
-	assert.Equal(t, []args.Arg{
-		{Spelling: "-c features.multi_agent=true", Key: "config.features.multi_agent", Value: "features.multi_agent=true"},
-		{Spelling: "-c " + desc, Key: "config.agents.reviewer.description", Value: desc},
-		{Spelling: `-c project_doc_fallback_filenames=["CLAUDE.md"]`, Key: "config.project_doc_fallback_filenames",
-			Value: `project_doc_fallback_filenames=["CLAUDE.md"]`},
-		{Spelling: "--dangerously-bypass-approvals-and-sandbox", Key: "permission-mode.bypassPermissions"},
-		{Spelling: "--sandbox danger-full-access", Key: "sandbox.danger-full-access"},
-		{Spelling: "-c stream_idle_timeout_ms=3600000", Key: "config.stream_idle_timeout_ms", Value: "stream_idle_timeout_ms=3600000"},
-		{Spelling: `-c project_doc="/tmp/doc.md"`, Key: "config.project_doc", Value: `project_doc="/tmp/doc.md"`},
-	}, req.Args)
-}
-
 func TestParseArgs_Raw(t *testing.T) {
-	t.Run("raw tokens kept apart from the positional", func(t *testing.T) {
-		req := parseOK(t, []string{"--cli", "claude", "fix it", "--", "--add-dir", "../x", "--", "extra"}, noEnv)
-		assert.Equal(t, positional("fix it"), req.Prompt)
-		assert.Equal(t, []string{"--add-dir", "../x", "--", "extra"}, req.Raw)
-		assert.Empty(t, req.Args)
-	})
-	t.Run("a positional-looking raw token is not a second positional", func(t *testing.T) {
-		req := parseOK(t, []string{"fix it", "--", "other"}, noEnv)
-		assert.Equal(t, positional("fix it"), req.Prompt)
-		assert.Equal(t, []string{"other"}, req.Raw)
-	})
-	t.Run("-- with nothing after", func(t *testing.T) {
-		req := parseOK(t, []string{"x", "--"}, noEnv)
-		assert.Empty(t, req.Raw)
-	})
+	tests := []struct {
+		name string
+		argv []string
+		want []string
+	}{
+		{"tokens kept apart from the positional, later -- kept",
+			[]string{"exec", "tool-a", "fix it", "--", "--add-dir", "../x", "--", "extra"},
+			[]string{"--add-dir", "../x", "--", "extra"}},
+		{"a positional-looking token is not a second positional", []string{"exec", "tool-a", "fix it", "--", "other"},
+			[]string{"other"}},
+		{"-- with nothing after", []string{"exec", "tool-a", "x", "--"}, []string{}},
+		{"empty tokens, spaces and repeats kept", []string{"exec", "tool-a", "x", "--", "", "a b", "-v", "-v", "/abs"},
+			[]string{"", "a b", "-v", "-v", "/abs"}},
+		{"prompt text after -- is not a prompt", []string{"exec", "tool-a", "--", "fix it"}, []string{"fix it"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := parseOK(t, tc.argv)
+			assert.Equal(t, tc.want, req.Raw)
+			assert.Empty(t, req.Args)
+			if tc.name == "prompt text after -- is not a prompt" {
+				assert.False(t, req.Prompt.Set)
+				assert.False(t, req.PromptFlag.Set)
+			} else {
+				assert.True(t, req.Prompt.Set)
+			}
+		})
+	}
 }
 
 func TestParseArgs_SlashTokens(t *testing.T) {
 	// go-flags on Windows takes "/x" as an option; prompts and values starting with "/" must survive
-	req := parseOK(t, []string{"--model", "/models/m", "--sandbox=/weird", "/review the diff"}, noEnv)
+	req := parseOK(t, []string{"--model", "/models/m", "--doc=/weird", "/review the diff"})
 	assert.Equal(t, positional("/review the diff"), req.Prompt)
 	assert.Equal(t, "/models/m", req.Model)
-	assert.Equal(t, []args.Arg{{Spelling: "--sandbox /weird", Key: "sandbox./weird"}}, req.Args)
+	assert.Equal(t, []string{"/weird"}, req.Docs)
 }
 
 func TestParseArgs_Errors(t *testing.T) {
@@ -335,9 +281,22 @@ func TestParseArgs_Errors(t *testing.T) {
 		{"unknown short flag", []string{"-z", "x"}, "z"},
 		{"prompt-looking flag", []string{"-fix it"}, "unknown flag"},
 		{"second positional", []string{"one", "two"}, "more than one positional"},
-		{"second positional around flags", []string{"exec", "one", "--verbose", "two"}, "more than one positional"},
+		{"second positional around flags", []string{"exec", "tool-a", "one", "--verbose", "two"}, "more than one positional"},
 		{"missing value", []string{"x", "--model"}, "model"},
-		{"second -p", []string{"-p", "a", "--prompt", "b"}, "-p/--prompt given more than once"},
+		{"second -p", []string{"-p", "a", "--prompt", "b"}, "-p/--prompt/--print given more than once"},
+		{"-p and --print", []string{"-p", "a", "--print", "b"}, "-p/--prompt/--print given more than once"},
+		{"bare --print", []string{"x", "--print"}, "print"},
+		{"bare --print before --", []string{"exec", "tool-a", "x", "--print", "--", "y"}, "print"},
+		{"-- in decision mode", []string{"x", "--", "--add-dir"}, `"--" is only accepted with exec`},
+		{"empty -- in decision mode", []string{"x", "--"}, `"--" is only accepted with exec`},
+		{"removed --permission-mode", []string{"--permission-mode", "plan", "x"}, "permission-mode"},
+		{"removed --dangerously-skip-permissions", []string{"--dangerously-skip-permissions", "x"}, "dangerously-skip-permissions"},
+		{"removed --dangerously-bypass-approvals-and-sandbox", []string{"exec", "tool-a",
+			"--dangerously-bypass-approvals-and-sandbox", "x"}, "dangerously-bypass-approvals-and-sandbox"},
+		{"removed --output-format", []string{"--output-format=json", "x"}, "output-format"},
+		{"removed --sandbox", []string{"--sandbox", "read-only", "x"}, "sandbox"},
+		{"removed -c", []string{"exec", "tool-a", "-c", "k=v", "x"}, "unknown flag"},
+		{"removed --config", []string{"--config=k=v", "x"}, "config"},
 		{"second --prompt-file", []string{"--prompt-file", "a", "--prompt-file=b"}, "--prompt-file given more than once"},
 		{"-p value looks like a flag", []string{"-p", "--model", "x"}, "expected argument"},
 		{"-p without value", []string{"x", "-p"}, "prompt"},
@@ -346,7 +305,7 @@ func TestParseArgs_Errors(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := parseArgs(tc.argv, noEnv)
+			_, err := parseArgs(tc.argv)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.wantErr)
 			assert.NotContains(t, err.Error(), "\n")
@@ -362,23 +321,6 @@ func TestRun_SecondPositional(t *testing.T) {
 	assert.Equal(t, 2, code)
 	assert.Empty(t, stdout.String())
 	assert.Equal(t, "agrouter: more than one positional argument: pass the prompt as one quoted argument\n", stderr.String())
-}
-
-func TestUnquoteTOML(t *testing.T) {
-	tests := map[string]string{
-		`"a"`:     "a",
-		`'a'`:     "a",
-		`"a\"b"`:  `a"b`,
-		`"a\qb"`:  `a\qb`,
-		`a`:       "a",
-		`"`:       `"`,
-		`""`:      "",
-		`"a'`:     `"a'`,
-		`gpt-6"x`: `gpt-6"x`,
-	}
-	for in, want := range tests {
-		assert.Equal(t, want, unquoteTOML(in), in)
-	}
 }
 
 func TestPosixHelp(t *testing.T) {

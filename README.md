@@ -5,7 +5,7 @@ agrouter picks the coding-agent CLI, model and reasoning effort for a prompt by 
 It has two modes:
 
 - **Decision** (default): print the choice, project complexity and per-stage confidence as one JSON line. Add `--verbose` for the argv and other details when the caller launches the CLI itself.
-- **Exec** (`agrouter exec`): translate agrouter's arguments into the chosen CLI's own arguments through config, and run it.
+- **Exec** (`agrouter exec <cli>`): route within the named CLI, add the chosen model and effort through config, append the CLI's own arguments given after `--`, and run it.
 
 ## Install
 
@@ -44,26 +44,24 @@ The key comes from `--jev-api-key`, then `TYPESAFE_API_KEY`, then `api_key` in c
 ## Usage
 
 ```
-agrouter      [options] [-p TEXT] [--prompt-file PATH] [--doc PATH]... [prompt] [-- raw args...]    # decision mode
-agrouter exec [options] [-p TEXT] [--prompt-file PATH] [--doc PATH]... [prompt] [-- raw args...]    # exec mode
+agrouter           [options] [-p TEXT] [--prompt-file PATH] [--doc PATH]... [prompt]                       # decision mode
+agrouter exec <cli> [options] [-p TEXT] [--prompt-file PATH] [--doc PATH]... [prompt] [-- native args...]  # exec mode
 ```
 
-The prompt can come from four sources, in any combination: `-p TEXT`, the one positional argument, the text of `--prompt-file PATH` and stdin. agrouter joins them in that order with a blank line between them; at least one must be non-empty. `-p` and `--prompt-file` may each be given once, and a `-p` value that looks like a flag (`-p --model`) is rejected. `-p` takes the prompt as its value, like Claude Code's `-p "query"`; it used to be a bare print switch, so a caller passing `-p` with no value should drop it or use `--print`. Arguments follow Claude Code's names:
+Exec needs the CLI to run right after `exec`; a missing operand, or a CLI that is not configured and enabled, is exit `2` before Jev is asked. `--cli` cannot supply it: `--cli` equal to the operand is accepted as redundant, a different one is exit `2`. Decision mode rejects `--`, even with nothing after it.
+
+The prompt can come from four sources, in any combination: `-p TEXT`, the one positional argument, the text of `--prompt-file PATH` and stdin, all before `--`. agrouter joins them in that order with a blank line between them; at least one must be non-empty. Nothing after `--` is read as a prompt: text there goes to the child but is not routed on. `-p`, `--prompt` and `--print` are one option: it may be given once, and a value that looks like a flag (`-p --model`) is rejected, as is a bare `--print` with no value before `--`. `--prompt-file` may be given once. Arguments follow Claude Code's names:
 
 | Option | Meaning |
 |---|---|
-| `--cli=NAME` (`AGROUTER_CLI`) | route only within one CLI (`claude`, `codex`, ...) |
+| `--cli=NAME` | decision mode: route only within one CLI (`claude`, `codex`, ...); exec takes its CLI from the operand |
 | `--model=M`, `--effort=E` | fix the model or effort; Jev chooses the rest. Values outside the catalog are passed through for the CLI to validate |
-| `-p TEXT`, `--prompt=TEXT` | the prompt, before the positional prompt, `--prompt-file` and stdin |
+| `-p TEXT`, `--prompt=TEXT`, `--print=TEXT` | the prompt, before the positional prompt, `--prompt-file` and stdin |
 | `--prompt-file=PATH` | read prompt text from a file |
 | `--doc=PATH` | a project doc (`CLAUDE.md`, `AGENTS.md`, ...) for routing only; repeatable, never passed to the child |
-| `--print` | accepted; non-interactive mode is always on |
-| `--permission-mode=MODE`, `--dangerously-skip-permissions` | Claude's permission modes, mapped to the closest Codex setting; Codex's `--dangerously-bypass-approvals-and-sandbox` is an alias |
-| `--output-format=text\|json\|stream-json` | child output format, mapped through config |
-| `--verbose` | full agrouter decision details; never passed to the child and never affects routing |
-| `--sandbox=MODE`, `-c key=value` (`--config`) | Codex's spellings, so ralphex's Codex executor can call agrouter unchanged |
+| `--verbose` | full agrouter decision details; never affects routing. Before `--` it is agrouter's only; after `--` it is the child's own option |
 | `--jev-api-key=KEY` | Jev API key; an empty value clears it |
-| `-- raw args...` | appended to the child's argv unchanged, only with `--cli` |
+| `-- native args...` | exec only: appended to the child's argv unchanged and in order, including empty tokens, repeats and later `--` |
 | `--help`, `--version` | print help or the version and exit |
 
 Whenever stdin is not a terminal, agrouter reads it to EOF within `[agrouter] timeout` before routing. A script that passes the prompt only as an argument or a file should close stdin or redirect it from `/dev/null`; an inherited pipe that stays open uses up the timeout, and Jev cannot decide.
@@ -96,7 +94,7 @@ A value the caller passes fixes its stage, because eligibility filters by it bef
 | `--effort E` | `cli` and `model`; E is never re-decided |
 | `--cli`, `--model` and `--effort` | none: one option is left and Jev is not asked |
 
-If any stage fails, the whole routing fails and the cannot-decide policy below applies to the original eligibility; the stages that completed appear only in `--verbose` and `AGROUTER_DEBUG=1` output. A CLI Jev chose never enables raw `--` passthrough; only an explicit `--cli` does.
+If any stage fails, the whole routing fails and the cannot-decide policy below applies to the original eligibility; the stages that completed appear only in `--verbose` and `AGROUTER_DEBUG=1` output. Native arguments after `--` exist only in exec, whose CLI is always the operand.
 
 ### Project complexity
 
@@ -119,7 +117,7 @@ A prompt with its files that is too large for one request is split into chunks, 
 Decision mode:
 
 ```sh
-agrouter -p "fix the flaky test in pkg/foo" --dangerously-skip-permissions --output-format stream-json
+agrouter -p "fix the flaky test in pkg/foo"
 # {"cli":"codex","model":"gpt-6.1-sol","effort":"medium","confidence":{"cli":0.82,"model":0.64,"effort":0.41}}
 ```
 
@@ -129,19 +127,19 @@ Add `--verbose` for indented JSON with every stage, chunk and option, plus a rea
 {"cli":"codex","model":"gpt-6.1-sol","effort":"medium","project_complexity":"6.9/10","confidence":{"cli":0.82,"model":0.64,"effort":0.41,"project_complexity":0.9}}
 ```
 
-`project_complexity` is the final project score formatted as `score/10` with one decimal, for example `5.1/10` and is omitted when the complexity stage did not complete. In verbose output, `argv` holds the `-p`, positional and `--prompt-file` text, joined like the routing prompt, as its last token after `--`, so text that starts with `-` reaches the child as the prompt and never as one of its flags (each CLI's `prompt` mapping must end with `"--", "{prompt}"`; raw tokens after agrouter's own `--` come before it). It never holds stdin: a caller that piped a prompt must send it to the child itself. `--doc` is never in `argv`; the child loads its own `CLAUDE.md`/`AGENTS.md`. `effort` is `null` for a model without efforts; `skipped` lists, as the caller spelled them, the arguments that got a skip warning: an unknown or disabled `--cli`, arguments the chosen CLI does not map or maps to nothing, and raw tokens after `--` without `--cli`.
+`project_complexity` is the final project score formatted as `score/10` with one decimal, for example `5.1/10` and is omitted when the complexity stage did not complete. In verbose output, `argv` holds the `-p`, positional and `--prompt-file` text, joined like the routing prompt, as its last token after `--`, so text that starts with `-` reaches the child as the prompt and never as one of its flags (each CLI's `prompt` mapping must end with `"--", "{prompt}"`). It never holds stdin: a caller that piped a prompt must send it to the child itself. `--doc` is never in `argv`; the child loads its own `CLAUDE.md`/`AGENTS.md`. `effort` is `null` for a model without efforts; `skipped` lists, as the caller spelled them, the arguments that got a skip warning: an unknown or disabled `--cli` and an effort the chosen CLI does not map.
 
-Exec mode, with the prompt on stdin and the output format fixed by pinning the CLI:
+Exec mode, with the prompt on stdin and the CLI's own options after `--`:
 
 ```sh
-agrouter exec --cli=claude --dangerously-skip-permissions --output-format stream-json --verbose < prompt.txt
+agrouter exec claude -- --dangerously-skip-permissions --output-format stream-json --verbose < prompt.txt
 ```
 
-`--verbose` requests full agrouter selection details. Claude's stream-json mapping adds the child's own `--verbose`, which `claude -p` requires for that format.
+agrouter reads stdin for routing and replays the same bytes to the child, so the prompt never goes into argv. The `--verbose` after `--` is Claude's own (`claude -p` requires it for stream-json); agrouter adds none itself.
 
 On Windows with npm's `claude.cmd`/`codex.cmd` shims, pass a multi-line prompt on stdin: cmd.exe cannot carry a line break inside an argument, so a multi-line `-p`, positional or `--prompt-file` prompt fails to start (exit `127`). This includes any prompt combined from two sources, since they are joined with a blank line. Decision mode and native executables are unaffected.
 
-Before starting the child, exec mode logs one line to stderr: `agrouter: selection: ` followed by a JSON object with `cli`, `model`, `effort`, any completed `project_complexity` score and the same `confidence` object as decision mode, so tools such as Ralphex show the selection for each step. The prefix keeps the line from passing for one of the child's stream-json events when a caller merges stderr into stdout (Ralphex drops JSON lines that aren't events and prints other lines); strip it to parse the JSON. Model and effort are `null` when the CLI's defaults apply. With `--verbose` it also includes every stage and per-request confidence. This line does not include the prompt or argv.
+Before starting the child, exec mode logs one line to stderr: `agrouter: selection: ` followed by a JSON object with `cli`, `model`, `effort`, any completed `project_complexity` score and the same `confidence` object as decision mode, so tools such as Ralphex show the selection for each step. The prefix keeps the line from passing for one of the child's stream-json events when a caller merges stderr into stdout (Ralphex drops JSON lines that aren't events and prints other lines); strip it to parse the JSON. Model and effort are `null` when the CLI's defaults apply. The line stays concise with agrouter's `--verbose` and never includes the prompt or argv.
 
 Decision JSON and the exec selection line include `confidence` when Jev answered:
 
@@ -182,7 +180,9 @@ INI files, merged per section and per key, later layers winning:
 1. embedded defaults ([`pkg/config/defaults/config`](pkg/config/defaults/config)): the catalog, routing policies and argument mappings;
 2. global `~/.config/agrouter/config` (directory overridable with `AGROUTER_CONFIG_DIR`);
 3. local `.agrouter/config` in the working directory;
-4. environment (`TYPESAFE_API_KEY`, `AGROUTER_CLI`).
+4. environment (`TYPESAFE_API_KEY`).
+
+`AGROUTER_CLI` is no longer read. When it is set, agrouter prints one warning and ignores it: use `exec <cli>` to run a CLI, or `--cli=NAME` to restrict a decision.
 
 The global config is installed with every setting and section commented out. Uncomment the section header and settings you want to customize. Missing, empty or comment-only files are refreshed from the current embedded defaults on each routing invocation; files with any active content are preserved. New directories use permissions `0700` and new files `0600`. Local `.agrouter/config` files are never created automatically.
 
@@ -223,35 +223,32 @@ The old question keys are config errors that name their replacement, for example
 
 ## ralphex
 
-Claude mode (`--cli=claude` keeps ralphex's stream-json parser working). Ralphex's `--verbose` is consumed by agrouter; the embedded `output-format.stream-json` mapping gives `claude` the `--verbose` it needs. A global config that copies `[cli.claude.args]` must keep `--verbose` in that mapping, or `claude` fails with `--output-format=stream-json requires --verbose`.
+Ralphex passes the prompt on stdin and appends only native flags, so its arguments must land after agrouter's `--`. Claude mode: `claude_args` ends with `--`, and Ralphex's appended `--print` goes to `claude` unchanged.
 
 Ralphex config:
 
 ```ini
 # ~/.config/ralphex/config
 # agrouter environment variables (set before starting ralphex, not as INI keys):
-# AGROUTER_CLI=codex pins external review; --cli=claude below overrides it for implementation.
 # TYPESAFE_API_KEY supplies Jev's key instead of [agrouter] api_key; --jev-api-key wins.
 # AGROUTER_CONFIG_DIR selects the directory containing agrouter's global config file.
 # AGROUTER_DEBUG=1 enables redacted stderr diagnostics; it does not enable --verbose.
 # no environment overrides exist for model, effort, --doc, --verbose, timeout or jev_model.
 claude_command = agrouter
-claude_args    = exec --cli=claude --dangerously-skip-permissions --output-format stream-json --verbose
+claude_args    = exec claude --doc=CLAUDE.md -- --dangerously-skip-permissions --output-format stream-json --verbose
 ```
 
-Codex mode (`executor = codex`) and the external Codex review:
+Codex mode (`executor = codex`) and the external Codex review. `codex_command` accepts only an executable, and Ralphex prepends Codex's own `exec`, so point it at a small wrapper that drops that `exec` and runs `agrouter exec codex --doc=CLAUDE.md -- "$@"`:
 
 ```ini
 # ~/.config/ralphex/config
-# set AGROUTER_CLI=codex in ralphex's environment to force this review to Codex.
-# codex_command accepts only the executable; ralphex adds exec and the other arguments.
-codex_command          = agrouter
+codex_command          = agrouter-codex
 # empty, so Jev chooses; ralphex's defaults would otherwise fix both
 codex_model            =
 codex_reasoning_effort =
 ```
 
-A `--model`/`--effort` (or `-c model=`/`-c model_reasoning_effort=`) that ralphex adds from `task_model`, `review_model`, `plan_model`, `codex_model` or `codex_reasoning_effort` is a constraint; leave them empty to let Jev choose.
+Leave `task_model`, `review_model`, `plan_model`, `codex_model` and `codex_reasoning_effort` empty to let Jev choose: a model or effort Ralphex appends after `--` goes to the child, not to routing.
 
 **`idle_timeout`:** agrouter prints nothing while it routes, up to `[agrouter] timeout` (10s by default). A ralphex `idle_timeout` must exceed that plus the child's time to its first output, or ralphex kills every run during routing.
 
@@ -260,7 +257,7 @@ A `--model`/`--effort` (or `-c model=`/`-c model_reasoning_effort=`) that ralphe
 | Code | Meaning |
 |---|---|
 | `0` | decision printed, or `--help`/`--version` |
-| `2` | agrouter error before any child starts: unknown flag, second positional, second `-p` or `--prompt-file`, no prompt, a bad `--prompt-file` or `--doc` file, the timeout passing while the `--prompt-file` is read, config error, or Jev cannot decide with more than one CLI left |
+| `2` | agrouter error before any child starts: unknown flag (including the removed `--permission-mode`, `--dangerously-*`, `--output-format`, `--sandbox` and `-c`), second positional, second `-p`/`--prompt`/`--print` or `--prompt-file`, a missing, unknown or disabled exec CLI, a `--cli` conflicting with it, `--` in decision mode, no prompt, a bad `--prompt-file` or `--doc` file, the timeout passing while the `--prompt-file` is read, config error, or Jev cannot decide with more than one CLI left |
 | `127` | exec mode: the chosen CLI could not be started |
 | other | exec mode: the child's exit code (`128+signal` on Unix when it was killed) |
 

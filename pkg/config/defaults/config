@@ -5,9 +5,6 @@
 # environment variables are set in the process environment, not as keys in this file:
 # TYPESAFE_API_KEY: overrides [agrouter] api_key; --jev-api-key takes precedence,
 # including an explicitly empty --jev-api-key, which clears the key.
-# AGROUTER_CLI: restricts routing like --cli=NAME; an explicit --cli overrides it.
-# with ralphex, AGROUTER_CLI=codex pins external review while --cli=claude in
-# claude_args keeps implementation on its own CLI.
 # AGROUTER_CONFIG_DIR: directory containing the global config file, replacing
 # ~/.config/agrouter; .agrouter/config in the working directory still overrides it.
 # AGROUTER_DEBUG=1: enables redacted diagnostics on stderr; it is separate from
