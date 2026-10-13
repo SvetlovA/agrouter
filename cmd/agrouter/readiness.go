@@ -26,15 +26,24 @@ var _ ReadinessChecker = readiness.Checker{}
 
 // preflight is the exec CLI's readiness check, running while the input is captured.
 type preflight struct {
-	done   chan struct{}
-	report readiness.Report
+	done    chan struct{}
+	report  readiness.Report
+	changed bool // native arguments switch the child's context: only the executable was looked up
+}
+
+// checked is what exec's preflight found, kept for the selection line: the report with the child's
+// defaults, its evaluation over the eligible options, and the context switch.
+type checked struct {
+	report  readiness.Report
+	ev      *readiness.Evaluation
+	changed bool
 }
 
 // startPreflight checks cli under ctx in the background. Native arguments that switch the child's
 // context make the probes moot: only the executable is looked up, and the rest is unknown.
 func (a *app) startPreflight(ctx context.Context, cli config.CLI, raw []string) *preflight {
-	p := &preflight{done: make(chan struct{})}
 	_, changed := args.ContextFlag(cli, raw)
+	p := &preflight{done: make(chan struct{}), changed: changed}
 	probed := cli
 	if changed {
 		probed.Availability = nil
@@ -57,17 +66,23 @@ func (p *preflight) wait() readiness.Report {
 
 // applyPreflight removes the options cli cannot run now from el, and warns once when what is left
 // is unverified. When nothing is left it returns the error that stops exec before any Jev request.
-func (a *app) applyPreflight(cli config.CLI, models []config.Model, report readiness.Report, el *router.Eligibility) error {
+func (a *app) applyPreflight(cli config.CLI, models []config.Model, p *preflight, el *router.Eligibility) (*checked, error) {
+	report := p.wait()
 	ev := readiness.Evaluate(report, el.Options, models, unknownPolicy(cli), a.clock())
 	a.debug.readiness(report, ev)
 	if ev.Blocked != nil {
-		return preflightBlock(cli, *ev.Blocked)
+		return nil, preflightBlock(cli, *ev.Blocked)
 	}
 	el.Exclude(ev.Excluded)
 	if ev.Unknown != "" {
-		fmt.Fprintf(a.stderr, "agrouter: warning: %s availability unknown: %s\n", cli.Name, ev.Unknown)
+		a.warnUnknown(cli, ev.Unknown)
 	}
-	return nil
+	return &checked{report: report, ev: ev, changed: p.changed}, nil
+}
+
+// warnUnknown is the one warning that cli's availability is unverified for reason.
+func (a *app) warnUnknown(cli config.CLI, reason string) {
+	fmt.Fprintf(a.stderr, "agrouter: warning: %s availability unknown: %s\n", cli.Name, reason)
 }
 
 // unknownPolicy is cli's unknown availability policy; a CLI without availability checks allows.

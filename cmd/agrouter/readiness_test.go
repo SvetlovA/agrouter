@@ -181,7 +181,8 @@ func TestApp_ExecPreflightFiltersOptions(t *testing.T) {
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Equal(t, map[string]any{"cli": "alpha", "model": "fast-1", "effort": "high",
-			"confidence": map[string]any{"effort": 0.9}}, selectionLog(t, r.stderr))
+			"confidence": map[string]any{"effort": 0.9},
+			"readiness":  map[string]any{"excluded": map[string]any{"quota_exhausted": float64(2)}}}, selectionLog(t, r.stderr))
 		assert.Equal(t, []string{"effort"}, e.jev.asked(), "one model left: only the effort stage asks Jev")
 	})
 

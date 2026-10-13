@@ -410,12 +410,13 @@ Exec processing flow: parse → load config → validate operand/flags/conflicts
 **Files:**
 - Modify: `cmd/agrouter/app.go`, `cmd/agrouter/confidence.go`, `cmd/agrouter/readiness.go`, `cmd/agrouter/app_test.go`, `cmd/agrouter/confidence_test.go`, `README.md`.
 
-- [ ] Add `fallback` when `Undecided` is set and `effective` model/effort with `router`/`caller`/`verified_child_default`/`child_default_unknown` sources, using preflight `defaults` evidence.
-- [ ] Check a verified delegated default model against model-scoped blocks; block the fallback (quota line, exit 127, no child) when it is known blocked.
-- [ ] Emit the fallback warning line (failing stage, reason code, fallen-back fields only, each verified default or "unknown" with its reason, "not a Jev selection") before the selection line.
-- [ ] Add the compact readiness summary to the selection line when exclusions or unknown warnings applied.
-- [ ] Write tests: success (no warning, no `fallback`), failure at each stage, effort-stage failure keeping Jev's model with `source: router` and warning only about effort, caller-fixed values never listed as fallbacks, warning text with verified and unknown defaults, exactly one warning and one selection line, verified and unknown delegated defaults, defaults unknown with a context flag, blocked verified default, readiness-filtered fallback, chunked routing, no fallback for intentional omissions, line stays single and concise.
-- [ ] Update README exec output section; run `make test`.
+- [x] Add `fallback` when `Undecided` is set and `effective` model/effort with `router`/`caller`/`verified_child_default`/`child_default_unknown` sources, using preflight `defaults` evidence.
+- [x] Check a verified delegated default model against model-scoped blocks; block the fallback (quota line, exit 127, no child) when it is known blocked.
+- [x] Emit the fallback warning line (failing stage, reason code, fallen-back fields only, each verified default or "unknown" with its reason, "not a Jev selection") before the selection line.
+- [x] Add the compact readiness summary to the selection line when exclusions or unknown warnings applied.
+- [x] Write tests: success (no warning, no `fallback`), failure at each stage, effort-stage failure keeping Jev's model with `source: router` and warning only about effort, caller-fixed values never listed as fallbacks, warning text with verified and unknown defaults, exactly one warning and one selection line, verified and unknown delegated defaults, defaults unknown with a context flag, blocked verified default, readiness-filtered fallback, chunked routing, no fallback for intentional omissions, line stays single and concise.
+- [x] Update README exec output section; run `make test`.
+- ➕ Notes: the router now keeps a model Jev chose at an asked model stage when a later stage fails (`askedModel`), in both modes, so an effort-stage failure runs Jev's model; a skipped model stage still delegates. The fallback code lives in a new `cmd/agrouter/fallback.go`. `effective` appears only when a model or effort is left to the child (otherwise the top-level values already say what runs); a `NoEffort` model has no effort entry. A delegated model is judged with `Evaluation.Model` on success too: a verified default known blocked is the preflight block line (127), an unknown one under a model-scoped block warns once (`delegated_model_unverified`) or, under `unknown = block`, exits 2. The fake Jev ignores chunk uploads the client abandons once another chunk failed.
 
 ### Task 10: Verify acceptance criteria
 

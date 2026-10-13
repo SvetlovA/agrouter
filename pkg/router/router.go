@@ -104,8 +104,12 @@ func (r *Router) Route(ctx context.Context, el *Eligibility, req *args.Request, 
 	}
 	o, stages, err := r.decide(ctx, el, captured)
 	if err != nil {
-		// partial decisions are discarded: the policy runs against the original eligibility
+		// the policy runs against the original eligibility; of the partial decision only a model Jev
+		// chose survives, so an effort-stage failure keeps it
 		d, policyErr := r.cannotDecide(el, req, err)
+		if policyErr == nil && d.Model == "" {
+			d.Model = askedModel(el, stages)
+		}
 		d.Stages, d.Complexity = stages, cx
 		return d, policyErr
 	}
@@ -123,7 +127,8 @@ func (r *Router) chosen(el *Eligibility, o catalog.Option) Decision {
 }
 
 // cannotDecide applies the policy: with one CLI left (--cli, implied by --model, or the only one
-// eligible) it runs with only what the caller fixed; with more, there is nothing to run.
+// eligible) it runs with only what the caller fixed; with more, there is nothing to run. Route adds
+// the model Jev chose before a later stage failed.
 func (r *Router) cannotDecide(el *Eligibility, req *args.Request, cause error) (Decision, error) {
 	clis := el.CLIs()
 	if len(clis) == 0 {
@@ -139,4 +144,20 @@ func (r *Router) cannotDecide(el *Eligibility, req *args.Request, cause error) (
 		d.Model = el.Options[0].Name
 	}
 	return d, nil
+}
+
+// askedModel is the name of the model Jev chose at an asked model stage among stages, empty when the
+// model stage was skipped or never completed.
+func askedModel(el *Eligibility, stages []Stage) string {
+	for _, st := range stages {
+		if st.Level != LevelModel || st.Skipped {
+			continue
+		}
+		for _, o := range el.Options {
+			if modelLabel(o) == st.Choice {
+				return o.Name
+			}
+		}
+	}
+	return ""
 }

@@ -84,6 +84,10 @@ type selectionJSON struct {
 	ProjectComplexity string           `json:"project_complexity,omitempty"`
 	Confidence        *confidenceJSON  `json:"confidence,omitempty"`
 	Options           []optionJSON     `json:"options,omitempty"`
+	// exec only
+	Fallback  *fallbackJSON  `json:"fallback,omitempty"`
+	Effective *effectiveJSON `json:"effective,omitempty"`
+	Readiness *readinessJSON `json:"readiness,omitempty"`
 }
 
 // optionJSON is one eligible option, in catalog order.
@@ -166,7 +170,12 @@ func (a *app) run(argv []string) int {
 		return a.printDecision(d, res, cmd.verbose)
 	}
 	// --verbose is agrouter's decision detail; the exec selection line stays concise
-	a.logSelection(selectionOutput(d, false, nil))
+	s, blocked := a.execSelection(cli, req, d)
+	if blocked != nil {
+		fmt.Fprintln(a.stderr, blocked.line)
+		return blocked.code
+	}
+	a.logSelection(s)
 	return a.exec(res, d.captured)
 }
 
@@ -220,6 +229,7 @@ type routed struct {
 	router.Decision
 	captured *prompt.Result
 	options  []optionJSON
+	checked  *checked // exec's preflight; nil in decision mode
 }
 
 // route reads --prompt-file and every --doc, captures the prompt and decides, all within the routing
@@ -278,9 +288,10 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 	}
 
 	el := router.Eligible(cat, req)
+	var pre *checked
 	if pf != nil {
-		if blocked := a.applyPreflight(execCLI, cfg.Models, pf.wait(), el); blocked != nil {
-			return routed{}, blocked
+		if pre, err = a.applyPreflight(execCLI, cfg.Models, pf, el); err != nil {
+			return routed{}, err
 		}
 	}
 	for _, w := range el.Warnings {
@@ -302,7 +313,7 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 	for i, o := range el.Options {
 		options[i] = optionJSON{ID: o.ID, CLI: o.CLI, Model: o.Name, Effort: el.EffortFor(o)}
 	}
-	return routed{Decision: d, captured: captured, options: options}, nil
+	return routed{Decision: d, captured: captured, options: options, checked: pre}, nil
 }
 
 // printDecision writes concise or indented verbose JSON to stdout.

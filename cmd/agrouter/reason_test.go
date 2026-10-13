@@ -202,7 +202,7 @@ func TestApp_FailureReasons(t *testing.T) {
 				r := e.run(argv("exec", "alpha"), nil)
 
 				require.Equal(t, exitOK, r.code, r.stderr)
-				s := selectionLog(t, r.stderr)
+				_, s := fallbackLog(t, r.stderr)
 				assert.Subset(t, s, map[string]any{"cli": "alpha", "model": nil, "effort": nil})
 				reason, _ := s["reason"].(map[string]any)
 				assert.Equal(t, cause.code, reason["code"])
@@ -245,7 +245,7 @@ func TestApp_FailureStages(t *testing.T) {
 				var d map[string]any
 				if mode == "exec" {
 					require.Equal(t, exitOK, r.code, r.stderr)
-					d = selectionLog(t, r.stderr)
+					_, d = fallbackLog(t, r.stderr)
 				} else {
 					d = decision(t, r.stdout)
 				}

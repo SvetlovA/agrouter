@@ -389,3 +389,47 @@ func TestRouteAfterExcludeSkipsJevForOneOption(t *testing.T) {
 	assert.Equal(t, "fast", d.OptionID)
 	assert.True(t, d.Pinned)
 }
+
+func TestRouteKeepsAskedModelOnLaterFailure(t *testing.T) {
+	cfg, cat := requestFixture(t)
+	failEffort := func(fail error) *mocks.JevClientMock {
+		return &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+			if _, ok := req.Questions[LevelEffort]; ok {
+				return nil, fail
+			}
+			return certain(req, "strong@high"), nil
+		}}
+	}
+	tests := []struct {
+		name      string
+		req       *args.Request
+		wantModel string
+	}{
+		{name: "asked model kept", req: &args.Request{CLI: "alpha"}, wantModel: "strong-model"},
+		{name: "caller's model kept", req: &args.Request{Model: "strong-model"}, wantModel: "strong-model"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRouter(t, cfg, cat, failEffort(context.DeadlineExceeded))
+			d, err := r.Route(context.Background(), Eligible(cat, tc.req), tc.req, captured("fix it"))
+			require.NoError(t, err)
+			se, ok := errors.AsType[*StageError](d.Undecided)
+			require.True(t, ok)
+			assert.Equal(t, LevelEffort, se.Stage)
+			assert.Equal(t, tc.wantModel, d.Model)
+			assert.Empty(t, d.Effort)
+			assert.Empty(t, d.OptionID, "still undecided")
+		})
+	}
+
+	t.Run("a failing model stage keeps nothing", func(t *testing.T) {
+		r := newRouter(t, cfg, cat, failing(context.DeadlineExceeded))
+		req := &args.Request{CLI: "alpha"}
+		d, err := r.Route(context.Background(), Eligible(cat, req), req, captured("fix it"))
+		require.NoError(t, err)
+		assert.Empty(t, d.Model)
+	})
+	t.Run("a choice outside the options keeps nothing", func(t *testing.T) {
+		assert.Empty(t, askedModel(Eligible(cat, &args.Request{}), []Stage{{Level: LevelModel, Choice: "no-such", Answer: &jev.Answer{}}}))
+	})
+}

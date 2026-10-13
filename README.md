@@ -139,7 +139,7 @@ agrouter reads stdin for routing and replays the same bytes to the child, so the
 
 On Windows with npm's `claude.cmd`/`codex.cmd` shims, pass a multi-line prompt on stdin: cmd.exe cannot carry a line break inside an argument, so a multi-line `-p`, positional or `--prompt-file` prompt fails to start (exit `127`). This includes any prompt combined from two sources, since they are joined with a blank line. Decision mode and native executables are unaffected.
 
-Before starting the child, exec mode logs one line to stderr: `agrouter: selection: ` followed by a JSON object with `cli`, `model`, `effort`, any completed `project_complexity` score and the same `confidence` object as decision mode, so tools such as Ralphex show the selection for each step. The prefix keeps the line from passing for one of the child's stream-json events when a caller merges stderr into stdout (Ralphex drops JSON lines that aren't events and prints other lines); strip it to parse the JSON. Model and effort are `null` when the CLI's defaults apply, with the same `reason` and `null_reasons` as decision mode. The line stays concise with agrouter's `--verbose` and never includes the prompt or argv.
+Before starting the child, exec mode logs one line to stderr: `agrouter: selection: ` followed by a JSON object with `cli`, `model`, `effort`, any completed `project_complexity` score and the same `confidence` object as decision mode, so tools such as Ralphex show the selection for each step. The prefix keeps the line from passing for one of the child's stream-json events when a caller merges stderr into stdout (Ralphex drops JSON lines that aren't events and prints other lines); strip it to parse the JSON. Model and effort are `null` when the CLI's defaults apply, with the same `reason` and `null_reasons` as decision mode, plus exec's own `fallback`, `effective` and `readiness` fields (see [Exec fallback](#exec-fallback)). The line stays concise with agrouter's `--verbose` and never includes the prompt or argv.
 
 Decision JSON and the exec selection line include `confidence` when Jev answered:
 
@@ -171,7 +171,7 @@ Stage probabilities and pooled scores are separate from Jev's Choice confidence.
 
 The child's stdout, stderr and exit code are agrouter's. Set `AGROUTER_DEBUG=1` to see eligibility, each `--doc` chunk's complexity score, evidence and confidence with the project complexity, one line per routing stage (`stage <level>: skipped (<choice>)`, or the choice, confidence and top candidates, per chunk when pooled), Jev's probabilities and the final command on stderr (prompt text and key redacted; doc text is never printed). In exec mode it also prints one `readiness <cli>:` line per piece of availability evidence (dimension, status, reason code, window, model scope, reset, check), the defaults the checks reported, and how many options they excluded; never a probe's raw response.
 
-When Jev cannot decide (no key, timeout, API errors, at any stage) and the CLI is known (`--cli`, implied by `--model`, or the only one left), agrouter runs it with only the caller's fixed `--model`/`--effort`, so the CLI's defaults apply. With more than one CLI left, decision mode exits `2`: the one-line `agrouter:` error goes to stderr and one decision JSON object with `null` values and the reasons goes to stdout, without `argv`, `command` or stage confidence. `AGROUTER_DEBUG=1` shows the stages that completed.
+When Jev cannot decide (no key, timeout, API errors, at any stage) and the CLI is known (`--cli`, implied by `--model`, or the only one left), agrouter runs it with only the caller's fixed `--model`/`--effort` and a model Jev already chose before a later stage failed, so the CLI's defaults apply to the rest. With more than one CLI left, decision mode exits `2`: the one-line `agrouter:` error goes to stderr and one decision JSON object with `null` values and the reasons goes to stdout, without `argv`, `command` or stage confidence. `AGROUTER_DEBUG=1` shows the stages that completed.
 
 ### Failure and null reasons
 
@@ -223,6 +223,34 @@ Exec then routes only over the CLI's options that are left. It never switches to
 A blocked exec prints no selection line, nothing on stdout, and makes no Jev request. The reset is the latest reset of the exhausted windows, since a weekly window outlasts a five-hour one, and is left out when any of them is unverified. `quota_error_prefix` (default `agrouter: `) and `quota_error_message` come from config, so the line can match a caller's own limit pattern, for example a severity prefix such as `ERROR: agrouter: `. An unknown availability is never reported as a quota block. Native arguments after `--` that switch the child's context (`context_flags`) make the probes moot: only the executable is checked, and the rest is unknown (`context_changed`).
 
 The shipped checks take about 0.5s to 2s on a cold start, which is part of the routing budget (`[agrouter] timeout`, 10s by default). A probe cut off by either timeout is unknown, not a block.
+
+### Exec fallback
+
+When Jev routing fails in exec, the child runs with its own defaults for whatever Jev did not choose. agrouter makes this unmistakable: one warning line comes before the selection line, and the selection line says which values fell back and what they are.
+
+```text
+agrouter: warning: Jev routing failed at the model stage (jev_timeout); model and effort fall back to tool-a defaults, not a Jev selection: model m-2 (verified child default), effort unknown (child did not report it)
+agrouter: selection: {"cli":"tool-a","model":null,"effort":null,"reason":{...},"null_reasons":{...},"fallback":{"action":"child_defaults","fields":["model","effort"],"message":"Model and effort fall back to the child's defaults, not a Jev selection"},"effective":{"model":{"value":"m-2","source":"verified_child_default"},"effort":{"value":null,"source":"child_default_unknown","reason":{"code":"default_not_reported"}}}}
+```
+
+Note: the first line is readable without parsing JSON; the second carries the same facts for tools.
+
+| Field | Meaning |
+|---|---|
+| `fallback` | only after a routing failure: `action` (`child_defaults`), the fallen-back `fields`, and a fixed `message` |
+| `effective` | when a model or effort is left to the child: each value's `value` and `source`, with a `reason` when the default is unknown |
+| `readiness` | when readiness excluded options or warned: `excluded` (option count by reason) and `unknown` (the warning's reason) |
+
+| `effective.*.source` | Meaning |
+|---|---|
+| `router` | agrouter chose it: Jev, or the one option left |
+| `caller` | `--model` or `--effort` fixed it |
+| `verified_child_default` | the child's own default, as its prompt-free probe reported it for this working directory and settings |
+| `child_default_unknown` | the child's default is not known: `default_not_reported`, or `context_changed` when native `context_flags` switch the child's context |
+
+Values Jev chose before the failure (the model when only the effort stage failed) and values the caller fixed keep their source and are never listed as fallbacks. Top-level `model`/`effort` stay `null` whenever agrouter passes no selection flag, even when `effective` shows a verified default. A catalog default or a model list's recommendation is never reported as verified. An intentional omission (a model without effort levels, the effort of a passed-through `--model`) is no fallback and prints no warning.
+
+A delegated model is checked against model-scoped quota blocks. When the verified default is blocked, exec prints the quota line and exits `127` without starting the child, as a preflight block does. When the default is unknown and some model has its own block, the model is unverified (`delegated_model_unverified`): a warning under `unknown = allow`, exit `2` under `unknown = block`.
 
 ## Configuration
 

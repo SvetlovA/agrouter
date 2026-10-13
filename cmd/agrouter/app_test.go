@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -107,6 +108,9 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 		} `json:"questions"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			return // a chunk request the client abandoned mid-upload once another chunk failed
+		}
 		f.t.Errorf("fake jev: decode request: %v", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -369,6 +373,17 @@ func selectionLog(t *testing.T, stderr string) map[string]any {
 	line, ok := strings.CutPrefix(stderr, selectionPrefix)
 	require.True(t, ok, stderr)
 	return decision(t, line)
+}
+
+// fallbackLog splits exec's stderr after a routing failure into its two lines: the one fallback
+// warning, then the decoded selection line.
+func fallbackLog(t *testing.T, stderr string) (string, map[string]any) {
+	t.Helper()
+	warning, rest, ok := strings.Cut(stderr, "\n")
+	require.True(t, ok, stderr)
+	require.True(t, strings.HasPrefix(warning, "agrouter: warning: Jev routing failed"), stderr)
+	require.Equal(t, 1, strings.Count(rest, "\n"), stderr)
+	return warning, selectionLog(t, rest)
 }
 
 func strs(v ...string) []any {
