@@ -18,7 +18,8 @@ type Drop struct {
 
 // Eligibility is what the filters leave for Jev to choose from.
 type Eligibility struct {
-	Options []catalog.Option // never empty, in catalog order
+	// Options are in catalog order. Eligible never empties them; Exclude can.
+	Options []catalog.Option
 	// Pinned is true when a valid --cli or the exec CLI fixed the CLI.
 	Pinned bool
 	// ModelPassthrough: the caller's --model was not among the remaining options, so every option
@@ -117,6 +118,17 @@ func (e *Eligibility) filterEffort(effort string) {
 		}
 	}
 	e.Options, e.EffortPassthrough = opts, true
+}
+
+// Exclude removes the options with the given ids, such as those the exec CLI cannot run now. It
+// never adds or broadens an option, and may leave none: Route then returns ErrNoEligible.
+func (e *Eligibility) Exclude(ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	kept := slices.DeleteFunc(slices.Clone(e.Options), func(o catalog.Option) bool { return slices.Contains(ids, o.ID) })
+	e.drop(kept, "unavailable")
+	e.Options = kept
 }
 
 // drop records the CLIs of the current options that kept no longer has.

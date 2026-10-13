@@ -24,6 +24,10 @@ type JevClient interface {
 // nothing to run: exit 2.
 var ErrCannotDecide = errors.New("jev cannot decide")
 
+// ErrNoEligible means no option is left to route over, for example after Eligibility.Exclude removed
+// every one. Route returns it without asking Jev.
+var ErrNoEligible = errors.New("no eligible options")
+
 // Router chooses among the eligible options with Jev.
 type Router struct {
 	cfg    *config.Config
@@ -75,8 +79,12 @@ func (d Decision) Choice() args.Choice {
 // project complexity. When Jev cannot decide, in either stage, the CLI is used with only the
 // caller's fixed --model and --effort if it is known (one CLI left); otherwise Route returns an
 // error matching ErrCannotDecide beside a Decision holding only the stages and complexity completed.
+// With no option left it returns ErrNoEligible without asking Jev.
 func (r *Router) Route(ctx context.Context, el *Eligibility, req *args.Request, captured *prompt.Result) (Decision, error) {
-	if len(el.Options) == 1 {
+	switch len(el.Options) {
+	case 0:
+		return Decision{}, ErrNoEligible
+	case 1:
 		d := r.chosen(el, el.Options[0])
 		d.Stages = skippedStages(el, el.Options[0])
 		return d, nil
@@ -118,6 +126,9 @@ func (r *Router) chosen(el *Eligibility, o catalog.Option) Decision {
 // eligible) it runs with only what the caller fixed; with more, there is nothing to run.
 func (r *Router) cannotDecide(el *Eligibility, req *args.Request, cause error) (Decision, error) {
 	clis := el.CLIs()
+	if len(clis) == 0 {
+		return Decision{}, fmt.Errorf("%w: %w", ErrNoEligible, cause)
+	}
 	if len(clis) > 1 {
 		return Decision{}, fmt.Errorf("%w between %s: %w; pass --cli to run one without Jev",
 			ErrCannotDecide, strings.Join(clis, ", "), cause)

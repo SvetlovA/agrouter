@@ -386,10 +386,11 @@ Exec processing flow: parse → load config → validate operand/flags/conflicts
 - Create: `pkg/readiness/evaluate.go`, `pkg/readiness/evaluate_test.go`.
 - Modify: `pkg/router/eligibility.go`, `pkg/router/eligibility_test.go`, `pkg/router/router.go`, `pkg/router/router_test.go`.
 
-- [ ] Implement evaluation: per-option status, scope matching, delegated-model handling, latest-reset recovery, unknown policy.
-- [ ] Add `Eligibility.Exclude(ids)`; guard `Route` and `cannotDecide` against empty eligibility with a typed error.
-- [ ] Write tests: five-hour/weekly/both exhaustion, weekly survives five-hour reset, scoped alternatives within one CLI, fixed and out-of-catalog constraints, unknown allow/block, stale or malformed evidence, all candidates unavailable, empty-eligibility guard.
-- [ ] Run `make test`.
+- [x] Implement evaluation: per-option status, scope matching, delegated-model handling, latest-reset recovery, unknown policy.
+- [x] Add `Eligibility.Exclude(ids)`; guard `Route` and `cannotDecide` against empty eligibility with a typed error.
+- [x] Write tests: five-hour/weekly/both exhaustion, weekly survives five-hour reset, scoped alternatives within one CLI, fixed and out-of-catalog constraints, unknown allow/block, stale or malformed evidence, all candidates unavailable, empty-eligibility guard.
+- [x] Run `make test`.
+- ➕ Notes: `readiness.Evaluate(report, options, models, unknown, now)` imports `pkg/catalog` for the option type (dependency line for Task 11: `config`, `catalog`, `runner` <- `readiness`). Precedence per option: missing executable, failed auth, unsupported model, quota block, then unknowns; unknown executable/auth/capability never stop the child. Quota: an account-wide `not_applicable` needs no windows; otherwise both windows must be verified available (else unknown `window_not_reported`). A block whose verified reset is already past is unknown `quota_reset_passed`; a block's reset is the latest of its windows and is omitted when any is unverified. Model-scoped labels match the model name, section or an alias, ignoring case. `Evaluation.Model(name)` serves Task 9: an empty name (delegated) is unknown `delegated_model_unverified` under any model-scoped quota block, and is never matched against unsupported-model lists. When everything is excluded, `Blocked` is a known unavailable verdict when any exists (preferring the quota block with the earliest verified recovery), else the refused unknown. `Eligibility.Exclude` records a CLI it empties as a drop with reason `unavailable`; `Route` returns `router.ErrNoEligible` for empty eligibility without asking Jev, and `cannotDecide` wraps it with the cause.
 
 ### Task 8: Exec preflight before any Jev request
 

@@ -355,3 +355,37 @@ func overAnchor() *prompt.Result {
 	}
 	return c
 }
+
+func TestRouteNoEligible(t *testing.T) {
+	cfg, cat := requestFixture(t)
+	client := &mocks.JevClientMock{} // Ask panics if called
+	r := newRouter(t, cfg, cat, client)
+	req := &args.Request{CLI: "alpha"}
+	el := Eligible(cat, req)
+	el.Exclude(ids(el.Options))
+
+	d, err := r.Route(context.Background(), el, req, &prompt.Result{Prompt: "x", Docs: []string{"doc"}})
+	require.ErrorIs(t, err, ErrNoEligible)
+	require.NotErrorIs(t, err, ErrCannotDecide)
+	assert.Equal(t, Decision{}, d)
+	assert.Empty(t, client.AskCalls(), "no complexity or selection question")
+
+	cause := errors.New("cause")
+	d, err = r.cannotDecide(el, req, cause)
+	require.ErrorIs(t, err, ErrNoEligible)
+	require.ErrorIs(t, err, cause)
+	assert.Equal(t, Decision{}, d)
+}
+
+func TestRouteAfterExcludeSkipsJevForOneOption(t *testing.T) {
+	cfg, cat := requestFixture(t)
+	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
+	req := &args.Request{CLI: "alpha"}
+	el := Eligible(cat, req)
+	el.Exclude([]string{"strong@low", "strong@high"})
+
+	d, err := r.Route(context.Background(), el, req, captured("x"))
+	require.NoError(t, err)
+	assert.Equal(t, "fast", d.OptionID)
+	assert.True(t, d.Pinned)
+}

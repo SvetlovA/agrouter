@@ -204,3 +204,48 @@ func TestEligibleNeverEmpty(t *testing.T) {
 		}
 	}
 }
+
+func TestEligibilityExclude(t *testing.T) {
+	_, cat := requestFixture(t)
+	cases := []struct {
+		name    string
+		req     *args.Request
+		exclude []string
+		want    []string
+		dropped []Drop
+	}{
+		{name: "nothing to exclude", exclude: nil,
+			want: []string{"strong@low", "strong@high", "fast", "worker@low", "worker@high"}},
+		{name: "one model of a cli", exclude: []string{"strong@low", "strong@high"},
+			want: []string{"fast", "worker@low", "worker@high"}},
+		{name: "every option of a cli is a drop", exclude: []string{"worker@low", "worker@high"},
+			want: []string{"strong@low", "strong@high", "fast"}, dropped: []Drop{{CLI: "beta", Reason: "unavailable"}}},
+		{name: "unknown ids are ignored", exclude: []string{"missing"},
+			want: []string{"strong@low", "strong@high", "fast", "worker@low", "worker@high"}},
+		{name: "a fixed cli is never broadened", req: &args.Request{CLI: "alpha"}, exclude: []string{"strong@low", "strong@high"},
+			want: []string{"fast"}, dropped: []Drop{{CLI: "beta", Reason: "--cli alpha"}}},
+		{name: "a passed-through model", req: &args.Request{CLI: "beta", Model: "other-model"}, exclude: []string{"beta"},
+			want: []string{}, dropped: []Drop{{CLI: "alpha", Reason: "--cli beta"}, {CLI: "beta", Reason: "unavailable"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := tc.req
+			if req == nil {
+				req = &args.Request{}
+			}
+			e := Eligible(cat, req)
+			e.Exclude(tc.exclude)
+			assert.Equal(t, tc.want, append([]string{}, ids(e.Options)...))
+			assert.Equal(t, tc.dropped, e.Dropped)
+		})
+	}
+}
+
+func TestEligibilityExcludeKeepsOriginal(t *testing.T) {
+	_, cat := requestFixture(t)
+	e := Eligible(cat, &args.Request{})
+	before := e.Options
+	e.Exclude([]string{"fast"})
+	assert.Len(t, before, 5, "the slice handed out earlier is not rewritten")
+	assert.Len(t, e.Options, 4)
+}
