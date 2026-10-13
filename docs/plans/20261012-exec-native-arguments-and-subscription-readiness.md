@@ -39,8 +39,10 @@ Every user-visible change, applied (with README and `CLAUDE.md` updates) in the 
 
 | Change | Task |
 | --- | --- |
-| `exec <cli>` positional operand required; `--cli`/`AGROUTER_CLI` cannot supply it; conflicting explicit `--cli` is exit 2 | 1 |
-| Child-option flags (`--permission-mode`, `--dangerously-*`, `--output-format`, `--sandbox`, `-c`, compatibility `--print`) removed; native options go after `--` | 1 |
+| `exec <cli>` positional operand required; `--cli` cannot supply it; conflicting explicit `--cli` is exit 2 | 1 |
+| `AGROUTER_CLI` removed (user decision, 2026-10-13); if set, one `agrouter: warning:` line says it is ignored and points to `exec <cli>`/`--cli` | 1 |
+| Child-option flags (`--permission-mode`, `--dangerously-*`, `--output-format`, `--sandbox`, `-c`) removed; native options go after `--` | 1 |
+| `--print TEXT` becomes a long alias of `-p TEXT`/`--prompt TEXT` (user decision, 2026-10-13), replacing the boolean compatibility `--print`; `--print "text"` keeps working, a bare `--print` with no value before `--` is a usage error | 1 |
 | Decision mode rejects `--` (even with an empty tail) with exit 2 | 1 |
 | Exec selection line always concise, regardless of agrouter `--verbose`; no automatic child `--verbose` | 1 |
 | `[cli.*.args]` removed with a migration error; `[cli.*]` gains fixed invocation descriptor keys; CLI names may not contain `.` | 2 |
@@ -56,7 +58,7 @@ Every user-visible change, applied (with README and `CLAUDE.md` updates) in the 
 
 ## Context
 
-- `cmd/agrouter/flags.go:76` splits at the first `--`; exec takes its CLI from `--cli` or `AGROUTER_CLI` and passes raw arguments through only when `Pinned`. `flags.go:155-188` translates child flags into `args.Arg` entries and `-c` keys through `config.ConfigKeyPrefix`.
+- `cmd/agrouter/flags.go:76` splits at the first `--`; exec takes its CLI from `--cli` or the `AGROUTER_CLI` environment variable (used today to pin a Ralphex phase) and passes raw arguments through only when `Pinned`. `flags.go:155-188` translates child flags into `args.Arg` entries and `-c` keys through `config.ConfigKeyPrefix`.
 - `pkg/args/request.go`, `build.go`, and `redact.go` own requests, mapped argv construction, and redaction. Embedded `prompt = ["--", "{prompt}"]` puts the prompt after `--` in argv.
 - `pkg/config/load.go:147,183-197` treats every `cli.*` section not ending in `.args` as a CLI and decodes `.args` with its parent. Any new `[cli.<name>.<sub>]` section would load as a CLI named `<name>.<sub>`.
 - `pkg/router/eligibility.go` applies constraints and mapped-argument preferences (`prefer`). `(*Router).cannotDecide` (`router.go:116-120`) indexes `clis[0]` without a guard and would panic on empty eligibility.
@@ -108,9 +110,11 @@ Approaches considered: native control/status protocols (**chosen**: the child CL
 
 ### Invocation and native arguments
 
-- Exec consumes its positional CLI immediately after `exec`. Missing, unknown, or disabled operands return exit 2 before probing or Jev. In exec the operand wins over `AGROUTER_CLI`; an explicit `--cli` equal to the operand is accepted as redundant, a conflicting one is exit 2.
-- Decision mode keeps the existing `--cli`/environment constraint behavior, including the warning for an unusable constraint. Model/effort constraints and out-of-catalog values keep their behavior.
+- Exec consumes its positional CLI immediately after `exec`. Missing, unknown, or disabled operands return exit 2 before probing or Jev. An explicit `--cli` equal to the operand is accepted as redundant, a conflicting one is exit 2.
+- `AGROUTER_CLI` is removed: it only existed to pin a CLI for a Ralphex phase, which `exec <cli>` now does explicitly. It is no longer an environment config layer; when set, agrouter ignores it with one warning line so a stale export does not silently change meaning.
+- Decision mode keeps the existing `--cli` constraint behavior, including the warning for an unusable constraint. Model/effort constraints and out-of-catalog values keep their behavior.
 - The parser records whether a separator was supplied, independently of how many tokens follow. Decision mode rejects `--` with exit 2.
+- **Prompt sources stay before `--` or on stdin.** agrouter reads its prompt from `-p`/`--prompt`/`--print` (one flag with three spellings), the positional prompt, `--prompt-file`, or stdin, all before the separator; nothing after `--` is ever read as a prompt. Ralphex (both executors) passes the prompt **through stdin** and appends only flags (`--print` for one, the native `exec` subcommand plus `-c`/`--sandbox` for the other) to argv. agrouter captures stdin for routing and replays the same bytes to the child's stdin, so the prompt is never placed in argv and `prompt_args` is not emitted. Appended native flags after `--` are forwarded unchanged, including a `--print` that duplicates `exec_args`. A caller who puts the prompt text after `--` gets it forwarded to the child but not routed on; with no other prompt source that is the existing "no prompt" exit 2.
 - Native tokens are forwarded without rewriting, normalization, deduplication, catalog validation, or warnings, preserving empty tokens, spaces, repeated flags, and later `--` tokens.
 - `--verbose` before the separator affects only agrouter; after it, only the child. Exec always logs the concise selection.
 
@@ -286,13 +290,15 @@ Exec processing flow: parse → load config → validate operand/flags/conflicts
 ### Task 1: Positional exec CLI, separator, and verbosity boundaries
 
 **Files:**
-- Modify: `cmd/agrouter/flags.go`, `cmd/agrouter/flags_test.go`, `cmd/agrouter/app.go`, `cmd/agrouter/app_test.go`, `pkg/args/request.go`, `README.md`, `CLAUDE.md`.
+- Modify: `cmd/agrouter/flags.go`, `cmd/agrouter/flags_test.go`, `cmd/agrouter/app.go`, `cmd/agrouter/app_test.go`, `pkg/args/request.go`, `pkg/config/defaults/config` (comments only), `README.md`, `CLAUDE.md`.
 
-- [ ] Parse `exec <cli>`; validate missing/unknown/disabled operands, redundant/conflicting `--cli`, and `AGROUTER_CLI` precedence before Jev.
+- [ ] Parse `exec <cli>`; validate missing/unknown/disabled operands and redundant/conflicting `--cli` before Jev.
+- [ ] Remove `AGROUTER_CLI` from `flags.go`, `pkg/args/request.go`, the embedded config comments, and README's environment layer; warn once when it is set.
 - [ ] Track separator presence; reject `--` in decision mode; forward the native tail as-is for exec (via the existing raw passthrough path).
-- [ ] Remove child-option flags (`--permission-mode`, `--dangerously-*`, `--output-format`, `--sandbox`, `-c`, compatibility `--print`) and `-c` constraint extraction; mapping code goes dead but still compiles.
+- [ ] Make `--print TEXT` a long alias of `-p`/`--prompt` (counted as the same flag for the "second `-p`" usage error) and update its help text.
+- [ ] Remove child-option flags (`--permission-mode`, `--dangerously-*`, `--output-format`, `--sandbox`, `-c`) and `-c` constraint extraction; mapping code goes dead but still compiles.
 - [ ] Always log the concise exec selection (`selectionOutput(d, false)`).
-- [ ] Write tests: operand errors, removed flags as usage errors, separator with empty tail, exact native forwarding (empty tokens, spaces, repeated flags, later `--`), and all four agrouter/child verbosity combinations.
+- [ ] Write tests: operand errors, removed flags as usage errors, `--print TEXT` equal to `-p TEXT` in both modes, `-p a --print b` as a second-prompt error, bare `--print` before `--` as a usage error, `--print` after `--` forwarded to the child, `AGROUTER_CLI` ignored with a warning in both modes, stdin prompt replayed byte-for-byte with appended native flags after `--` (no prompt in argv), prompt text after `--` not used for routing, separator with empty tail, exact native forwarding (empty tokens, spaces, repeated flags, later `--`), and all four agrouter/child verbosity combinations.
 - [ ] Update end-to-end calls, README invocation/help sections, and `CLAUDE.md` for the new contract; run `make test`.
 
 ### Task 2: Replace mappings with invocation descriptors
