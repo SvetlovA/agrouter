@@ -26,12 +26,12 @@ Both modes include reasons in their output JSON when Jev fails or selection valu
 ## Decisions
 
 - **Unknown availability defaults to `allow`** (user decision, 2026-10-13): exec runs combinations whose availability cannot be verified and prints one concise `agrouter: warning:` line. A CLI opts into `unknown = block` under `[cli.<name>.availability]`; a strict block exits 2 as "availability unverified", never as quota exhaustion. Unknown is never described as ready.
-- **No persistent readiness cache in this change.** Probes are free and run fresh on every exec invocation. Ralphex retries every fifteen minutes, so a cached success (useful for about a minute) is never reused, and "zero Jev calls while blocked" already holds with a fresh probe. Recorded in [readiness-cache-across-invocations](../backlog/readiness-cache-across-invocations.md).
-- **No observation of real child output in this change.** The runner hands its own stdout/stderr files to the child; inserting pipes changes TTY detection, buffering, and `WaitDelay` truncation, and observed failures would only feed the deferred cache. Recorded in [child-failure-observation](../backlog/child-failure-observation.md).
-- **No verified child defaults.** No prompt-free evidence reliably accounts for provider, profile, settings, and invocation context, so exec reports delegated model/effort as `child_default_unknown`. Recorded in [verified-child-defaults](../backlog/verified-child-defaults.md).
+- **No readiness cache** (user decision, 2026-10-13): every exec invocation probes fresh, and whenever the CLI is available agrouter asks Jev every time. Nothing about availability is stored between invocations. This answers the readiness backlog's cache investigation.
+- **No observation of real child output in this change.** The runner hands its own stdout/stderr files to the child; inserting pipes changes TTY detection, buffering, and `WaitDelay` truncation. Without a cache an observed failure has nowhere to persist, and the next invocation's fresh probe already sees a block the probe can report. Not planned; the only case it would help (the probe keeps passing or returning unknown while the child keeps failing) would need state saved between invocations.
+- **Verified child defaults are in scope** (user decision, 2026-10-13): when exec delegates model or effort to the child, agrouter reports the child's actual default as `verified_child_default` when prompt-free evidence states it for the effective context, and `child_default_unknown` otherwise. A catalog default or an advertised recommendation is never presented as verified.
 - **Three probe transports:** an SDK control-stream usage decoder, a JSON-RPC rate-limit decoder, and a `json-helper` transport whose stdout is agrouter's normalized evidence JSON. Each decoder is named after its wire protocol (for example `sdk-control-usage-v1`, `jsonrpc-ratelimits-v1`), never after a CLI. Config selects the transport and supplies command, argv, and timeout; there is no configurable field-path or unit-mapping language. Auth-only checks (`auth status`, `login status`) are not readiness and are not shipped as transports; the quota reads already surface auth failure.
 
-These three readiness backlog "investigate" items are answered by this plan's investigation plus the new backlog files; that is what lets the source backlog item close.
+The source backlogs' "investigate" items are answered here: the cache and child-failure recording by the decisions above, and child defaults by the implementation below. That is what lets the source items close.
 
 ## Contract changes
 
@@ -52,7 +52,7 @@ Every user-visible change, applied (with README and `CLAUDE.md` updates) in the 
 | Exec exit 127 broadened: missing executable, authentication failure, or exhausted subscription quota found during preflight | 8 |
 | Exec exit 2 for a strict-policy unknown availability block | 8 |
 | Exec quota block prints one configured native-compatible line, which may start with a configured severity prefix before `agrouter:` (narrow exception to the `agrouter:` prefix rule) | 8 |
-| Exec JSON gains `fallback` and `effective` | 9 |
+| Exec JSON gains `fallback` and `effective` (including `verified_child_default`); a fallback whose verified delegated default is quota-blocked exits 127 without starting the child | 9 |
 
 ## Context
 
@@ -101,7 +101,8 @@ Approaches considered: native control/status protocols (**chosen**: the child CL
 - Mark completed items with `[x]` immediately when done.
 - Add newly discovered tasks with ➕ prefix; document blockers with ⚠️ prefix.
 - Update this plan when implementation deviates from scope.
-- 2026-10-13: revised after plan review (task reorder, config section dispatch, cache/observation/verified-default deferral, transport reduction, unknown policy decided).
+- 2026-10-13: revised after plan review (task reorder, config section dispatch, cache/observation deferral, transport reduction, unknown policy decided).
+- 2026-10-13: cache and child-output observation dropped entirely (no backlog items); verified child defaults restored to scope.
 
 ## Solution overview
 
@@ -193,7 +194,9 @@ Illustrative decision JSON after a model-stage timeout with a fixed synthetic CL
 ### Exec fallback metadata
 
 - Exec-only `fallback` when `Undecided` is set: the allowed action (run the fixed CLI with caller-fixed values, delegate the rest), alongside the shared `reason`.
-- Exec-only `effective` for model and effort: `value`, `source` (`router`, `caller`, `child_default_unknown`), optional reason. Top-level nulls stay null when agrouter emitted no selection flag.
+- Exec-only `effective` for model and effort: `value`, `source` (`router`, `caller`, `verified_child_default`, `child_default_unknown`), optional reason. Top-level nulls stay null when agrouter emitted no selection flag, even when `effective` shows a verified default.
+- **Default evidence:** the same preflight probe connection reads the child's effective default model/effort when its protocol reports the value the child would use in this working directory with its settings, profile, and provider. Decoders and `json-helper` report `defaults` evidence; anything weaker (catalog default, a model list's recommended/default flag without effective-config backing) is unknown. A configured `context_flags` spelling in the native tail makes defaults unknown, as for quota. Decision mode never reads defaults.
+- **Defaults and blocks:** a verified default model is checked against model-scoped quota blocks. If the delegated default is known blocked, the fallback is blocked: no child starts, the quota line is printed, and exec exits 127 (the same as a preflight block). An unknown delegated model stays unknown under the unknown policy.
 - A compact readiness summary (excluded combination count by reason, unknown warning code) when exclusions affected the selection.
 - The selection line stays one prefixed line with `cli`, `model`, `effort`, completed project complexity, stage confidence summaries, and the new fields; no options, stage records, probabilities, chunks, prompt, docs, argv, or command.
 
@@ -225,7 +228,8 @@ Normalized helper output (`json-helper`, schema `agrouter.readiness/v1`):
     {"window": "five_hour", "status": "available"},
     {"window": "weekly", "status": "unavailable", "reason": "quota_exhausted", "models": [], "reset_at": "2026-10-13T15:00:00Z"}
   ],
-  "capability": {"unsupported_models": []}
+  "capability": {"unsupported_models": []},
+  "defaults": {"model": "m-2", "effort": null}
 }
 ```
 
@@ -325,6 +329,7 @@ Exec processing flow: parse → load config → validate operand/flags/conflicts
 - [ ] Implement initialization, the usage control request, correlation, and unrelated-message handling; never emit a user event.
 - [ ] Normalize five-hour, weekly, model-scoped, and extra-usage evidence; map non-subscription auth to `not_applicable`; enforce `min_version` plus shape validation.
 - [ ] Configure the embedded Claude check (real working directory, hooks/MCP/persistence suppressed, no `--bare`) and its quota error prefix/message.
+- [ ] ⚠️ Investigate whether the control protocol's initialization or a read-only control request reports the effective default model/effort for the session; if it does, normalize it as `defaults` evidence, otherwise report defaults unknown and record the finding here.
 - [ ] Write tests with synthetic fixtures: quota available, weekly exhausted with five-hour available, both exhausted with different resets, missing/null windows, unsupported version, unknown shape, throttling, API-key context; assert every message the fake receives contains no prompt, user event, or inference action.
 - [ ] ⚠️ Measure cold-start latency of the real probe once (prompt-free) and record it here; run `make test`.
 
@@ -337,7 +342,8 @@ Exec processing flow: parse → load config → validate operand/flags/conflicts
 - [ ] Implement initialization, read requests, correlation, notifications, pagination, and bounded shutdown; reject thread/turn and other mutating methods.
 - [ ] Normalize multiple buckets, server-provided durations, resets, and explicit usage-permission/limit-reached/spend-control denials.
 - [ ] Configure the embedded Codex check and its quota error prefix/message.
-- [ ] Write tests: both windows, scoped buckets, denial despite low percentages, missing/null permission, credits as unknown, API-key/custom provider, hidden/paginated models, RPC errors; assert no thread/turn or mutating actions.
+- [ ] ⚠️ Investigate the app-server read that returns the effective configuration (model and reasoning effort as resolved for this working directory and profile); normalize it as `defaults` evidence and never treat the model list's default flag alone as verified. Record the finding here.
+- [ ] Write tests: both windows, scoped buckets, denial despite low percentages, missing/null permission, credits as unknown, API-key/custom provider, hidden/paginated models, RPC errors, effective-config defaults present/absent, model-list default without effective config staying unknown; assert no thread/turn or mutating actions.
 - [ ] ⚠️ Measure cold-start latency once and record it; run `make test`.
 
 ### Task 7: Evaluate evidence against eligible combinations
@@ -366,11 +372,12 @@ Exec processing flow: parse → load config → validate operand/flags/conflicts
 ### Task 9: Exec fallback and effective metadata
 
 **Files:**
-- Modify: `cmd/agrouter/app.go`, `cmd/agrouter/confidence.go`, `cmd/agrouter/app_test.go`, `cmd/agrouter/confidence_test.go`, `README.md`.
+- Modify: `cmd/agrouter/app.go`, `cmd/agrouter/confidence.go`, `cmd/agrouter/readiness.go`, `cmd/agrouter/app_test.go`, `cmd/agrouter/confidence_test.go`, `README.md`.
 
-- [ ] Add `fallback` when `Undecided` is set and `effective` model/effort with `router`/`caller`/`child_default_unknown` sources.
+- [ ] Add `fallback` when `Undecided` is set and `effective` model/effort with `router`/`caller`/`verified_child_default`/`child_default_unknown` sources, using preflight `defaults` evidence.
+- [ ] Check a verified delegated default model against model-scoped blocks; block the fallback (quota line, exit 127, no child) when it is known blocked.
 - [ ] Add the compact readiness summary to the selection line when exclusions or unknown warnings applied.
-- [ ] Write tests: success, failure at each stage, caller-fixed values, delegated values, readiness-filtered fallback, chunked routing, no fallback for intentional omissions, line stays single and concise.
+- [ ] Write tests: success, failure at each stage, caller-fixed values, verified and unknown delegated defaults, defaults unknown with a context flag, blocked verified default, readiness-filtered fallback, chunked routing, no fallback for intentional omissions, line stays single and concise.
 - [ ] Update README exec output section; run `make test`.
 
 ### Task 10: Verify acceptance criteria
@@ -388,13 +395,13 @@ Exec processing flow: parse → load config → validate operand/flags/conflicts
 
 **Files:**
 - Modify: `README.md`, `AGENTS.md`, `CLAUDE.md`, embedded config comments.
-- Delete: the three source files in `docs/backlog/`.
+- Delete: `docs/backlog/raw-cli-arguments-after-separator.md`, `docs/backlog/exec-cli-readiness-before-jev.md`, `docs/backlog/exec-fallback-target-and-reason.md`.
 - Move: this plan into `docs/plans/completed/`.
 
 - [ ] Document the migration (removed flags, sections, and fields), native conflicts, per-CLI availability and unknown policy, a configuration-only third CLI with `json-helper`, probe/version limitations, a stdin-based control-probe example, and the Ralphex usage examples from Post-completion labeled as user-owned.
 - [ ] Update `CLAUDE.md` layout and dependency line for `pkg/readiness`, and fix the stale golangci-lint version (v2.13.0 → v2.14.0).
 - [ ] Verify help/examples against parser tests.
-- [ ] Remove each source backlog item in the commit landing its implementation; keep the three deferred backlog items. Move the plan only after acceptance passes. Do not commit or push without user authorization.
+- [ ] `git rm` the three source backlog items in the commit that lands this task, after Task 10's acceptance checks pass (their requirements span Tasks 1-9, so no earlier commit completes any of them). Move the plan to `docs/plans/completed/` in the same commit. Do not commit or push without user authorization.
 
 ## Post-completion
 
