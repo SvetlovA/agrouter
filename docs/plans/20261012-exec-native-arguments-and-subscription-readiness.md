@@ -321,11 +321,11 @@ Exec processing flow: parse → load config → validate operand/flags/conflicts
 - Modify: `pkg/jev/client.go`, `pkg/jev/*_test.go`, `pkg/router/router.go`, `pkg/router/stage.go`, `pkg/router/router_test.go`, `pkg/router/stage_test.go`.
 - Modify: `cmd/agrouter/app.go`, `cmd/agrouter/confidence.go`, `cmd/agrouter/app_test.go`, `cmd/agrouter/confidence_test.go`, `README.md`, `CLAUDE.md`.
 
-- [ ] Add typed sentinel errors for Jev answer validation; carry failing stage and cause through router errors with `%w`, including the cannot-decide error.
-- [ ] Add `reason` and `null_reasons` to decision and exec JSON (concise and verbose); make `cli` nullable.
-- [ ] Emit decision JSON with nulls and reasons on multi-CLI failure, keeping exit 2 and the stderr error line.
-- [ ] Write tests in both modes and verbosity levels: success (fields omitted), missing key, timeout, cancellation, unauthorized, API/transport error, null/missing/empty answers, each failing stage, chunked routing, caller-fixed values preserved, `delegated` and `no_applicable_effort` omissions, and no secrets/prompt/doc text in messages.
-- [ ] Update the README output and exit-code sections and `CLAUDE.md` stdout rule; run `make test`.
+- [x] Add typed sentinel errors for Jev answer validation; carry failing stage and cause through router errors with `%w`, including the cannot-decide error.
+- [x] Add `reason` and `null_reasons` to decision and exec JSON (concise and verbose); make `cli` nullable.
+- [x] Emit decision JSON with nulls and reasons on multi-CLI failure, keeping exit 2 and the stderr error line.
+- [x] Write tests in both modes and verbosity levels: success (fields omitted), missing key, timeout, cancellation, unauthorized, API/transport error, null/missing/empty answers, each failing stage, chunked routing, caller-fixed values preserved, `delegated` and `no_applicable_effort` omissions, and no secrets/prompt/doc text in messages.
+- [x] Update the README output and exit-code sections and `CLAUDE.md` stdout rule; run `make test`.
 
 ### Task 4: Readiness model, availability config, and generic probe execution
 

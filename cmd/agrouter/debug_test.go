@@ -132,7 +132,8 @@ func TestDebug_StagesBeforeAFailureWithTwoCLIs(t *testing.T) {
 	r := e.run([]string{"--verbose", "fix it"}, nil)
 
 	assert.Equal(t, exitUsage, r.code)
-	assert.Empty(t, r.stdout)
+	assert.Equal(t, map[string]any{"code": "jev_api_error", "stage": "model",
+		"message": "Jev model selection failed: Jev returned an error status"}, decision(t, r.stdout)["reason"])
 	assert.Equal(t, []string{"cli"}, e.jev.asked(), "the cli stage was answered")
 	lines := debugLines(r.stderr)
 	require.Len(t, lines, 4, r.stderr)

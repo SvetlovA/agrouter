@@ -242,25 +242,25 @@ func TestComplexityFailures(t *testing.T) {
 		ask      func(c prompt.DocChunk, whole bool) (map[string]jev.Answer, error)
 		want     error
 	}{
-		{name: "missing complexity answer", captured: small, want: jev.ErrMalformed,
+		{name: "missing complexity answer", captured: small, want: jev.ErrEmptyAnswer,
 			ask: func(prompt.DocChunk, bool) (map[string]jev.Answer, error) {
 				a := docAnswers(3, 1)
 				delete(a, questionComplexity)
 				return a, nil
 			}},
-		{name: "missing evidence answer", captured: big, want: jev.ErrMalformed,
+		{name: "missing evidence answer", captured: big, want: jev.ErrEmptyAnswer,
 			ask: func(prompt.DocChunk, bool) (map[string]jev.Answer, error) {
 				a := docAnswers(3, 1)
 				delete(a, questionEvidence)
 				return a, nil
 			}},
-		{name: "probability missing for a level", captured: small, want: jev.ErrMalformed,
+		{name: "probability missing for a level", captured: small, want: jev.ErrInvalidAnswer,
 			ask: func(prompt.DocChunk, bool) (map[string]jev.Answer, error) {
 				a := docAnswers(3, 1)
 				delete(a[questionComplexity].Probabilities, "9")
 				return a, nil
 			}},
-		{name: "probabilities all zero", captured: small, want: jev.ErrMalformed,
+		{name: "probabilities all zero", captured: small, want: jev.ErrInvalidAnswer,
 			ask: func(prompt.DocChunk, bool) (map[string]jev.Answer, error) {
 				return map[string]jev.Answer{questionComplexity: levels(nil),
 					questionEvidence: {Type: jev.TypeNoul, Noul: 1}}, nil

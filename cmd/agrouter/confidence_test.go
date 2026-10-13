@@ -95,12 +95,17 @@ func TestRecordedConfidence(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.decision.CLI = "alpha"
-			data, err := json.Marshal(selection(tc.decision, true))
-			require.NoError(t, err)
-			assert.JSONEq(t, tc.want, string(data))
-			data, err = json.Marshal(selection(tc.decision, false))
-			require.NoError(t, err)
-			assert.JSONEq(t, tc.wantSummary, string(data))
+			assert.JSONEq(t, tc.want, withoutReasons(t, selection(tc.decision, true, nil)))
+			assert.JSONEq(t, tc.wantSummary, withoutReasons(t, selection(tc.decision, false, nil)))
 		})
 	}
+}
+
+// withoutReasons is s as JSON without reason and null_reasons, which reason_test.go covers.
+func withoutReasons(t *testing.T, s selectionJSON) string {
+	t.Helper()
+	s.Reason, s.NullReasons = nil, nil
+	data, err := json.Marshal(s)
+	require.NoError(t, err)
+	return string(data)
 }

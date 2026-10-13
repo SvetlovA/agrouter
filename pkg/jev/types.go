@@ -103,8 +103,8 @@ type Answer struct {
 
 // response is the wire form of a 200 response; pointers tell a missing number from zero.
 type response struct {
-	Model   string                `json:"model"`
-	Answers map[string]wireAnswer `json:"answers"`
+	Model   string                 `json:"model"`
+	Answers map[string]*wireAnswer `json:"answers"` // nil: a null answer
 }
 
 type wireAnswer struct {

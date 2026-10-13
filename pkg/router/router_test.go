@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	goflag "flag"
 	"fmt"
 	"os"
@@ -248,6 +249,9 @@ func TestRouteCannotDecide(t *testing.T) {
 				d, err := r.Route(context.Background(), el, tc.req, captured("fix it"))
 				require.NoError(t, err)
 				require.ErrorIs(t, d.Undecided, cause.err)
+				se, ok := errors.AsType[*StageError](d.Undecided)
+				require.True(t, ok, "the failing stage is carried")
+				assert.Equal(t, routeLevels[len(d.Stages)].name, se.Stage, "the stage after the skipped ones")
 				d.Undecided = nil
 				for _, st := range d.Stages {
 					assert.True(t, st.Skipped, "only the stages fixed before the failing one: %s", st.Level)
@@ -264,6 +268,9 @@ func TestRouteCannotDecide(t *testing.T) {
 			_, err := r.Route(context.Background(), Eligible(cat, req), req, captured("fix it"))
 			require.ErrorIs(t, err, ErrCannotDecide)
 			require.ErrorIs(t, err, cause.err)
+			se, ok := errors.AsType[*StageError](err)
+			require.True(t, ok, "the failing stage is carried through the cannot-decide error")
+			assert.Equal(t, LevelCLI, se.Stage)
 			assert.Contains(t, err.Error(), "claude, codex")
 		})
 	}
@@ -288,6 +295,8 @@ func TestRouteCannotDecideWithoutRequest(t *testing.T) {
 			d, err := r.Route(context.Background(), Eligible(cat, req), req, tc.captured)
 			require.NoError(t, err)
 			require.ErrorIs(t, d.Undecided, tc.want)
+			_, staged := errors.AsType[*StageError](d.Undecided)
+			assert.False(t, staged, "no stage was asked")
 			assert.Equal(t, "codex", d.CLI)
 			assert.Empty(t, d.Model)
 			assert.Empty(t, client.AskCalls())
@@ -300,13 +309,14 @@ func TestRouteMalformedAnswers(t *testing.T) {
 	tests := []struct {
 		name    string
 		answers map[string]jev.Answer
+		want    error
 	}{
-		{name: "missing stage answer", answers: map[string]jev.Answer{}},
+		{name: "missing stage answer", answers: map[string]jev.Answer{}, want: jev.ErrEmptyAnswer},
 		{name: "choice outside the criteria", answers: map[string]jev.Answer{LevelModel: {Choice: "gpt-6.1-sol",
 			Probabilities: map[string]float64{"claude-opus-5-5": 0.5, "claude-sonnet-5-5": 0.5, "claude-haiku-5-5": 0,
-				"claude-fable-5-1": 0}}}},
+				"claude-fable-5-1": 0}}}, want: jev.ErrInvalidAnswer},
 		{name: "missing probability", answers: map[string]jev.Answer{LevelModel: {Choice: "claude-opus-5-5",
-			Probabilities: map[string]float64{"claude-opus-5-5": 1}}}},
+			Probabilities: map[string]float64{"claude-opus-5-5": 1}}}, want: jev.ErrInvalidAnswer},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -318,6 +328,10 @@ func TestRouteMalformedAnswers(t *testing.T) {
 			d, err := r.Route(context.Background(), Eligible(cat, req), req, captured("x"))
 			require.NoError(t, err)
 			require.ErrorIs(t, d.Undecided, jev.ErrMalformed)
+			require.ErrorIs(t, d.Undecided, tc.want)
+			se, ok := errors.AsType[*StageError](d.Undecided)
+			require.True(t, ok)
+			assert.Equal(t, LevelModel, se.Stage)
 			assert.Equal(t, Decision{CLI: "claude", Pinned: true, Undecided: d.Undecided,
 				Stages: []Stage{{Level: LevelCLI, Choice: "claude", Skipped: true}}}, d)
 		})

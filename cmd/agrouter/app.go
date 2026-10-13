@@ -61,14 +61,17 @@ func stdinReader(r io.Reader) io.Reader {
 	return r
 }
 
-// selectionJSON records the selection, project complexity and available Jev confidence.
+// selectionJSON records the selection, why routing failed or a value is null, project complexity
+// and available Jev confidence.
 type selectionJSON struct {
-	CLI               string          `json:"cli"`
-	Model             *string         `json:"model"`
-	Effort            *string         `json:"effort"`
-	ProjectComplexity string          `json:"project_complexity,omitempty"`
-	Confidence        *confidenceJSON `json:"confidence,omitempty"`
-	Options           []optionJSON    `json:"options,omitempty"`
+	CLI               *string          `json:"cli"`
+	Model             *string          `json:"model"`
+	Effort            *string          `json:"effort"`
+	Reason            *reasonJSON      `json:"reason,omitempty"`
+	NullReasons       *nullReasonsJSON `json:"null_reasons,omitempty"`
+	ProjectComplexity string           `json:"project_complexity,omitempty"`
+	Confidence        *confidenceJSON  `json:"confidence,omitempty"`
+	Options           []optionJSON     `json:"options,omitempty"`
 }
 
 // optionJSON is one eligible option, in catalog order.
@@ -126,9 +129,15 @@ func (a *app) run(argv []string) int {
 
 	d, err := a.route(cfg, cat, rt, req)
 	if err != nil {
-		// the stages completed before Jev failed, if any; stdout stays empty
+		// the stages completed before Jev failed, if any
 		a.debug.decision(d.Decision)
 		a.debug.failed(err)
+		if req.Mode == args.ModeDecision && errors.Is(err, router.ErrCannotDecide) {
+			// stdout still gets the decision, all null with the reasons, beside the error line
+			if code := a.writeDecision(selectionOutput(d, cmd.verbose, err), cmd.verbose); code != exitOK {
+				return code
+			}
+		}
 		return a.fail(err)
 	}
 	a.debug.decision(d.Decision)
@@ -141,7 +150,7 @@ func (a *app) run(argv []string) int {
 		return a.printDecision(d, res, cmd.verbose)
 	}
 	// --verbose is agrouter's decision detail; the exec selection line stays concise
-	a.logSelection(selectionOutput(d, false))
+	a.logSelection(selectionOutput(d, false, nil))
 	return a.exec(res, d.captured)
 }
 
@@ -268,7 +277,7 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 
 // printDecision writes concise or indented verbose JSON to stdout.
 func (a *app) printDecision(d routed, res args.Result, verbose bool) int {
-	summary := selectionOutput(d, verbose)
+	summary := selectionOutput(d, verbose, nil)
 	var out any = summary
 	if verbose {
 		details := decisionJSON{selectionJSON: summary, Argv: res.Argv}
@@ -276,6 +285,11 @@ func (a *app) printDecision(d routed, res args.Result, verbose bool) int {
 		details.StdinRequired = d.captured.Stdin != nil && (len(d.captured.Stdin.Buffered) > 0 || d.captured.Stdin.Rest != nil)
 		out = details
 	}
+	return a.writeDecision(out, verbose)
+}
+
+// writeDecision encodes out to stdout, indented when verbose.
+func (a *app) writeDecision(out any, verbose bool) int {
 	enc := json.NewEncoder(a.stdout)
 	enc.SetEscapeHTML(false)
 	if verbose {
@@ -287,17 +301,22 @@ func (a *app) printDecision(d routed, res args.Result, verbose bool) int {
 	return exitOK
 }
 
-func selectionOutput(d routed, verbose bool) selectionJSON {
-	out := selection(d.Decision, verbose)
+// selectionOutput is the selection of d; failure is the routing error when no CLI was chosen.
+func selectionOutput(d routed, verbose bool, failure error) selectionJSON {
+	out := selection(d.Decision, verbose, failure)
 	if verbose {
 		out.Options = d.options
 	}
 	return out
 }
 
-// selection shares the selected values between decision output and exec logging.
-func selection(d router.Decision, verbose bool) selectionJSON {
-	out := selectionJSON{CLI: d.CLI, Confidence: recordedConfidence(d, verbose)}
+// selection shares the selected values between decision output and exec logging. The reason comes
+// from failure, or from d.Undecided when the CLI was known anyway.
+func selection(d router.Decision, verbose bool, failure error) selectionJSON {
+	out := selectionJSON{Confidence: recordedConfidence(d, verbose)}
+	if d.CLI != "" {
+		out.CLI = &d.CLI
+	}
 	if d.Complexity != nil {
 		out.ProjectComplexity = formatComplexity(d.Complexity.Complexity)
 	}
@@ -307,6 +326,11 @@ func selection(d router.Decision, verbose bool) selectionJSON {
 	if d.Effort != "" {
 		out.Effort = &d.Effort
 	}
+	if failure == nil {
+		failure = d.Undecided
+	}
+	out.Reason = failureReason(failure)
+	out.NullReasons = nullReasons(out, failure != nil, d.NoEffort)
 	return out
 }
 

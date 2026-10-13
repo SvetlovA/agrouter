@@ -241,6 +241,7 @@ func TestAskSlowResponseHitsDeadline(t *testing.T) {
 	start := time.Now()
 	_, err := c.Ask(ctx, testRequest())
 	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorIs(t, err, ErrTransport, "cut off in the transport")
 	assert.Less(t, time.Since(start), 2*time.Second)
 }
 
@@ -269,7 +270,8 @@ func TestAskNetworkError(t *testing.T) {
 	c := New(testKey)
 	c.URL = "http://127.0.0.1:1/" + testKey
 	_, err := c.Ask(t.Context(), testRequest())
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrTransport)
+	require.NotErrorIs(t, err, ErrMalformed)
 	assert.NotContains(t, err.Error(), testKey)
 	assert.Contains(t, err.Error(), redacted)
 }
@@ -373,30 +375,37 @@ func TestAskMalformed(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
+		want error // ErrEmptyAnswer or ErrInvalidAnswer
 	}{
-		{"invalid JSON", `{"answers":`},
-		{"NaN literal", answer(`{"choice":"a","probabilities":{"a":1,"b@high":0},"confidence":NaN}`)},
-		{"missing route answer", `{"answers":{"other":{}}}`},
-		{"no answers", `{}`},
-		{"unknown choice", answer(`{"choice":"z","probabilities":{"a":1,"b@high":0},"confidence":1}`)},
-		{"empty choice", answer(`{"probabilities":{"a":1,"b@high":0},"confidence":1}`)},
-		{"missing confidence", answer(`{"choice":"a","probabilities":{"a":1,"b@high":0}}`)},
-		{"confidence above 1", answer(`{"choice":"a","probabilities":{"a":1,"b@high":0},"confidence":1.5}`)},
-		{"confidence below 0", answer(`{"choice":"a","probabilities":{"a":1,"b@high":0},"confidence":-0.1}`)},
-		{"confidence overflow", answer(`{"choice":"a","probabilities":{"a":1,"b@high":0},"confidence":1e999}`)},
-		{"missing probability", answer(`{"choice":"a","probabilities":{"a":1},"confidence":1}`)},
-		{"extra probability", answer(`{"choice":"a","probabilities":{"a":0.5,"b@high":0.5,"c":0},"confidence":1}`)},
-		{"wrong probability key", answer(`{"choice":"a","probabilities":{"a":0.5,"c":0.5},"confidence":1}`)},
-		{"probability above 1", answer(`{"choice":"a","probabilities":{"a":1.2,"b@high":-0.2},"confidence":1}`)},
-		{"sum too low", answer(`{"choice":"a","probabilities":{"a":0.5,"b@high":0.48},"confidence":1}`)},
-		{"sum too high", answer(`{"choice":"a","probabilities":{"a":0.6,"b@high":0.42},"confidence":1}`)},
-		{"wrong type", answer(`{"type":"noul","noul":0.5}`)},
+		{"invalid JSON", `{"answers":`, ErrInvalidAnswer},
+		{"NaN literal", answer(`{"choice":"a","probabilities":{"a":1,"b@high":0},"confidence":NaN}`), ErrInvalidAnswer},
+		{"missing route answer", `{"answers":{"other":{}}}`, ErrEmptyAnswer},
+		{"no answers", `{}`, ErrEmptyAnswer},
+		{"unknown choice", answer(`{"choice":"z","probabilities":{"a":1,"b@high":0},"confidence":1}`), ErrInvalidAnswer},
+		{"empty choice", answer(`{"probabilities":{"a":1,"b@high":0},"confidence":1}`), ErrEmptyAnswer},
+		{"missing confidence", answer(`{"choice":"a","probabilities":{"a":1,"b@high":0}}`), ErrInvalidAnswer},
+		{"confidence above 1", answer(`{"choice":"a","probabilities":{"a":1,"b@high":0},"confidence":1.5}`), ErrInvalidAnswer},
+		{"confidence below 0", answer(`{"choice":"a","probabilities":{"a":1,"b@high":0},"confidence":-0.1}`), ErrInvalidAnswer},
+		{"confidence overflow", answer(`{"choice":"a","probabilities":{"a":1,"b@high":0},"confidence":1e999}`), ErrInvalidAnswer},
+		{"missing probability", answer(`{"choice":"a","probabilities":{"a":1},"confidence":1}`), ErrInvalidAnswer},
+		{"extra probability", answer(`{"choice":"a","probabilities":{"a":0.5,"b@high":0.5,"c":0},"confidence":1}`), ErrInvalidAnswer},
+		{"wrong probability key", answer(`{"choice":"a","probabilities":{"a":0.5,"c":0.5},"confidence":1}`), ErrInvalidAnswer},
+		{"probability above 1", answer(`{"choice":"a","probabilities":{"a":1.2,"b@high":-0.2},"confidence":1}`), ErrInvalidAnswer},
+		{"sum too low", answer(`{"choice":"a","probabilities":{"a":0.5,"b@high":0.48},"confidence":1}`), ErrInvalidAnswer},
+		{"sum too high", answer(`{"choice":"a","probabilities":{"a":0.6,"b@high":0.42},"confidence":1}`), ErrInvalidAnswer},
+		{"wrong type", answer(`{"type":"noul","noul":0.5}`), ErrInvalidAnswer},
+		{"choice question without a choice", answer(`{"type":"choice","confidence":1}`), ErrEmptyAnswer},
+		{"null answer", answer(`null`), ErrEmptyAnswer},
+		{"empty answer", answer(`{}`), ErrEmptyAnswer},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := newTestClient(t, reply(http.StatusOK, tt.body))
 			_, err := c.Ask(t.Context(), testRequest())
 			require.ErrorIs(t, err, ErrMalformed)
+			require.ErrorIs(t, err, tt.want)
+			other := map[error]error{ErrEmptyAnswer: ErrInvalidAnswer, ErrInvalidAnswer: ErrEmptyAnswer}[tt.want]
+			require.NotErrorIs(t, err, other)
 		})
 	}
 }

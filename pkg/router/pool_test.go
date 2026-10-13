@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -507,14 +508,14 @@ func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 				}
 				return answer(req, st)
 			}},
-		{name: "missing relevance answer", captured: big, want: jev.ErrMalformed,
+		{name: "missing relevance answer", captured: big, want: jev.ErrEmptyAnswer,
 			ask: func(req jev.Request) (map[string]jev.Answer, error) {
 				st, _ := req.State.(prompt.ChunkState)
 				a, err := answer(req, st)
 				delete(a, questionRelevance)
 				return a, err
 			}},
-		{name: "missing route answer", captured: big, want: jev.ErrMalformed,
+		{name: "missing route answer", captured: big, want: jev.ErrEmptyAnswer,
 			ask: func(req jev.Request) (map[string]jev.Answer, error) {
 				st, _ := req.State.(prompt.ChunkState)
 				a, err := answer(req, st)
@@ -522,7 +523,7 @@ func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 				delete(a, id)
 				return a, err
 			}},
-		{name: "probability missing for an option", captured: big, want: jev.ErrMalformed,
+		{name: "probability missing for an option", captured: big, want: jev.ErrInvalidAnswer,
 			ask: func(req jev.Request) (map[string]jev.Answer, error) {
 				st, _ := req.State.(prompt.ChunkState)
 				a, err := answer(req, st)
@@ -561,6 +562,9 @@ func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 			d, err := r.Route(context.Background(), el, req, tc.captured)
 			require.NoError(t, err)
 			require.ErrorIs(t, d.Undecided, tc.want)
+			se, ok := errors.AsType[*StageError](d.Undecided)
+			require.True(t, ok, "a chunked failure carries its stage")
+			assert.Equal(t, LevelModel, se.Stage)
 			assert.Equal(t, Decision{CLI: "claude", Pinned: true, Undecided: d.Undecided,
 				Stages: []Stage{{Level: LevelCLI, Choice: "claude", Skipped: true}}}, d, "the model stage failed")
 		})
@@ -577,6 +581,9 @@ func TestRouteChunkedCannotDecideCLIUnknown(t *testing.T) {
 	_, err := newRouter(t, cfg, cat, client).Route(context.Background(), el, req, captured(filler(200_000)))
 	require.ErrorIs(t, err, ErrCannotDecide)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
+	se, ok := errors.AsType[*StageError](err)
+	require.True(t, ok)
+	assert.Equal(t, LevelCLI, se.Stage)
 }
 
 func TestRouteChunkedStopsOnDeadline(t *testing.T) {

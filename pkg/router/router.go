@@ -46,6 +46,9 @@ type Decision struct {
 	CLI    string
 	Model  string // empty: no model argument, the CLI's default applies (null in decision JSON)
 	Effort string // empty: no effort argument (null in decision JSON)
+	// NoEffort is true when the chosen catalog model has no effort levels and none was passed, so
+	// there is no effort to emit.
+	NoEffort bool
 	// OptionID is the chosen option; empty when Jev could not decide.
 	OptionID string
 	// Pinned is true when a valid --cli or the exec CLI fixed the CLI.
@@ -85,7 +88,7 @@ func (r *Router) Route(ctx context.Context, el *Eligibility, req *args.Request, 
 	if captured.HasDocs() {
 		var err error
 		if cx, err = r.complexity(ctx, captured); err != nil {
-			return r.cannotDecide(el, req, fmt.Errorf("complexity stage: %w", err))
+			return r.cannotDecide(el, req, &StageError{Stage: LevelComplexity, Err: err})
 		}
 		withProject := *captured
 		withProject.Project = &prompt.Project{Complexity: cx.Complexity}
@@ -105,7 +108,10 @@ func (r *Router) Route(ctx context.Context, el *Eligibility, req *args.Request, 
 
 // chosen is the decision to run o. Pinned comes from the caller's --cli only, never from a CLI Jev chose.
 func (r *Router) chosen(el *Eligibility, o catalog.Option) Decision {
-	return Decision{CLI: o.CLI, Model: o.Name, Effort: el.EffortFor(o), OptionID: o.ID, Pinned: el.Pinned}
+	effort := el.EffortFor(o)
+	// a passed-through model has no section: its CLI decides the effort, as for an unset model
+	noEffort := effort == "" && o.Section != ""
+	return Decision{CLI: o.CLI, Model: o.Name, Effort: effort, NoEffort: noEffort, OptionID: o.ID, Pinned: el.Pinned}
 }
 
 // cannotDecide applies the policy: with one CLI left (--cli, implied by --model, or the only one

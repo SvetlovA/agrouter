@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -60,7 +61,7 @@ func helper() int {
 // effort label (pick is an option id, "<section>@<effort>" or "<section>", or a CLI under model
 // passthrough), a complexity Score with level normalized to 0 to 10, and every Noul with 0.5, and
 // records each request's state. With failDocs it rejects every doc request with a 400, and with
-// failStage every request asking that routing stage.
+// failStage every request asking that routing stage, as the fail fields say.
 type fakeJev struct {
 	t         *testing.T
 	mu        sync.Mutex
@@ -68,6 +69,12 @@ type fakeJev struct {
 	level     string
 	failDocs  bool
 	failStage string
+	// how failStage fails: with failStatus (0: 400), with a 200 carrying failAnswer as its answer
+	// ("omit" leaves it out), by never answering (failHang) or by dropping the connection (failDrop)
+	failStatus int
+	failAnswer string
+	failHang   bool
+	failDrop   bool
 	states    []string
 	stages    []string // the routing stage each Choice request asked, in order
 	srv       *httptest.Server
@@ -104,7 +111,7 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, ok := req.Questions[failStage]; ok {
-		http.Error(w, failStage+" stage rejected", http.StatusBadRequest)
+		f.fail(w, r, failStage)
 		return
 	}
 
@@ -150,6 +157,27 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 		f.mu.Unlock()
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"model": req.Model, "answers": answers})
+}
+
+// fail fails a request asking stage as the fail fields say.
+func (f *fakeJev) fail(w http.ResponseWriter, r *http.Request, stage string) {
+	switch {
+	case f.failHang:
+		<-r.Context().Done()
+	case f.failDrop:
+		conn, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			f.t.Errorf("fake jev: hijack: %v", err)
+			return
+		}
+		_ = conn.Close()
+	case f.failAnswer == "omit":
+		_, _ = io.WriteString(w, `{"answers":{}}`)
+	case f.failAnswer != "":
+		_, _ = io.WriteString(w, `{"answers":{"`+stage+`":`+f.failAnswer+`}}`)
+	default:
+		http.Error(w, stage+" stage rejected", cmp.Or(f.failStatus, http.StatusBadRequest))
+	}
 }
 
 // stagePick is pick's criterion name at the stage asked under id. The cli stage finds the CLI
@@ -626,7 +654,14 @@ func TestApp_Errors(t *testing.T) {
 
 	t.Run("cannot decide with the CLI unknown", func(t *testing.T) {
 		e := newEnv(t)
-		oneLine(t, e.run([]string{"--jev-api-key=", "fix it"}, nil), "agrouter: jev cannot decide between claude, codex")
+		r := e.run([]string{"--jev-api-key=", "fix it"}, nil)
+		assert.Equal(t, 2, r.code)
+		assert.Equal(t, 1, strings.Count(r.stderr, "\n"), r.stderr)
+		assert.True(t, strings.HasPrefix(r.stderr, "agrouter: jev cannot decide between claude, codex"), r.stderr)
+		d := decision(t, r.stdout)
+		assert.Subset(t, d, map[string]any{"cli": nil, "model": nil, "effort": nil})
+		assert.Equal(t, map[string]any{"code": "jev_no_key", "stage": "cli",
+			"message": "Jev CLI selection failed: no Jev API key is set"}, d["reason"])
 	})
 
 	t.Run("unknown flag and second positional", func(t *testing.T) {
@@ -937,10 +972,14 @@ func TestApp_Docs(t *testing.T) {
 		r := e.run([]string{"--doc", "project.md", "fix it"}, nil)
 
 		assert.Equal(t, 2, r.code)
-		assert.Empty(t, r.stdout)
 		assert.Equal(t, 1, strings.Count(r.stderr, "\n"), r.stderr)
 		assert.True(t, strings.HasPrefix(r.stderr, "agrouter: "), r.stderr)
 		assert.NotContains(t, r.stderr, "DOC TEXT")
+		assert.NotContains(t, r.stdout, "DOC TEXT")
+		d := decision(t, r.stdout)
+		assert.Nil(t, d["cli"])
+		assert.Equal(t, map[string]any{"code": "jev_api_error", "stage": "complexity",
+			"message": "Jev project complexity scoring failed: Jev returned an error status"}, d["reason"])
 	})
 
 	t.Run("exec: the deadline passing while reading a doc runs the known CLI with its defaults", func(t *testing.T) {

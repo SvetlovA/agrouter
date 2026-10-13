@@ -127,7 +127,7 @@ Add `--verbose` for indented JSON with every stage, chunk and option, plus a rea
 {"cli":"codex","model":"gpt-6.1-sol","effort":"medium","project_complexity":"6.9/10","confidence":{"cli":0.82,"model":0.64,"effort":0.41,"project_complexity":0.9}}
 ```
 
-`project_complexity` is the final project score formatted as `score/10` with one decimal, for example `5.1/10` and is omitted when the complexity stage did not complete. In verbose output, `argv` holds the `-p`, positional and `--prompt-file` text, joined like the routing prompt, as its last token, after `--` in the shipped `prompt_args`, so text that starts with `-` reaches the child as the prompt and never as one of its flags. It never holds stdin: a caller that piped a prompt must send it to the child itself. `--doc` is never in `argv`; the child loads its own `CLAUDE.md`/`AGENTS.md`. `effort` is `null` for a model without efforts.
+`project_complexity` is the final project score formatted as `score/10` with one decimal, for example `5.1/10` and is omitted when the complexity stage did not complete. In verbose output, `argv` holds the `-p`, positional and `--prompt-file` text, joined like the routing prompt, as its last token, after `--` in the shipped `prompt_args`, so text that starts with `-` reaches the child as the prompt and never as one of its flags. It never holds stdin: a caller that piped a prompt must send it to the child itself. `--doc` is never in `argv`; the child loads its own `CLAUDE.md`/`AGENTS.md`. `effort` is `null` for a model without efforts, and `cli` is `null` only when routing failed with more than one CLI left (see [Failure and null reasons](#failure-and-null-reasons)).
 
 Exec mode, with the prompt on stdin and the CLI's own options after `--`:
 
@@ -139,7 +139,7 @@ agrouter reads stdin for routing and replays the same bytes to the child, so the
 
 On Windows with npm's `claude.cmd`/`codex.cmd` shims, pass a multi-line prompt on stdin: cmd.exe cannot carry a line break inside an argument, so a multi-line `-p`, positional or `--prompt-file` prompt fails to start (exit `127`). This includes any prompt combined from two sources, since they are joined with a blank line. Decision mode and native executables are unaffected.
 
-Before starting the child, exec mode logs one line to stderr: `agrouter: selection: ` followed by a JSON object with `cli`, `model`, `effort`, any completed `project_complexity` score and the same `confidence` object as decision mode, so tools such as Ralphex show the selection for each step. The prefix keeps the line from passing for one of the child's stream-json events when a caller merges stderr into stdout (Ralphex drops JSON lines that aren't events and prints other lines); strip it to parse the JSON. Model and effort are `null` when the CLI's defaults apply. The line stays concise with agrouter's `--verbose` and never includes the prompt or argv.
+Before starting the child, exec mode logs one line to stderr: `agrouter: selection: ` followed by a JSON object with `cli`, `model`, `effort`, any completed `project_complexity` score and the same `confidence` object as decision mode, so tools such as Ralphex show the selection for each step. The prefix keeps the line from passing for one of the child's stream-json events when a caller merges stderr into stdout (Ralphex drops JSON lines that aren't events and prints other lines); strip it to parse the JSON. Model and effort are `null` when the CLI's defaults apply, with the same `reason` and `null_reasons` as decision mode. The line stays concise with agrouter's `--verbose` and never includes the prompt or argv.
 
 Decision JSON and the exec selection line include `confidence` when Jev answered:
 
@@ -171,7 +171,41 @@ Stage probabilities and pooled scores are separate from Jev's Choice confidence.
 
 The child's stdout, stderr and exit code are agrouter's. Set `AGROUTER_DEBUG=1` to see eligibility, each `--doc` chunk's complexity score, evidence and confidence with the project complexity, one line per routing stage (`stage <level>: skipped (<choice>)`, or the choice, confidence and top candidates, per chunk when pooled), Jev's probabilities and the final command on stderr (prompt text and key redacted; doc text is never printed).
 
-When Jev cannot decide (no key, timeout, API errors, at any stage) and the CLI is known (`--cli`, implied by `--model`, or the only one left), agrouter runs it with only the caller's fixed `--model`/`--effort`, so the CLI's defaults apply. With more than one CLI left, it exits `2` with nothing on stdout; `AGROUTER_DEBUG=1` shows the stages that completed.
+When Jev cannot decide (no key, timeout, API errors, at any stage) and the CLI is known (`--cli`, implied by `--model`, or the only one left), agrouter runs it with only the caller's fixed `--model`/`--effort`, so the CLI's defaults apply. With more than one CLI left, decision mode exits `2`: the one-line `agrouter:` error goes to stderr and one decision JSON object with `null` values and the reasons goes to stdout, without `argv`, `command` or stage confidence. `AGROUTER_DEBUG=1` shows the stages that completed.
+
+### Failure and null reasons
+
+Decision JSON and the exec selection line explain a failed routing and every `null` value, with or without `--verbose`. A successful, fully populated selection has neither field.
+
+| Field | Meaning |
+|---|---|
+| `reason` | why routing failed: a normalized `code`, the failing `stage` (`complexity`, `cli`, `model` or `effort`) when known, and a fixed `message` |
+| `null_reasons` | one entry per `null` among `cli`, `model` and `effort`, each with a `code` and a fixed `message` |
+
+| `reason.code` | Cause |
+|---|---|
+| `jev_no_key` | no Jev API key is set |
+| `jev_unauthorized` | Jev rejected the key (HTTP 401) |
+| `jev_timeout` | `[agrouter] timeout` passed |
+| `jev_canceled` | routing was canceled |
+| `jev_api_error` | Jev answered with another error status, including rate limits that outlasted the retries |
+| `jev_transport_error` | Jev could not be reached, or the connection failed |
+| `jev_invalid_answer` | Jev answered with an answer that does not fit the question |
+| `jev_empty_answer` | Jev left a question without an answer, or answered `null` or without the value asked for |
+| `no_decision` | any other reason Jev could not decide |
+
+| `null_reasons.*.code` | Meaning |
+|---|---|
+| `routing_failed` | routing failed with the CLI known; the child's default applies |
+| `unresolved` | routing failed with more than one CLI left; nothing was chosen |
+| `delegated` | routing succeeded and left the value to the child, for example the effort of a passed-through `--model` |
+| `no_applicable_effort` | the chosen model has no effort levels |
+
+Messages never carry the prompt, `--doc` text, the key or Jev's response body. A value the caller fixed (`--cli`, `--model`, `--effort`) stays set after a failure. For example, `--cli=alpha` with the model stage timing out prints:
+
+```json
+{"cli":"alpha","model":null,"effort":null,"reason":{"code":"jev_timeout","stage":"model","message":"Jev model selection timed out"},"null_reasons":{"model":{"code":"routing_failed","message":"Model delegated to the child after routing failed"},"effort":{"code":"routing_failed","message":"Effort delegated to the child after routing failed"}}}
+```
 
 ## Configuration
 
@@ -285,7 +319,7 @@ Leave `task_model`, `review_model`, `plan_model`, `codex_model` and `codex_reaso
 | Code | Meaning |
 |---|---|
 | `0` | decision printed, or `--help`/`--version` |
-| `2` | agrouter error before any child starts: unknown flag (including the removed `--permission-mode`, `--dangerously-*`, `--output-format`, `--sandbox` and `-c`), second positional, second `-p`/`--prompt`/`--print` or `--prompt-file`, a missing, unknown or disabled exec CLI, a `--cli` conflicting with it, `--` in decision mode, a native model or effort selection after `--`, a command-line prompt after a second `--`, no prompt, a bad `--prompt-file` or `--doc` file, the timeout passing while the `--prompt-file` is read, config error, or Jev cannot decide with more than one CLI left |
+| `2` | agrouter error before any child starts: unknown flag (including the removed `--permission-mode`, `--dangerously-*`, `--output-format`, `--sandbox` and `-c`), second positional, second `-p`/`--prompt`/`--print` or `--prompt-file`, a missing, unknown or disabled exec CLI, a `--cli` conflicting with it, `--` in decision mode, a native model or effort selection after `--`, a command-line prompt after a second `--`, no prompt, a bad `--prompt-file` or `--doc` file, the timeout passing while the `--prompt-file` is read, config error, or Jev cannot decide with more than one CLI left (decision mode then also prints the decision JSON with `null` values and reasons) |
 | `127` | exec mode: the chosen CLI could not be started |
 | other | exec mode: the child's exit code (`128+signal` on Unix when it was killed) |
 
