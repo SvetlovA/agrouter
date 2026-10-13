@@ -9,7 +9,7 @@ It has two modes:
 
 ## Install
 
-Requires Go 1.27 or later. Exec mode also needs the chosen CLI (`claude`, `codex`) on `PATH`; otherwise agrouter exits `127`.
+Requires Go 1.27 or later. Exec mode also needs the chosen CLI (`claude`, `codex`) on `PATH`; otherwise agrouter exits `127` before routing.
 
 ```sh
 go install github.com/SvetlovA/agrouter/cmd/agrouter@latest
@@ -169,7 +169,7 @@ Verbose output includes all available numeric details, without truncating chunks
 Stage probabilities and pooled scores are separate from Jev's Choice confidence. Verbose JSON retains zero values. The exec selection log remains one prefixed line on stderr and excludes argv and command; the child's output goes to stdout.
 
 
-The child's stdout, stderr and exit code are agrouter's. Set `AGROUTER_DEBUG=1` to see eligibility, each `--doc` chunk's complexity score, evidence and confidence with the project complexity, one line per routing stage (`stage <level>: skipped (<choice>)`, or the choice, confidence and top candidates, per chunk when pooled), Jev's probabilities and the final command on stderr (prompt text and key redacted; doc text is never printed).
+The child's stdout, stderr and exit code are agrouter's. Set `AGROUTER_DEBUG=1` to see eligibility, each `--doc` chunk's complexity score, evidence and confidence with the project complexity, one line per routing stage (`stage <level>: skipped (<choice>)`, or the choice, confidence and top candidates, per chunk when pooled), Jev's probabilities and the final command on stderr (prompt text and key redacted; doc text is never printed). In exec mode it also prints one `readiness <cli>:` line per piece of availability evidence (dimension, status, reason code, window, model scope, reset, check), the defaults the checks reported, and how many options they excluded; never a probe's raw response.
 
 When Jev cannot decide (no key, timeout, API errors, at any stage) and the CLI is known (`--cli`, implied by `--model`, or the only one left), agrouter runs it with only the caller's fixed `--model`/`--effort`, so the CLI's defaults apply. With more than one CLI left, decision mode exits `2`: the one-line `agrouter:` error goes to stderr and one decision JSON object with `null` values and the reasons goes to stdout, without `argv`, `command` or stage confidence. `AGROUTER_DEBUG=1` shows the stages that completed.
 
@@ -206,6 +206,23 @@ Messages never carry the prompt, `--doc` text, the key or Jev's response body. A
 ```json
 {"cli":"alpha","model":null,"effort":null,"reason":{"code":"jev_timeout","stage":"model","message":"Jev model selection timed out"},"null_reasons":{"model":{"code":"routing_failed","message":"Model delegated to the child after routing failed"},"effort":{"code":"routing_failed","message":"Effort delegated to the child after routing failed"}}}
 ```
+
+### Exec readiness
+
+Before any Jev request, including the `--doc` complexity stage, exec checks that its CLI can run now: the executable, then the prompt-free checks in `[cli.<name>.availability]` (authentication, the subscription five-hour and weekly quota windows, model support). The checks run once per invocation, while agrouter reads the prompt, docs and stdin, within both the availability `timeout` and `[agrouter] timeout`; nothing is cached between invocations. Decision mode never runs them.
+
+Exec then routes only over the CLI's options that are left. It never switches to another CLI and never broadens a `--model`/`--effort` the caller fixed. Every outcome is one stderr line:
+
+| Outcome | stderr | Exit |
+|---|---|---|
+| some options are unverified (a probe timed out, was throttled, or did not report a window) and `unknown = allow` | `agrouter: warning: <cli> availability unknown: <reason>`, then routing and the child as usual | the child's |
+| nothing is left: missing executable or failed authentication | `agrouter: <cli> unavailable: <reason>` | `127` |
+| nothing is left: subscription quota exhausted | `<quota_error_prefix><quota_error_message>; <windows> subscription quota exhausted[; resets at <RFC 3339>]` | `127` |
+| nothing is left under `unknown = block` | `agrouter: <cli> availability unverified: <reason>` | `2` |
+
+A blocked exec prints no selection line, nothing on stdout, and makes no Jev request. The reset is the latest reset of the exhausted windows, since a weekly window outlasts a five-hour one, and is left out when any of them is unverified. `quota_error_prefix` (default `agrouter: `) and `quota_error_message` come from config, so the line can match a caller's own limit pattern, for example a severity prefix such as `ERROR: agrouter: `. An unknown availability is never reported as a quota block. Native arguments after `--` that switch the child's context (`context_flags`) make the probes moot: only the executable is checked, and the rest is unknown (`context_changed`).
+
+The shipped checks take about 0.5s to 2s on a cold start, which is part of the routing budget (`[agrouter] timeout`, 10s by default). A probe cut off by either timeout is unknown, not a block.
 
 ## Configuration
 
@@ -263,7 +280,7 @@ agrouter has no other per-CLI argument mapping: pass every other native option a
 
 When `prompt_args` puts the prompt after `--` and the native tokens already hold a `--`, a command-line prompt is exit `2`: the child would read the prompt's `--` as prompt text. Pass the prompt on stdin, or drop the extra `--`.
 
-The former `[cli.<name>.args]` mapping sections are config errors that name the replacement keys. `[cli.<name>.availability]` sections are reserved for readiness checks.
+The former `[cli.<name>.args]` mapping sections are config errors that name the replacement keys. `[cli.<name>.availability]` sections configure the exec readiness checks.
 
 The questions sent to Jev and the description of every state field are built into agrouter. Config holds only the preference they follow, in two `[agrouter]` keys that must be non-empty:
 
@@ -320,7 +337,8 @@ Leave `task_model`, `review_model`, `plan_model`, `codex_model` and `codex_reaso
 |---|---|
 | `0` | decision printed, or `--help`/`--version` |
 | `2` | agrouter error before any child starts: unknown flag (including the removed `--permission-mode`, `--dangerously-*`, `--output-format`, `--sandbox` and `-c`), second positional, second `-p`/`--prompt`/`--print` or `--prompt-file`, a missing, unknown or disabled exec CLI, a `--cli` conflicting with it, `--` in decision mode, a native model or effort selection after `--`, a command-line prompt after a second `--`, no prompt, a bad `--prompt-file` or `--doc` file, the timeout passing while the `--prompt-file` is read, config error, or Jev cannot decide with more than one CLI left (decision mode then also prints the decision JSON with `null` values and reasons) |
-| `127` | exec mode: the chosen CLI could not be started |
+| `2` | exec mode: availability unverified under `unknown = block` (`agrouter: <cli> availability unverified: <reason>`) |
+| `127` | exec mode: the chosen CLI could not be started, or before routing: its executable is missing, its authentication failed, or its subscription quota is exhausted (one quota line in the configured wording) |
 | other | exec mode: the child's exit code (`128+signal` on Unix when it was killed) |
 
 ## Releasing

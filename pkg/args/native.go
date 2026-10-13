@@ -45,6 +45,23 @@ func CheckNative(cli config.CLI, raw []string) error {
 	return nil
 }
 
+// ContextFlag returns the first configured context spelling among the native tokens before the
+// child's own "--": a flag that switches the child's provider, profile or settings, so a probe of the
+// default context says nothing about the run. Like CheckNative it has no arity table.
+func ContextFlag(cli config.CLI, raw []string) (string, bool) {
+	for _, tok := range raw {
+		if tok == config.EndOfOptions {
+			break
+		}
+		for _, f := range cli.ContextFlags {
+			if _, ok := flagValue(tok, f); ok {
+				return f, true
+			}
+		}
+	}
+	return "", false
+}
+
 // flagValue reports whether tok is flag f, and returns its attached value: nil for a bare flag,
 // the text after "=" for --flag=value, or the text after a short flag such as -mvalue or -m=value.
 func flagValue(tok, f string) (*string, bool) {

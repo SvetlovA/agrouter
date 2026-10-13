@@ -258,3 +258,23 @@ func TestChecker_DefaultClock(t *testing.T) {
 	before := time.Now()
 	assert.False(t, Checker{}.now().Before(before))
 }
+
+func TestReport_ContextChanged(t *testing.T) {
+	model := "m-2"
+	ready := Report{CLI: "tool-a", Defaults: Defaults{Model: &model}, Evidence: []Evidence{
+		{Dimension: DimensionExecutable, Status: StatusAvailable, ObservedAt: observed},
+		{Dimension: DimensionAuth, Status: StatusUnavailable, Reason: ReasonAuthFailed, Check: "usage", ObservedAt: observed},
+		{Dimension: DimensionQuota, Status: StatusUnavailable, Reason: ReasonQuotaExhausted, Window: WindowWeekly, ObservedAt: observed},
+		{Dimension: DimensionCapability, Status: StatusUnavailable, Reason: ReasonUnsupportedModel, ObservedAt: observed},
+	}}
+	later := observed.Add(time.Minute)
+	assert.Equal(t, Report{CLI: "tool-a", Evidence: []Evidence{
+		{Dimension: DimensionExecutable, Status: StatusAvailable, ObservedAt: observed},
+		{Dimension: DimensionQuota, Status: StatusUnknown, Reason: ReasonContextChanged, ObservedAt: later},
+	}}, ready.ContextChanged(later), "the probes saw another context: only the executable lookup holds")
+
+	missing := Report{CLI: "tool-a", Evidence: []Evidence{
+		{Dimension: DimensionExecutable, Status: StatusUnavailable, Reason: ReasonExecutableMissing, ObservedAt: observed},
+	}}
+	assert.Equal(t, missing, missing.ContextChanged(later), "a missing executable stays the only evidence")
+}

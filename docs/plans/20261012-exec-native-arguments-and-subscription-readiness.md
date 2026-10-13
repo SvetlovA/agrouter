@@ -398,11 +398,12 @@ Exec processing flow: parse → load config → validate operand/flags/conflicts
 - Create: `cmd/agrouter/readiness.go`, `cmd/agrouter/readiness_test.go`, `cmd/agrouter/mocks/readiness_checker.go` (generated).
 - Modify: `cmd/agrouter/app.go`, `cmd/agrouter/debug.go`, `cmd/agrouter/app_test.go`, `cmd/agrouter/debug_test.go`, `README.md`, `CLAUDE.md`.
 
-- [ ] Wire `ReadinessChecker` only in exec, after operand/config/conflict validation, concurrently with input capture, before `Router.Route`, under the total deadline.
-- [ ] Apply exclusions; emit the unknown warning, the quota line, the auth/executable line, or the strict-unknown line; return 127/2 as specified.
-- [ ] Add redacted readiness evidence to `AGROUTER_DEBUG=1` output.
-- [ ] Write end-to-end tests: total block with zero complexity and selection Jev calls, empty stdout and no selection line, quota line for both synthetic prefix styles (plain `agrouter:` and a severity prefix), latest reset, absent reset, auth/throttle/unknown never printing a quota phrase, fixed constraints, single-candidate bypass still probed, no cross-CLI switch, deadline behavior, unchanged stdin replay; decision mode never calls the checker, even with missing executables and `--doc`.
-- [ ] Update the README exit-code table and `CLAUDE.md` exit-code and prefix rules (narrow severity-prefix exception); run `make generate` and `make test`.
+- [x] Wire `ReadinessChecker` only in exec, after operand/config/conflict validation, concurrently with input capture, before `Router.Route`, under the total deadline.
+- [x] Apply exclusions; emit the unknown warning, the quota line, the auth/executable line, or the strict-unknown line; return 127/2 as specified.
+- [x] Add redacted readiness evidence to `AGROUTER_DEBUG=1` output.
+- [x] Write end-to-end tests: total block with zero complexity and selection Jev calls, empty stdout and no selection line, quota line for both synthetic prefix styles (plain `agrouter:` and a severity prefix), latest reset, absent reset, auth/throttle/unknown never printing a quota phrase, fixed constraints, single-candidate bypass still probed, no cross-CLI switch, deadline behavior, unchanged stdin replay; decision mode never calls the checker, even with missing executables and `--doc`.
+- [x] Update the README exit-code table and `CLAUDE.md` exit-code and prefix rules (narrow severity-prefix exception); run `make generate` and `make test`.
+- ➕ Notes: probes start once the operand, native conflicts, `--prompt-file` and duplicate-separator checks pass, run while docs and stdin are captured, and share the routing context (`[agrouter] timeout`) besides the availability timeout; an early failure cancels them and waits. Budget (the Task 5 ⚠️): the measured 0.5-1.8s cold starts stay inside the default 10s routing budget, so there is no separate preflight bound and the README records this. A `context_flags` spelling in the native tail skips the probes (the CLI is checked with its availability cleared) and `Report.ContextChanged` keeps only the executable lookup plus unknown quota `context_changed`; native tokens never reach a probe. Blocks return `*preflightError` from `route`, printed verbatim; the quota line names the blocking windows (`five-hour and weekly`) and the UTC reset. Debug prints one `readiness <cli>:` line per evidence, the reported defaults, and the excluded count.
 
 ### Task 9: Exec fallback and effective metadata
 

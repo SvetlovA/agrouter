@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/SvetlovA/agrouter/pkg/args"
 	"github.com/SvetlovA/agrouter/pkg/catalog"
@@ -16,6 +17,7 @@ import (
 	"github.com/SvetlovA/agrouter/pkg/config/defaults"
 	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
+	"github.com/SvetlovA/agrouter/pkg/readiness"
 	"github.com/SvetlovA/agrouter/pkg/router"
 	"github.com/SvetlovA/agrouter/pkg/runner"
 )
@@ -35,7 +37,9 @@ type app struct {
 	embedded       []byte
 	newJev         func(key string) router.JevClient
 	runner         CommandRunner
-	debug          *debugLog // nil unless AGROUTER_DEBUG=1
+	checker        ReadinessChecker // exec only
+	now            func() time.Time // nil means time.Now
+	debug          *debugLog        // nil unless AGROUTER_DEBUG=1
 }
 
 // newApp returns an app wired to the real process environment.
@@ -50,7 +54,15 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer) *app {
 		embedded: defaults.Config,
 		newJev:   func(key string) router.JevClient { return jev.New(key) },
 		runner:   runner.Runner{},
+		checker:  readiness.Checker{Dir: wd},
 	}
+}
+
+func (a *app) clock() time.Time {
+	if a.now != nil {
+		return a.now()
+	}
+	return time.Now()
 }
 
 // stdinReader returns the prompt's stdin: nil for a terminal, which agrouter does not read.
@@ -132,6 +144,10 @@ func (a *app) run(argv []string) int {
 		// the stages completed before Jev failed, if any
 		a.debug.decision(d.Decision)
 		a.debug.failed(err)
+		if blocked, ok := errors.AsType[*preflightError](err); ok {
+			fmt.Fprintln(a.stderr, blocked.line)
+			return blocked.code
+		}
 		if req.Mode == args.ModeDecision && errors.Is(err, router.ErrCannotDecide) {
 			// stdout still gets the decision, all null with the reasons, beside the error line
 			if code := a.writeDecision(selectionOutput(d, cmd.verbose, err), cmd.verbose); code != exitOK {
@@ -207,8 +223,10 @@ type routed struct {
 }
 
 // route reads --prompt-file and every --doc, captures the prompt and decides, all within the routing
-// deadline. Eligibility warnings go to stderr once the prompt is known to be there. When Jev cannot
-// decide, the error comes with the partial decision: the stages and complexity completed.
+// deadline. Exec checks its CLI's readiness meanwhile and routes only over what it can run now; when
+// nothing is left it returns a *preflightError without asking Jev. Eligibility warnings go to stderr
+// once the prompt is known to be there. When Jev cannot decide, the error comes with the partial
+// decision: the stages and complexity completed.
 func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router, req *args.Request) (routed, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Agrouter.Timeout)
 	defer cancel()
@@ -220,11 +238,18 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 		}
 		req.FileText = text
 	}
+	var (
+		execCLI config.CLI
+		pf      *preflight
+	)
 	if req.Mode == args.ModeExec {
-		cli, _ := cfg.CLIByName(req.CLI)
-		if err := args.CheckSeparator(cli, req); err != nil {
+		execCLI, _ = cfg.CLIByName(req.CLI)
+		if err := args.CheckSeparator(execCLI, req); err != nil {
 			return routed{}, err
 		}
+		pf = a.startPreflight(ctx, execCLI, req.Raw)
+		// an early return stops the probes before leaving
+		defer func() { cancel(); pf.wait() }()
 	}
 	// docs are read even when one option will be left, so a bad --doc fails every call alike; the
 	// deadline passing mid-read is not a bad doc, so Jev cannot decide
@@ -253,6 +278,11 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 	}
 
 	el := router.Eligible(cat, req)
+	if pf != nil {
+		if blocked := a.applyPreflight(execCLI, cfg.Models, pf.wait(), el); blocked != nil {
+			return routed{}, blocked
+		}
+	}
 	for _, w := range el.Warnings {
 		fmt.Fprintln(a.stderr, w)
 	}

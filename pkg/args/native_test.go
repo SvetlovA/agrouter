@@ -90,3 +90,27 @@ func TestCheckSeparator(t *testing.T) {
 		require.NoError(t, CheckSeparator(noSeparator, &req))
 	})
 }
+
+func TestContextFlag(t *testing.T) {
+	cli := fixtureCLI(t, "alpha")
+	cli.ContextFlags = []string{"--profile", "-P"}
+	tests := []struct {
+		name string
+		raw  []string
+		want string
+	}{
+		{name: "no native tokens"},
+		{name: "unrelated options", raw: []string{"--json", "--profiles", "-v"}},
+		{name: "bare long flag", raw: []string{"--json", "--profile", "work"}, want: "--profile"},
+		{name: "long flag with =", raw: []string{"--profile=work"}, want: "--profile"},
+		{name: "attached short flag", raw: []string{"-Pwork"}, want: "-P"},
+		{name: "after the child's --", raw: []string{"--", "--profile", "work"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := ContextFlag(cli, tc.raw)
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want != "", ok)
+		})
+	}
+}

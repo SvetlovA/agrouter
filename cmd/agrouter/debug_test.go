@@ -9,12 +9,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/SvetlovA/agrouter/pkg/catalog"
+	"github.com/SvetlovA/agrouter/pkg/config"
 	"github.com/SvetlovA/agrouter/pkg/jev"
+	"github.com/SvetlovA/agrouter/pkg/readiness"
 	"github.com/SvetlovA/agrouter/pkg/router"
 )
 
@@ -39,14 +42,22 @@ func TestDebug_Redaction(t *testing.T) {
 	require.Equal(t, 0, r.code, r.stderr)
 
 	lines := debugLines(r.stderr)
-	require.Len(t, lines, 7)
+	require.Len(t, lines, 13)
 	assert.Equal(t, "api key: from env", lines[0])
-	assert.Regexp(t, `^eligible: [1-9][0-9]* option\(s\) on claude$`, lines[1])
-	assert.Equal(t, "dropped codex: --cli claude", lines[2], "the exec CLI restricts routing like --cli")
-	assert.Equal(t, "stage cli: skipped (claude)", lines[3])
-	assert.True(t, strings.HasPrefix(lines[4], "stage model: choice claude-sonnet-5-5, confidence 0.900, top [claude-sonnet-5-5 1.000"), lines[4])
-	assert.True(t, strings.HasPrefix(lines[5], "stage effort: choice low, confidence 0.900, top [low 1.000"), lines[5])
-	assert.Equal(t, "command: "+helperCommand(t)+" -p --model claude-sonnet-5-5 --effort low <2 raw argument(s)> -- <prompt>", lines[6])
+	assert.Equal(t, []string{
+		"readiness claude: executable available",
+		"readiness claude: auth available",
+		"readiness claude: quota available, window five_hour",
+		"readiness claude: quota available, window weekly",
+		"readiness claude: defaults model unknown, effort unknown",
+	}, lines[1:6])
+	assert.Regexp(t, `^readiness claude: 0 of [1-9][0-9]* option\(s\) excluded$`, lines[6])
+	assert.Regexp(t, `^eligible: [1-9][0-9]* option\(s\) on claude$`, lines[7])
+	assert.Equal(t, "dropped codex: --cli claude", lines[8], "the exec CLI restricts routing like --cli")
+	assert.Equal(t, "stage cli: skipped (claude)", lines[9])
+	assert.True(t, strings.HasPrefix(lines[10], "stage model: choice claude-sonnet-5-5, confidence 0.900, top [claude-sonnet-5-5 1.000"), lines[10])
+	assert.True(t, strings.HasPrefix(lines[11], "stage effort: choice low, confidence 0.900, top [low 1.000"), lines[11])
+	assert.Equal(t, "command: "+helperCommand(t)+" -p --model claude-sonnet-5-5 --effort low <2 raw argument(s)> -- <prompt>", lines[12])
 	assert.NotContains(t, r.stderr, secret)
 	assert.NotContains(t, r.stderr, "raw-two")
 	assert.NotContains(t, r.stderr, testKey)
@@ -237,4 +248,37 @@ agrouter debug: stage model: pooled choice b, confidence none, top []
 			Choice: "a", Answer: &jev.Answer{Choice: "a", Confidence: 0.5, Probabilities: map[string]float64{"a": 0.5, "b": 0.5}}}}})
 		assert.Equal(t, "agrouter debug: stage cli: choice a, confidence 0.500, top [a 0.500, b 0.500]\n", buf.String())
 	})
+}
+
+func TestDebug_Readiness(t *testing.T) {
+	e := newSyntheticEnv(t)
+	t.Setenv(envDebug, "1")
+	model := "fast-1"
+	e.checker = reportChecker(func(cli config.CLI) readiness.Report {
+		r := withQuota(cli, free(readiness.WindowFiveHour), exhausted(readiness.WindowWeekly, time.Hour, "strong"),
+			unknownQuota(readiness.ReasonProbeThrottled))
+		r.Evidence[2].Check = "usage"
+		r.Defaults.Model = &model
+		return r
+	})
+	r := e.run([]string{"exec", "alpha", "--model=fast-1", "--effort=low", "--jev-api-key=" + testKey, "fix it"}, nil)
+	require.Equal(t, 0, r.code, r.stderr)
+
+	var lines []string
+	for _, l := range debugLines(r.stderr) {
+		if strings.HasPrefix(l, "readiness ") {
+			lines = append(lines, l)
+		}
+	}
+	assert.Equal(t, []string{
+		"readiness alpha: executable available",
+		"readiness alpha: auth available",
+		"readiness alpha: quota available, window five_hour, check usage",
+		"readiness alpha: quota unavailable (quota_exhausted), window weekly, models strong, resets 2026-10-13T13:00:00Z",
+		"readiness alpha: quota unknown (probe_throttled)",
+		"readiness alpha: defaults model fast-1, effort unknown",
+		"readiness alpha: 0 of 1 option(s) excluded",
+	}, lines)
+	assert.NotContains(t, r.stderr, "fix it")
+	assert.NotContains(t, r.stderr, testKey)
 }

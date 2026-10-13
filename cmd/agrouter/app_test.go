@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -35,7 +36,10 @@ const (
 	helperEnv  = "GO_WANT_HELPER_PROCESS"
 	helperOut  = "AGROUTER_HELPER_OUT"
 	helperExit = "AGROUTER_HELPER_EXIT"
-	testKey    = "test-jev-key"
+	// with helperProbeArg first, the helper is a readiness probe printing $AGROUTER_HELPER_PROBE
+	helperProbe    = "AGROUTER_HELPER_PROBE"
+	helperProbeArg = "--readiness-probe"
+	testKey        = "test-jev-key"
 )
 
 func TestMain(m *testing.M) {
@@ -46,6 +50,11 @@ func TestMain(m *testing.M) {
 }
 
 func helper() int {
+	if len(os.Args) > 1 && os.Args[1] == helperProbeArg {
+		// a json-helper readiness probe: its stdout is the configured evidence
+		_, _ = os.Stdout.WriteString(os.Getenv(helperProbe))
+		return 0
+	}
 	out := os.Getenv(helperOut)
 	argv, _ := json.Marshal(os.Args[1:])
 	stdin, _ := io.ReadAll(os.Stdin)
@@ -75,9 +84,9 @@ type fakeJev struct {
 	failAnswer string
 	failHang   bool
 	failDrop   bool
-	states    []string
-	stages    []string // the routing stage each Choice request asked, in order
-	srv       *httptest.Server
+	states     []string
+	stages     []string // the routing stage each Choice request asked, in order
+	srv        *httptest.Server
 }
 
 func newFakeJev(t *testing.T) *fakeJev {
@@ -255,17 +264,20 @@ func repeated(state string, n int) []string {
 }
 
 // env is an isolated agrouter environment: its own global config dir, working directory, fake Jev
-// and helper output directory.
+// and helper output directory. Its exec readiness checks find the CLI ready unless a test replaces
+// the checker.
 type env struct {
 	t         *testing.T
 	configDir string
 	workDir   string
 	out       string
 	jev       *fakeJev
+	checker   ReadinessChecker
 }
 
 func newEnv(t *testing.T) *env {
-	e := &env{t: t, configDir: t.TempDir(), workDir: t.TempDir(), out: t.TempDir(), jev: newFakeJev(t)}
+	e := &env{t: t, configDir: t.TempDir(), workDir: t.TempDir(), out: t.TempDir(), jev: newFakeJev(t),
+		checker: reportChecker(readyReport)}
 	t.Setenv(config.EnvConfigDir, e.configDir)
 	t.Setenv(config.EnvAPIKey, testKey)
 	t.Setenv(legacyCLIEnv, "")
@@ -319,7 +331,9 @@ func (e *env) runWithRunner(argv []string, stdin io.Reader, child CommandRunner)
 			c.URL = e.jev.srv.URL
 			return c
 		},
-		runner: child,
+		runner:  child,
+		checker: e.checker,
+		now:     func() time.Time { return testNow },
 	}
 	code := a.run(argv)
 	return result{code: code, stdout: stdout.String(), stderr: stderr.String()}

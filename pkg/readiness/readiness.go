@@ -61,6 +61,7 @@ const (
 	ReasonNotSubscription       = "not_subscription"              // API-key or other-provider auth: no subscription windows
 	ReasonVersionUnsupported    = "version_unsupported"           // older than the check's min_version, or no version reported
 	ReasonPermissionUnknown     = "usage_permission_not_reported" // the backend did not say whether usage is allowed
+	ReasonContextChanged        = "context_changed"               // native arguments switch the provider, profile or settings
 )
 
 // Scope is what a piece of evidence applies to: the whole account when Models is empty, otherwise
@@ -184,6 +185,32 @@ func (c Checker) now() time.Time {
 		return c.Now()
 	}
 	return time.Now()
+}
+
+// ContextChanged is r for a child whose native arguments switch its provider, profile or settings:
+// only the executable lookup still holds, and the probes' auth, quota, capability and defaults,
+// observed in the default context, become unknown.
+func (r Report) ContextChanged(now time.Time) Report {
+	out := Report{CLI: r.CLI}
+	for _, e := range r.Evidence {
+		if e.Dimension == DimensionExecutable {
+			out.add(e)
+		}
+	}
+	if !out.blocked() {
+		out.add(unknownQuota("", ReasonContextChanged, now))
+	}
+	return out
+}
+
+// blocked reports whether the executable is known missing, which no other evidence follows.
+func (r *Report) blocked() bool {
+	for _, e := range r.Evidence {
+		if e.Dimension == DimensionExecutable && e.Status == StatusUnavailable {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Report) add(e ...Evidence) { r.Evidence = append(r.Evidence, e...) }
