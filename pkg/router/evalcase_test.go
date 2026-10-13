@@ -15,7 +15,6 @@ import (
 
 	"github.com/SvetlovA/agrouter/pkg/args"
 	"github.com/SvetlovA/agrouter/pkg/catalog"
-	"github.com/SvetlovA/agrouter/pkg/config"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 )
 
@@ -178,7 +177,7 @@ const evalTimeout = 2 * time.Minute
 
 // runEvalCase captures the case's prompt the way agrouter does (mentioned files from a temporary
 // working directory) and routes it within evalTimeout.
-func runEvalCase(ctx context.Context, r *Router, cfg *config.Config, cat *catalog.Catalog, c evalCase, workDir string) evalResult {
+func runEvalCase(ctx context.Context, r *Router, cat *catalog.Catalog, c evalCase, workDir string) evalResult {
 	res := evalResult{Case: c.Name}
 	start := time.Now()
 	fail := func(err error) evalResult {
@@ -214,7 +213,7 @@ func runEvalCase(ctx context.Context, r *Router, cfg *config.Config, cat *catalo
 		return fail(fmt.Errorf("read mentions: %w", err))
 	}
 
-	d, err := r.Route(ctx, Eligible(cfg, cat, req), req, captured)
+	d, err := r.Route(ctx, Eligible(cat, req), req, captured)
 	if err != nil {
 		return fail(err)
 	}

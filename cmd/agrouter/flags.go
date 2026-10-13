@@ -154,11 +154,8 @@ func newFlagSet(req *args.Request, seen *flagCounts) *flagSet {
 		JevAPIKey: func(v string) {
 			req.APIKey = args.Optional{Value: unescape(v), Set: true}
 		},
-		Model: func(v string) { req.Model, req.ModelSource = unescape(v), args.SourceFlag },
-		Effort: func(v string) {
-			v = unescape(v)
-			req.Effort, req.EffortSource, req.EffortSpell = v, args.SourceFlag, "--effort "+v
-		},
+		Model:  func(v string) { req.Model = unescape(v) },
+		Effort: func(v string) { req.Effort = unescape(v) },
 	}
 }
 

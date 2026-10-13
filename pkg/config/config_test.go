@@ -20,24 +20,28 @@ routing_policy    = Prefer the cheapest option; compare ` + "`models`" + ` "well
 complexity_policy = Judge the whole codebase.
 
 [cli.alpha]
-command     = alpha
-description = Alpha agent.
+command               = alpha
+description           = Alpha agent.
+exec_args             = ["-p"]
+model_args            = ["--model", "{model}"]
+effort_args           = ["-c", "effort=\"{effort}\""]
+prompt_args           = ["--", "{prompt}"]
+selection_flags       = --model, -m
+config_flags          = -c, --config
+selection_config_keys = model, effort
+context_flags         = --profile
 
-[cli.alpha.args]
-print                  = ["-p"]
-prompt                 = ["--", "{prompt}"]
-model                  = ["--model", "{model}"]
-effort                 = ["-c", "effort=\"{effort}\""]
-output-format.text     = []
-permission-mode.plan   = ["--mode", "plan"]
+[cli.alpha.availability]
+checks = usage
+
+[cli.alpha.availability.usage]
+transport = json-helper
 
 [cli.beta]
-command = beta
-
-[cli.beta.args]
-print = ["run"]
-prompt = ["--", "{prompt}"]
-model = ["-m", "{model}"]
+command     = beta
+exec_args   = []
+model_args  = ["-m", "{model}"]
+prompt_args = ["{prompt}"]
 
 [model.alpha-big]
 cli         = alpha
@@ -108,17 +112,17 @@ func TestLoad_Embedded(t *testing.T) {
 	assert.Equal(t, "alpha", alpha.Name)
 	assert.Equal(t, "alpha", alpha.Command)
 	assert.Equal(t, "Alpha agent.", alpha.Description)
-	assert.Equal(t, map[string][]string{
-		"print":                {"-p"},
-		"prompt":               {"--", "{prompt}"},
-		"model":                {"--model", "{model}"},
-		"effort":               {"-c", `effort="{effort}"`},
-		"output-format.text":   {},
-		"permission-mode.plan": {"--mode", "plan"},
-	}, alpha.Args)
-	assert.NotNil(t, alpha.Args["output-format.text"], "[] must stay distinguishable from a missing key")
-	_, has := alpha.Args["verbose"]
-	assert.False(t, has)
+	assert.Equal(t, CLI{
+		Name: "alpha", Command: "alpha", Description: "Alpha agent.",
+		ExecArgs:            []string{"-p"},
+		ModelArgs:           []string{"--model", "{model}"},
+		EffortArgs:          []string{"-c", `effort="{effort}"`},
+		PromptArgs:          []string{"--", "{prompt}"},
+		SelectionFlags:      []string{"--model", "-m"},
+		ConfigFlags:         []string{"-c", "--config"},
+		SelectionConfigKeys: []string{"model", "effort"},
+		ContextFlags:        []string{"--profile"},
+	}, alpha)
 
 	assert.Equal(t, []string{"alpha-big", "alpha-small", "beta-one"}, modelSections(cfg))
 	assert.Equal(t, Model{
@@ -135,6 +139,9 @@ func TestLoad_Embedded(t *testing.T) {
 	beta, ok := cfg.CLIByName("beta")
 	require.True(t, ok)
 	assert.Equal(t, "beta", beta.Command)
+	assert.NotNil(t, beta.ExecArgs, "[] must stay distinguishable from a missing key")
+	assert.Empty(t, beta.ExecArgs)
+	assert.Nil(t, beta.EffortArgs)
 	_, ok = cfg.CLIByName("gamma")
 	assert.False(t, ok)
 }
@@ -146,9 +153,9 @@ api_key = global-key
 timeout = 20s
 routing_policy = Prefer the strongest option.
 
-[cli.alpha.args]
-print = ["--print"]
-verbose = ["-v"]
+[cli.alpha]
+exec_args     = ["--print"]
+context_flags = --settings
 
 [model.alpha-big]
 description = Global description.
@@ -158,8 +165,8 @@ description = Global description.
 timeout = 30s
 complexity_policy = Judge only the architecture.
 
-[cli.alpha.args]
-model = ["--use-model", "{model}"]
+[cli.alpha]
+model_args = ["--use-model", "{model}"]
 
 [model.alpha-big]
 description = Local description.
@@ -179,10 +186,10 @@ name = local-new
 	assert.Equal(t, "Judge only the architecture.", cfg.Agrouter.ComplexityPolicy, "local overrides a policy")
 
 	alpha, _ := cfg.CLIByName("alpha")
-	assert.Equal(t, []string{"--print"}, alpha.Args["print"], "global overrides one args key")
-	assert.Equal(t, []string{"--use-model", "{model}"}, alpha.Args["model"], "local overrides one args key")
-	assert.Equal(t, []string{"-c", `effort="{effort}"`}, alpha.Args["effort"], "other args keys stay embedded")
-	assert.Equal(t, []string{"-v"}, alpha.Args["verbose"], "a layer can add an args key")
+	assert.Equal(t, []string{"--print"}, alpha.ExecArgs, "global overrides one descriptor key")
+	assert.Equal(t, []string{"--use-model", "{model}"}, alpha.ModelArgs, "local overrides one descriptor key")
+	assert.Equal(t, []string{"-c", `effort="{effort}"`}, alpha.EffortArgs, "other descriptor keys stay embedded")
+	assert.Equal(t, []string{"--settings"}, alpha.ContextFlags, "a layer replaces a whole list")
 	assert.Equal(t, "alpha", alpha.Command)
 
 	assert.Equal(t, []string{"alpha-big", "alpha-small", "beta-one", "local-new"}, modelSections(cfg))
@@ -204,6 +211,11 @@ func TestLoad_Disabled(t *testing.T) {
 			wantCLIs: []string{"alpha", "beta"}, wantModels: []string{"alpha-big", "alpha-small", "beta-one"}},
 		{name: "cli takes its models and efforts", local: "[cli.alpha]\nenabled = false\n",
 			wantCLIs: []string{"beta"}, wantModels: []string{"beta-one"}},
+		{name: "disabled cli skips its subsections", local: "[cli.alpha]\nenabled = false\n[cli.alpha.availability]\nchecks = x\n",
+			wantCLIs: []string{"beta"}, wantModels: []string{"beta-one"}},
+		{name: "availability subsections of an enabled cli", local: "[cli.beta.availability]\nunknown = allow\n" +
+			"[cli.beta.availability.status]\ntransport = json-helper\n",
+			wantCLIs: []string{"alpha", "beta"}, wantModels: []string{"alpha-big", "alpha-small", "beta-one"}, wantEfforts: 1},
 		{name: "re-enabled explicitly", local: "[model.alpha-small]\nenabled = true\n",
 			wantCLIs: []string{"alpha", "beta"}, wantModels: []string{"alpha-big", "alpha-small", "beta-one"}, wantEfforts: 1},
 	}
@@ -239,14 +251,14 @@ func TestLoad_Errors(t *testing.T) {
 		local string
 		want  string
 	}{
-		{name: "malformed JSON template", local: "[cli.alpha.args]\nprint = [\"-p\", \n",
-			want: `[cli.alpha.args] print = "[\"-p\"," (local `},
-		{name: "template not an array", local: "[cli.alpha.args]\nprint = -p {prompt}\n",
+		{name: "malformed JSON template", local: "[cli.alpha]\nexec_args = [\"-p\", \n",
+			want: `[cli.alpha] exec_args = "[\"-p\"," (local `},
+		{name: "template not an array", local: "[cli.alpha]\nprompt_args = -p {prompt}\n",
 			want: "template must be a JSON array of strings"},
-		{name: "template null", local: "[cli.alpha.args]\nprint = null\n",
+		{name: "template null", local: "[cli.alpha]\nmodel_args = null\n",
 			want: "template must be a JSON array of strings"},
-		{name: "template of numbers", local: "[cli.alpha.args]\nprint = [1]\n",
-			want: "[cli.alpha.args] print"},
+		{name: "template of numbers", local: "[cli.alpha]\neffort_args = [1]\n",
+			want: "[cli.alpha] effort_args"},
 		{name: "bad duration", local: "[agrouter]\ntimeout = 10\n", want: `[agrouter] timeout = "10" (local `},
 		{name: "removed max_chunks", local: "[agrouter]\nmax_chunks = 64\n", want: "[agrouter] max_chunks (local "},
 		{name: "removed chunk_parallel", local: "[agrouter]\nchunk_parallel = 4\n", want: "[agrouter] chunk_parallel (local "},
@@ -258,7 +270,17 @@ func TestLoad_Errors(t *testing.T) {
 		{name: "unknown model key", local: "[model.alpha-big]\neffort = low\n", want: "[model.alpha-big] effort"},
 		{name: "unknown effort key", local: "[effort.alpha.low]\nname = x\n", want: "[effort.alpha.low] name"},
 		{name: "unknown section", local: "[typo.x]\ncli = alpha\n", want: "[typo.x]: unknown section"},
-		{name: "args without cli", local: "[cli.gamma.args]\nprint = []\n", want: "[cli.gamma.args]: no [cli.gamma] section"},
+		{name: "removed args section", local: "[cli.alpha.args]\nprint = []\n",
+			want: "[cli.alpha.args]: argument mappings were removed; set exec_args, model_args, effort_args and prompt_args in [cli.alpha]"},
+		{name: "removed args section without cli", local: "[cli.gamma.args]\nprint = []\n", want: "[cli.gamma.args]: argument mappings were removed"},
+		{name: "removed args section of a disabled cli", local: "[cli.alpha]\nenabled = false\n[cli.alpha.args]\nprint = []\n",
+			want: "[cli.alpha.args]: argument mappings were removed"},
+		{name: "availability without cli", local: "[cli.gamma.availability]\nchecks = x\n",
+			want: "[cli.gamma.availability]: no [cli.gamma] section"},
+		{name: "availability check without cli", local: "[cli.gamma.availability.usage]\ntransport = x\n",
+			want: "[cli.gamma.availability.usage]: no [cli.gamma] section"},
+		{name: "dotted cli name", local: "[cli.tool.v2]\ncommand = tool\n",
+			want: `[cli.tool.v2]: unknown section (CLI names cannot contain ".")`},
 		{name: "effort section name", local: "[effort.alpha]\ndescription = x\n", want: "[effort.<cli>.<level>]"},
 		{name: "key outside section", local: "api_key = x\n", want: `key "api_key" outside any section`},
 	}

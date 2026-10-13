@@ -33,14 +33,24 @@ type Agrouter struct {
 	ComplexityPolicy string
 }
 
-// CLI is a [cli.<name>] section together with its [cli.<name>.args] mappings.
+// CLI is a [cli.<name>] section: the command and the fixed invocation descriptors agrouter builds the
+// child's argv from. A missing template key is nil; an empty JSON array is an empty, non-nil slice.
 type CLI struct {
 	Name        string // section name without the "cli." prefix
 	Command     string
 	Description string
-	// Args maps a mapping key (print, model, output-format.json, config.<key>, ...) to its template.
-	// A missing key means the argument is not supported; an empty slice means supported, adds nothing.
-	Args map[string][]string
+	ExecArgs    []string // the noninteractive invocation, always emitted first
+	ModelArgs   []string // emitted with {model} substituted when a model is selected
+	EffortArgs  []string // emitted with {effort} substituted when an effort is selected
+	PromptArgs  []string // emitted last, only for a command-line prompt; {prompt} is its last token
+	// SelectionFlags are the native spellings that select a model or effort, rejected after "--".
+	SelectionFlags []string
+	// ConfigFlags are the native config flag spellings (key=value); SelectionConfigKeys are the keys
+	// that select a model or effort through them, rejected after "--" like SelectionFlags.
+	ConfigFlags         []string
+	SelectionConfigKeys []string
+	// ContextFlags are native spellings that change the child's provider, profile or settings context.
+	ContextFlags []string
 }
 
 // Model is a [model.<section>] section.

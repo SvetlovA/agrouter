@@ -308,12 +308,12 @@ Exec processing flow: parse → load config → validate operand/flags/conflicts
 - Modify: `pkg/args/build.go`, `pkg/args/redact.go`, `pkg/args/request.go`, `pkg/args/*_test.go`, `pkg/router/eligibility.go`, `pkg/router/eligibility_test.go`.
 - Modify: `cmd/agrouter/flags.go`, `cmd/agrouter/app.go`, `cmd/agrouter/*_test.go`, and synthetic fixtures in `pkg/catalog`, `pkg/router/testdata`.
 
-- [ ] Restructure section dispatch for `cli.<name>`, `cli.<name>.availability[.<check>]` (accepted and ignored until Task 4), and `cli.<name>.args` (migration error); forbid `.` in CLI names; skip subsections of disabled CLIs; error on orphans.
-- [ ] Add and validate `exec_args`, `model_args`, `effort_args`, `prompt_args`, `selection_flags`, `config_flags`, `selection_config_keys`, `context_flags`; migrate embedded config.
-- [ ] Remove `args.Arg`, `ConfigKeyPrefix`, `prefer`, `Skipped`, the `skipped` JSON field, and unmapped warnings; build argv from descriptors.
-- [ ] Implement the native conflict scan and the duplicate-separator check.
-- [ ] Write tests: dispatch (dotted names, orphans, disabled CLI subsections, `.args` migration error, layering), descriptor validation (placeholder placement, prompt last), argv with set/unset model/effort, conflict spellings (bare, `=`, attached short, `-c key=`, `-ckey=`, quoted, after child `--` ignored, value never echoed), duplicate separator, mapping-free eligibility.
-- [ ] Update `-update` goldens, README configuration section, and `CLAUDE.md` mapping rules; run `make test`.
+- [x] Restructure section dispatch for `cli.<name>`, `cli.<name>.availability[.<check>]` (accepted and ignored until Task 4), and `cli.<name>.args` (migration error); forbid `.` in CLI names; skip subsections of disabled CLIs; error on orphans.
+- [x] Add and validate `exec_args`, `model_args`, `effort_args`, `prompt_args`, `selection_flags`, `config_flags`, `selection_config_keys`, `context_flags`; migrate embedded config.
+- [x] Remove `args.Arg`, `ConfigKeyPrefix`, `prefer`, `Skipped`, the `skipped` JSON field, and unmapped warnings; build argv from descriptors.
+- [x] Implement the native conflict scan and the duplicate-separator check.
+- [x] Write tests: dispatch (dotted names, orphans, disabled CLI subsections, `.args` migration error, layering), descriptor validation (placeholder placement, prompt last), argv with set/unset model/effort, conflict spellings (bare, `=`, attached short, `-c key=`, `-ckey=`, quoted, after child `--` ignored, value never echoed), duplicate separator, mapping-free eligibility.
+- [x] Update `-update` goldens, README configuration section, and `CLAUDE.md` mapping rules; run `make test`.
 
 ### Task 3: Failure and null reasons in decision and exec JSON
 

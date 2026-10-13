@@ -61,7 +61,7 @@ The prompt can come from four sources, in any combination: `-p TEXT`, the one po
 | `--doc=PATH` | a project doc (`CLAUDE.md`, `AGENTS.md`, ...) for routing only; repeatable, never passed to the child |
 | `--verbose` | full agrouter decision details; never affects routing. Before `--` it is agrouter's only; after `--` it is the child's own option |
 | `--jev-api-key=KEY` | Jev API key; an empty value clears it |
-| `-- native args...` | exec only: appended to the child's argv unchanged and in order, including empty tokens, repeats and later `--` |
+| `-- native args...` | exec only: appended to the child's argv unchanged and in order, including empty tokens, repeats and later `--`. A native spelling that selects the model or effort is exit `2` (see [Invocation descriptors](#invocation-descriptors)) |
 | `--help`, `--version` | print help or the version and exit |
 
 Whenever stdin is not a terminal, agrouter reads it to EOF within `[agrouter] timeout` before routing. A script that passes the prompt only as an argument or a file should close stdin or redirect it from `/dev/null`; an inherited pipe that stays open uses up the timeout, and Jev cannot decide.
@@ -127,7 +127,7 @@ Add `--verbose` for indented JSON with every stage, chunk and option, plus a rea
 {"cli":"codex","model":"gpt-6.1-sol","effort":"medium","project_complexity":"6.9/10","confidence":{"cli":0.82,"model":0.64,"effort":0.41,"project_complexity":0.9}}
 ```
 
-`project_complexity` is the final project score formatted as `score/10` with one decimal, for example `5.1/10` and is omitted when the complexity stage did not complete. In verbose output, `argv` holds the `-p`, positional and `--prompt-file` text, joined like the routing prompt, as its last token after `--`, so text that starts with `-` reaches the child as the prompt and never as one of its flags (each CLI's `prompt` mapping must end with `"--", "{prompt}"`). It never holds stdin: a caller that piped a prompt must send it to the child itself. `--doc` is never in `argv`; the child loads its own `CLAUDE.md`/`AGENTS.md`. `effort` is `null` for a model without efforts; `skipped` lists, as the caller spelled them, the arguments that got a skip warning: an unknown or disabled `--cli` and an effort the chosen CLI does not map.
+`project_complexity` is the final project score formatted as `score/10` with one decimal, for example `5.1/10` and is omitted when the complexity stage did not complete. In verbose output, `argv` holds the `-p`, positional and `--prompt-file` text, joined like the routing prompt, as its last token, after `--` in the shipped `prompt_args`, so text that starts with `-` reaches the child as the prompt and never as one of its flags. It never holds stdin: a caller that piped a prompt must send it to the child itself. `--doc` is never in `argv`; the child loads its own `CLAUDE.md`/`AGENTS.md`. `effort` is `null` for a model without efforts.
 
 Exec mode, with the prompt on stdin and the CLI's own options after `--`:
 
@@ -162,14 +162,14 @@ Verbose output includes all available numeric details, without truncating chunks
 | `confidence.stages[].chunks` | for a pooled stage: every chunk's field, index/count, choice, Choice confidence, relevance weight and full probability map |
 | `confidence.stages[].pooled_scores` | for a pooled stage: every candidate's `name` and final `score` in catalog order, using relevance weights or an ordinary mean when all relevance is zero; catalog order breaks ties |
 | `confidence.complexity_chunks` | every document request's index/count, formatted project complexity (`5.1/10`), raw numeric `score` for precise calculations, Score confidence and evidence weight; scores use evidence weights or an ordinary mean when all evidence is zero |
-| `argv`, `skipped` | exact child arguments and arguments skipped with a warning; decision mode only |
+| `argv` | exact child arguments; decision mode only |
 | `command` | readable command text for copying; adapt quoting to your terminal; decision mode only |
 | `stdin_required` | whether the command needs the original stdin supplied again; stdin contents are not included in the command |
 
 Stage probabilities and pooled scores are separate from Jev's Choice confidence. Verbose JSON retains zero values. The exec selection log remains one prefixed line on stderr and excludes argv and command; the child's output goes to stdout.
 
 
-The child's stdout, stderr and exit code are agrouter's. An argument the chosen CLI does not map is skipped with one `agrouter: warning:` line on stderr, never an error. Set `AGROUTER_DEBUG=1` to see eligibility, each `--doc` chunk's complexity score, evidence and confidence with the project complexity, one line per routing stage (`stage <level>: skipped (<choice>)`, or the choice, confidence and top candidates, per chunk when pooled), Jev's probabilities and the final command on stderr (prompt text and key redacted; doc text is never printed).
+The child's stdout, stderr and exit code are agrouter's. Set `AGROUTER_DEBUG=1` to see eligibility, each `--doc` chunk's complexity score, evidence and confidence with the project complexity, one line per routing stage (`stage <level>: skipped (<choice>)`, or the choice, confidence and top candidates, per chunk when pooled), Jev's probabilities and the final command on stderr (prompt text and key redacted; doc text is never printed).
 
 When Jev cannot decide (no key, timeout, API errors, at any stage) and the CLI is known (`--cli`, implied by `--model`, or the only one left), agrouter runs it with only the caller's fixed `--model`/`--effort`, so the CLI's defaults apply. With more than one CLI left, it exits `2` with nothing on stdout; `AGROUTER_DEBUG=1` shows the stages that completed.
 
@@ -177,7 +177,7 @@ When Jev cannot decide (no key, timeout, API errors, at any stage) and the CLI i
 
 INI files, merged per section and per key, later layers winning:
 
-1. embedded defaults ([`pkg/config/defaults/config`](pkg/config/defaults/config)): the catalog, routing policies and argument mappings;
+1. embedded defaults ([`pkg/config/defaults/config`](pkg/config/defaults/config)): the catalog, routing policies and invocation descriptors;
 2. global `~/.config/agrouter/config` (directory overridable with `AGROUTER_CONFIG_DIR`);
 3. local `.agrouter/config` in the working directory;
 4. environment (`TYPESAFE_API_KEY`).
@@ -201,7 +201,35 @@ timeout   = 20s
 enabled = false
 ```
 
-CLI names, model IDs and aliases, and effort labels come from the merged config. Adding or renaming any of them, or changing their argument mappings, requires no Go code changes. The embedded defaults document every key.
+CLI names, model IDs and aliases, and effort labels come from the merged config. Adding or renaming any of them, or changing how a CLI is invoked, requires no Go code changes. The embedded defaults document every key.
+
+### Invocation descriptors
+
+Each `[cli.<name>]` section says how agrouter builds that CLI's argv. CLI names cannot contain `.`.
+
+```text
+argv = command + exec_args + model_args + effort_args + native args after "--" + prompt_args
+```
+
+**Note:** agrouter emits each part left to right. `model_args` and `effort_args` appear only for a value routing selected or the caller fixed; `prompt_args` only when there is a `-p`, positional or `--prompt-file` prompt.
+
+| Key | Holds |
+|---|---|
+| `exec_args` | the noninteractive invocation, for example `["-p"]` or `["exec"]`; required, may be `[]` |
+| `model_args` | how to pass the model, with `{model}`; required |
+| `effort_args` | how to pass the effort, with `{effort}`; required when a model of the CLI has efforts |
+| `prompt_args` | how to pass the prompt; `{prompt}` must be its last element and a whole token; required |
+| `selection_flags` | native spellings that select the model or effort, for example `--model, -m, --effort` |
+| `config_flags`, `selection_config_keys` | a native config flag (`-c`) and the keys that select the model or effort through it; set together |
+| `context_flags` | native spellings that switch the CLI's provider, profile or settings |
+
+Template keys are JSON arrays of strings; the flag and key lists are comma-separated. Only `{model}`, `{effort}` and `{prompt}` are placeholders, each only in its own key. An unset model or effort leaves its args out, so the CLI's own default applies.
+
+agrouter has no other per-CLI argument mapping: pass every other native option after `--` with exec. Before routing, exec scans the native tokens up to the child's own `--`. A selection flag (`--model x`, `--model=x`, `-mx`) or a config flag with a selection key (`-c model=x`, `-cmodel=x`, `--config=model=x`) is exit `2`, naming the spelling but never its value. Use agrouter's `--model`/`--effort` instead, so routing knows the constraint. There is no option-arity table, so a native value that is literally a reserved spelling is rejected too.
+
+When `prompt_args` puts the prompt after `--` and the native tokens already hold a `--`, a command-line prompt is exit `2`: the child would read the prompt's `--` as prompt text. Pass the prompt on stdin, or drop the extra `--`.
+
+The former `[cli.<name>.args]` mapping sections are config errors that name the replacement keys. `[cli.<name>.availability]` sections are reserved for readiness checks.
 
 The questions sent to Jev and the description of every state field are built into agrouter. Config holds only the preference they follow, in two `[agrouter]` keys that must be non-empty:
 
@@ -257,7 +285,7 @@ Leave `task_model`, `review_model`, `plan_model`, `codex_model` and `codex_reaso
 | Code | Meaning |
 |---|---|
 | `0` | decision printed, or `--help`/`--version` |
-| `2` | agrouter error before any child starts: unknown flag (including the removed `--permission-mode`, `--dangerously-*`, `--output-format`, `--sandbox` and `-c`), second positional, second `-p`/`--prompt`/`--print` or `--prompt-file`, a missing, unknown or disabled exec CLI, a `--cli` conflicting with it, `--` in decision mode, no prompt, a bad `--prompt-file` or `--doc` file, the timeout passing while the `--prompt-file` is read, config error, or Jev cannot decide with more than one CLI left |
+| `2` | agrouter error before any child starts: unknown flag (including the removed `--permission-mode`, `--dangerously-*`, `--output-format`, `--sandbox` and `-c`), second positional, second `-p`/`--prompt`/`--print` or `--prompt-file`, a missing, unknown or disabled exec CLI, a `--cli` conflicting with it, `--` in decision mode, a native model or effort selection after `--`, a command-line prompt after a second `--`, no prompt, a bad `--prompt-file` or `--doc` file, the timeout passing while the `--prompt-file` is read, config error, or Jev cannot decide with more than one CLI left |
 | `127` | exec mode: the chosen CLI could not be started |
 | other | exec mode: the child's exit code (`128+signal` on Unix when it was killed) |
 

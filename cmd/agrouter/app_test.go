@@ -463,7 +463,7 @@ func TestApp_Decision(t *testing.T) {
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Empty(t, r.stderr)
 		assert.Subset(t, decision(t, r.stdout), map[string]any{"cli": "claude", "model": nil, "effort": nil,
-			"argv": strs("claude", "-p", "--", "fix it"), "skipped": []any{}})
+			"argv": strs("claude", "-p", "--", "fix it")})
 		assert.Empty(t, e.jev.requests())
 	})
 
@@ -545,7 +545,7 @@ func TestApp_VerboseOutput(t *testing.T) {
 			assert.InDelta(t, 5.1, chunks[0].(map[string]any)["score"], 1e-9)
 			assert.Contains(t, d, "options")
 			assert.Contains(t, d, "argv")
-			assert.Equal(t, []any{}, d["skipped"])
+			assert.NotContains(t, d, "skipped")
 			assert.Equal(t, false, d["stdin_required"])
 			assert.Contains(t, d["command"], "private task")
 			assert.Contains(t, output, "\n  ")
@@ -661,7 +661,7 @@ func TestApp_Errors(t *testing.T) {
 		assert.Equal(t, "agrouter: warning: skipped --cli nope: not an enabled CLI; routing across every CLI\n", r.stderr)
 		var out map[string]any
 		require.NoError(t, json.Unmarshal([]byte(r.stdout), &out))
-		assert.Equal(t, strs("--cli nope"), out["skipped"])
+		assert.NotContains(t, out, "skipped")
 	})
 
 	t.Run("exec CLI must be configured and enabled", func(t *testing.T) {
@@ -713,7 +713,7 @@ func TestApp_LegacyCLIEnvIgnored(t *testing.T) {
 }
 
 // syntheticCLIs disables the shipped CLIs and defines two made-up ones, both running the helper with
-// -p/--model/--effort mappings: alpha (fast@low|high and deep@low|high, deep aliased "strong") and
+// -p/--model/--effort descriptors: alpha (fast@low|high and deep@low|high, deep aliased "strong") and
 // beta (other@low|high).
 func syntheticCLIs(t *testing.T) string {
 	t.Helper()
@@ -727,14 +727,15 @@ func syntheticCLIs(t *testing.T) string {
 	for _, name := range []string{"alpha", "beta"} {
 		clis.WriteString(strings.NewReplacer("CLI_NAME", name, "COMMAND", helperCommand(t)).Replace(`
 [cli.CLI_NAME]
-command     = COMMAND
-description = A coding agent that exists only in this test.
-
-[cli.CLI_NAME.args]
-print  = ["-p"]
-prompt = ["--", "{prompt}"]
-model  = ["--model", "{model}"]
-effort = ["--effort", "{effort}"]
+command               = COMMAND
+description           = A coding agent that exists only in this test.
+exec_args             = ["-p"]
+model_args            = ["--model", "{model}"]
+effort_args           = ["--effort", "{effort}"]
+prompt_args           = ["--", "{prompt}"]
+selection_flags       = --model, -m, --effort
+config_flags          = -c
+selection_config_keys = model, effort
 
 [effort.CLI_NAME.low]
 description = Little reasoning.
@@ -1133,6 +1134,52 @@ func TestApp_ExecNativeTail(t *testing.T) {
 	}
 }
 
+func TestApp_ExecNativeConflicts(t *testing.T) {
+	const secret = "secret-native-value"
+	tests := []struct {
+		name   string
+		argv   []string
+		stdin  string
+		prefix string // the one stderr line's start; empty when the child runs
+	}{
+		{name: "selection flag", argv: []string{"exec", "alpha", "fix it", "--", "--model", secret},
+			prefix: `agrouter: native argument --model after "--" selects the alpha model or effort`},
+		{name: "attached short selection flag", argv: []string{"exec", "alpha", "fix it", "--", "-m" + secret},
+			prefix: `agrouter: native argument -m after "--" selects the alpha model or effort`},
+		{name: "config flag with a selection key", argv: []string{"exec", "alpha", "fix it", "--", "-c", `effort="` + secret + `"`},
+			prefix: `agrouter: native argument -c effort after "--" selects the alpha model or effort`},
+		{name: "prompt argument and a native --", argv: []string{"exec", "alpha", "fix it", "--", "--json", "--", "x"},
+			prefix: `agrouter: the native arguments after "--" hold another "--"`},
+		{name: "selection flag after the child's --", argv: []string{"exec", "alpha", "--", "--json", "--", "--model", "x"},
+			stdin: "prompt on stdin"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newSyntheticEnv(t)
+			e.jev.pick = "fast@low"
+			var stdin io.Reader
+			if tc.stdin != "" {
+				stdin = strings.NewReader(tc.stdin)
+			}
+			r := e.run(tc.argv, stdin)
+			if tc.prefix == "" {
+				require.Equal(t, 0, r.code, r.stderr)
+				argv, _, _ := e.child()
+				assert.Equal(t, []string{"-p", "--model", "fast-1", "--effort", "low", "--json", "--", "--model", "x"}, argv)
+				return
+			}
+			assert.Equal(t, 2, r.code)
+			assert.Empty(t, r.stdout)
+			assert.Equal(t, 1, strings.Count(r.stderr, "\n"), r.stderr)
+			assert.True(t, strings.HasPrefix(r.stderr, tc.prefix), r.stderr)
+			assert.NotContains(t, r.stderr, secret, "the value is never echoed")
+			assert.NotContains(t, r.stderr, "selection:")
+			assert.Empty(t, e.jev.requests())
+			assert.NoFileExists(t, filepath.Join(e.out, "argv.json"), "the child must not run")
+		})
+	}
+}
+
 // madeUpConfig defines custom names in config and disables the shipped CLIs dynamically.
 func madeUpConfig(t *testing.T, name, command, section, model, effort string) string {
 	t.Helper()
@@ -1147,12 +1194,10 @@ func madeUpConfig(t *testing.T, name, command, section, model, effort string) st
 [cli.CLI_NAME]
 command     = COMMAND
 description = A coding agent that exists only in this test.
-
-[cli.CLI_NAME.args]
-print  = ["run", "--quiet"]
-prompt = ["--", "{prompt}"]
-model  = ["--llm", "{model}"]
-effort = ["--think={effort}"]
+exec_args   = ["run", "--quiet"]
+model_args  = ["--llm", "{model}"]
+effort_args = ["--think={effort}"]
+prompt_args = ["--", "{prompt}"]
 
 [model.small]
 cli         = CLI_NAME

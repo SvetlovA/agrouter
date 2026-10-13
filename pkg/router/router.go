@@ -48,7 +48,7 @@ type Decision struct {
 	Effort string // empty: no effort argument (null in decision JSON)
 	// OptionID is the chosen option; empty when Jev could not decide.
 	OptionID string
-	// Pinned is true when a valid --cli fixed the CLI, so raw passthrough is appended.
+	// Pinned is true when a valid --cli or the exec CLI fixed the CLI.
 	Pinned bool
 	// Undecided is why Jev could not decide when the CLI was known anyway; nil otherwise.
 	Undecided error
@@ -63,7 +63,7 @@ type Decision struct {
 
 // Choice is the argv choice for args.Build.
 func (d Decision) Choice() args.Choice {
-	return args.Choice{Model: d.Model, Effort: d.Effort, Pinned: d.Pinned}
+	return args.Choice{Model: d.Model, Effort: d.Effort}
 }
 
 // Route decides among el's options for the captured prompt, level by level (see decide). With one

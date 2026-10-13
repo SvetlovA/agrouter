@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strings"
 
 	"github.com/SvetlovA/agrouter/pkg/args"
@@ -80,11 +79,10 @@ type optionJSON struct {
 	Effort string `json:"effort"`
 }
 
-// decisionJSON adds the argv and skipped arguments for decision mode.
+// decisionJSON adds the argv for decision mode.
 type decisionJSON struct {
 	selectionJSON
 	Argv          []string `json:"argv"`
-	Skipped       []string `json:"skipped"`
 	StdinRequired bool     `json:"stdin_required"`
 	Command       string   `json:"command"`
 }
@@ -120,6 +118,10 @@ func (a *app) run(argv []string) int {
 		if len(catalog.ByCLI(cat.Options, req.CLI)) == 0 {
 			return a.fail(fmt.Errorf("exec %s: not a configured, enabled CLI", req.CLI))
 		}
+		cli, _ := cfg.CLIByName(req.CLI)
+		if err = args.CheckNative(cli, req.Raw); err != nil {
+			return a.fail(err)
+		}
 	}
 
 	d, err := a.route(cfg, cat, rt, req)
@@ -133,9 +135,6 @@ func (a *app) run(argv []string) int {
 
 	cli, _ := cfg.CLIByName(d.CLI)
 	res := args.Build(cli, req, d.Choice())
-	for _, s := range res.Skipped {
-		fmt.Fprintln(a.stderr, s.Warning)
-	}
 	a.debug.command(res)
 
 	if req.Mode == args.ModeDecision {
@@ -191,12 +190,10 @@ func (a *app) setup(req *args.Request) (*config.Config, *catalog.Catalog, *route
 	return cfg, cat, rt, nil
 }
 
-// routed is the decision together with the captured prompt, whose stdin the child replays, and the
-// routing arguments eligibility skipped.
+// routed is the decision together with the captured prompt, whose stdin the child replays.
 type routed struct {
 	router.Decision
 	captured *prompt.Result
-	skipped  []args.Skip
 	options  []optionJSON
 }
 
@@ -213,6 +210,12 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 			return routed{}, fmt.Errorf("--prompt-file: %w", err)
 		}
 		req.FileText = text
+	}
+	if req.Mode == args.ModeExec {
+		cli, _ := cfg.CLIByName(req.CLI)
+		if err := args.CheckSeparator(cli, req); err != nil {
+			return routed{}, err
+		}
 	}
 	// docs are read even when one option will be left, so a bad --doc fails every call alike; the
 	// deadline passing mid-read is not a bad doc, so Jev cannot decide
@@ -240,9 +243,9 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 		captured.Undecidable = undecidable
 	}
 
-	el := router.Eligible(cfg, cat, req)
-	for _, s := range el.Skipped {
-		fmt.Fprintln(a.stderr, s.Warning)
+	el := router.Eligible(cat, req)
+	for _, w := range el.Warnings {
+		fmt.Fprintln(a.stderr, w)
 	}
 	a.debug.eligibility(el)
 	// one option runs without Jev, so the files the prompt mentions are not read for it
@@ -260,21 +263,17 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 	for i, o := range el.Options {
 		options[i] = optionJSON{ID: o.ID, CLI: o.CLI, Model: o.Name, Effort: el.EffortFor(o)}
 	}
-	return routed{Decision: d, captured: captured, skipped: el.Skipped, options: options}, nil
+	return routed{Decision: d, captured: captured, options: options}, nil
 }
 
-// printDecision writes concise or indented verbose JSON to stdout; skipped lists what eligibility
-// skipped, then what the argv left out.
+// printDecision writes concise or indented verbose JSON to stdout.
 func (a *app) printDecision(d routed, res args.Result, verbose bool) int {
 	summary := selectionOutput(d, verbose)
 	var out any = summary
 	if verbose {
-		details := decisionJSON{selectionJSON: summary, Argv: res.Argv, Skipped: []string{}}
+		details := decisionJSON{selectionJSON: summary, Argv: res.Argv}
 		details.Command = commandText(res.Argv)
 		details.StdinRequired = d.captured.Stdin != nil && (len(d.captured.Stdin.Buffered) > 0 || d.captured.Stdin.Rest != nil)
-		for _, s := range slices.Concat(d.skipped, res.Skipped) {
-			details.Skipped = append(details.Skipped, s.Spelling)
-		}
 		out = details
 	}
 	enc := json.NewEncoder(a.stdout)

@@ -8,25 +8,14 @@ import (
 	"strings"
 )
 
-// Mapping keys with special meaning in [cli.*.args].
-const (
-	KeyPrint  = "print"
-	KeyPrompt = "prompt"
-	KeyModel  = "model"
-	KeyEffort = "effort"
-)
-
-// ConfigKeyPrefix prefixes the mapping key of a -c key=value argument: "config.<key>".
-const ConfigKeyPrefix = "config."
-
-// EndOfOptions ends option parsing in the child: the prompt template puts it right before {prompt},
-// so prompt text starting with "-" stays a positional argument instead of becoming a flag.
+// EndOfOptions ends option parsing in the child. When prompt_args puts it before {prompt}, prompt text
+// starting with "-" stays a positional argument instead of becoming a flag.
 const EndOfOptions = "--"
 
-// Placeholders substituted inside template tokens. {prompt} is a whole token only.
+// Placeholders substituted in the invocation descriptors, each only in its own key. {prompt} is a whole
+// token only.
 const (
 	PlaceholderPrompt = "{prompt}"
-	PlaceholderValue  = "{value}"
 	PlaceholderModel  = "{model}"
 	PlaceholderEffort = "{effort}"
 )
@@ -60,72 +49,108 @@ func (a Agrouter) validate() []error {
 	return errs
 }
 
-// validate checks the CLI's command and its [cli.<name>.args] mappings against the rules for
-// required keys, {prompt} placement and allowed placeholders.
+// validate checks the CLI's command and invocation descriptors: required keys, placeholders only in
+// their own key, {prompt} as the last prompt_args token, and the native flag lists.
 func (cli CLI) validate(models []Model) []error {
-	section := "cli." + cli.Name + ".args"
+	section := "cli." + cli.Name
 	var errs []error
+	add := func(key, format string, a ...any) {
+		errs = append(errs, fmt.Errorf("[%s] %s: %s", section, key, fmt.Sprintf(format, a...)))
+	}
 	if strings.TrimSpace(cli.Command) == "" {
-		errs = append(errs, fmt.Errorf("[cli.%s] command: must not be empty", cli.Name))
+		add("command", "must not be empty")
 	}
-	for _, key := range []string{KeyPrint, KeyPrompt, KeyModel} {
-		if _, ok := cli.Args[key]; !ok {
-			errs = append(errs, fmt.Errorf("[%s] %s: required mapping is missing", section, key))
-		}
-	}
-	if _, ok := cli.Args[KeyEffort]; !ok {
-		if i := slices.IndexFunc(models, func(m Model) bool { return m.CLI == cli.Name && len(m.Efforts) > 0 }); i >= 0 {
-			errs = append(errs, fmt.Errorf("[%s] %s: required mapping is missing, [model.%s] has efforts",
-				section, KeyEffort, models[i].Section))
-		}
-	}
+	hasEfforts := slices.ContainsFunc(models, func(m Model) bool { return m.CLI == cli.Name && len(m.Efforts) > 0 })
+	cli.validateTemplates(hasEfforts, add)
+	cli.validateFlags(add)
+	return errs
+}
 
-	keys := make([]string, 0, len(cli.Args))
-	for k := range cli.Args {
-		keys = append(keys, k)
+// validateTemplates checks the *_args keys: presence, each key's own placeholder, and prompt_args'
+// last token.
+func (cli CLI) validateTemplates(hasEfforts bool, add func(key, format string, a ...any)) {
+	templates := []struct {
+		key      string
+		tmpl     []string
+		own      string // the one placeholder the key holds, if any
+		required bool
+	}{
+		{"exec_args", cli.ExecArgs, "", true},
+		{"model_args", cli.ModelArgs, PlaceholderModel, true},
+		{"effort_args", cli.EffortArgs, PlaceholderEffort, hasEfforts},
+		{"prompt_args", cli.PromptArgs, PlaceholderPrompt, true},
 	}
-	slices.Sort(keys)
-
-	for _, key := range keys {
-		for _, tok := range cli.Args[key] {
+	for _, t := range templates {
+		if t.tmpl == nil {
+			if t.required {
+				add(t.key, "required")
+			}
+			continue
+		}
+		if t.own != "" && !slices.ContainsFunc(t.tmpl, func(tok string) bool { return strings.Contains(tok, t.own) }) {
+			add(t.key, "must contain %s", t.own)
+		}
+		for _, tok := range t.tmpl {
 			for _, ph := range placeholderRe.FindAllString(tok, -1) {
-				if err := checkPlaceholder(key, tok, ph); err != nil {
-					errs = append(errs, fmt.Errorf("[%s] %s: %w", section, key, err))
+				if err := checkPlaceholder(t.key, t.own, tok, ph); err != nil {
+					add(t.key, "%v", err)
 				}
 			}
 		}
 	}
-	if tmpl, ok := cli.Args[KeyPrompt]; ok {
-		if n := len(tmpl); n < 2 || tmpl[n-1] != PlaceholderPrompt || tmpl[n-2] != EndOfOptions ||
-			slices.Index(tmpl, PlaceholderPrompt) != n-1 {
-			errs = append(errs, fmt.Errorf("[%s] %s: must end with %q, %q and hold %s only there",
-				section, KeyPrompt, EndOfOptions, PlaceholderPrompt, PlaceholderPrompt))
-		}
+	if n := len(cli.PromptArgs); n > 0 && (cli.PromptArgs[n-1] != PlaceholderPrompt ||
+		slices.Index(cli.PromptArgs, PlaceholderPrompt) != n-1) {
+		add("prompt_args", "must hold %s once, as its last element", PlaceholderPrompt)
 	}
-	return errs
 }
 
-// checkPlaceholder reports whether placeholder ph is allowed in token tok of mapping key.
-func checkPlaceholder(key, tok, ph string) error {
+// validateFlags checks the native flag spellings and selection config keys.
+func (cli CLI) validateFlags(add func(key, format string, a ...any)) {
+	for _, l := range []struct {
+		key   string
+		items []string
+	}{
+		{"selection_flags", cli.SelectionFlags},
+		{"config_flags", cli.ConfigFlags},
+		{"context_flags", cli.ContextFlags},
+	} {
+		for _, f := range l.items {
+			if !isFlagSpelling(f) {
+				add(l.key, "%q is not a flag spelling (-x or --name)", f)
+			}
+		}
+	}
+	for _, k := range cli.SelectionConfigKeys {
+		if strings.ContainsAny(k, "= \t") {
+			add("selection_config_keys", "%q is not a config key", k)
+		}
+	}
+	if (len(cli.ConfigFlags) == 0) != (len(cli.SelectionConfigKeys) == 0) {
+		add("selection_config_keys", "set together with config_flags")
+	}
+}
+
+// isFlagSpelling reports whether f is a single option spelling such as -m or --model.
+func isFlagSpelling(f string) bool {
+	name := strings.TrimPrefix(strings.TrimPrefix(f, "-"), "-")
+	return strings.HasPrefix(f, "-") && name != "" && !strings.HasPrefix(name, "-") && !strings.ContainsAny(name, "= \t")
+}
+
+// checkPlaceholder reports whether placeholder ph is allowed in token tok of key, whose own
+// placeholder is own.
+func checkPlaceholder(key, own, tok, ph string) error {
 	switch ph {
-	case PlaceholderModel, PlaceholderEffort:
-		return nil
-	case PlaceholderValue:
-		if !strings.HasPrefix(key, ConfigKeyPrefix) {
-			return fmt.Errorf("%s is only allowed in config.* mappings", PlaceholderValue)
-		}
-		return nil
-	case PlaceholderPrompt:
-		if key != KeyPrompt {
-			return fmt.Errorf("%s is only allowed in %s", PlaceholderPrompt, KeyPrompt)
-		}
-		if tok != PlaceholderPrompt {
-			return fmt.Errorf("%s must be a whole token, found in %q", PlaceholderPrompt, tok)
-		}
-		return nil
+	case PlaceholderModel, PlaceholderEffort, PlaceholderPrompt:
 	default:
 		return fmt.Errorf("unknown placeholder %s in %q", ph, tok)
 	}
+	if ph != own {
+		return fmt.Errorf("%s is not allowed in %s", ph, key)
+	}
+	if ph == PlaceholderPrompt && tok != PlaceholderPrompt {
+		return fmt.Errorf("%s must be a whole token, found in %q", PlaceholderPrompt, tok)
+	}
+	return nil
 }
 
 // validateModels checks section names, required names, known CLIs and that every name and alias

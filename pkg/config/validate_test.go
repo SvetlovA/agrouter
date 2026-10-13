@@ -31,70 +31,121 @@ func TestValidate_Violations(t *testing.T) {
 			want:  []string{"[cli.beta] command: must not be empty"},
 		},
 		{
-			name:  "missing print",
-			local: "[cli.gamma]\ncommand = gamma\n[cli.gamma.args]\nmodel = [\"-m\", \"{model}\"]\nprompt = [\"--\", \"{prompt}\"]\n",
-			want:  []string{"[cli.gamma.args] print: required mapping is missing"},
+			name:  "missing exec_args",
+			local: "[cli.gamma]\ncommand = gamma\nmodel_args = [\"-m\", \"{model}\"]\nprompt_args = [\"{prompt}\"]\n",
+			want:  []string{"[cli.gamma] exec_args: required"},
 		},
 		{
-			name:  "missing model",
-			local: "[cli.gamma]\ncommand = gamma\n[cli.gamma.args]\nprint = []\nprompt = [\"--\", \"{prompt}\"]\n",
-			want:  []string{"[cli.gamma.args] model: required mapping is missing"},
+			name:  "missing model_args",
+			local: "[cli.gamma]\ncommand = gamma\nexec_args = []\nprompt_args = [\"{prompt}\"]\n",
+			want:  []string{"[cli.gamma] model_args: required"},
 		},
 		{
-			name: "missing effort with efforts on a model",
-			local: "[cli.gamma]\ncommand = gamma\n[cli.gamma.args]\nprint = []\nprompt = [\"--\", \"{prompt}\"]\nmodel = [\"-m\", \"{model}\"]\n" +
+			name:  "missing prompt_args",
+			local: "[cli.gamma]\ncommand = gamma\nexec_args = []\nmodel_args = [\"-m\", \"{model}\"]\n",
+			want:  []string{"[cli.gamma] prompt_args: required"},
+		},
+		{
+			name: "missing effort_args with efforts on a model",
+			local: "[cli.gamma]\ncommand = gamma\nexec_args = []\nmodel_args = [\"-m\", \"{model}\"]\nprompt_args = [\"{prompt}\"]\n" +
 				"[model.gamma-one]\ncli = gamma\nname = gamma-one\nefforts = low\n",
-			want: []string{"[cli.gamma.args] effort: required mapping is missing, [model.gamma-one] has efforts"},
+			want: []string{"[cli.gamma] effort_args: required"},
 		},
 		{
-			name:  "missing prompt",
-			local: "[cli.gamma]\ncommand = gamma\n[cli.gamma.args]\nprint = []\nmodel = [\"-m\", \"{model}\"]\n",
-			want:  []string{"[cli.gamma.args] prompt: required mapping is missing"},
+			name:  "model_args without its placeholder",
+			local: "[cli.beta]\nmodel_args = [\"-m\"]\n",
+			want:  []string{"[cli.beta] model_args: must contain {model}"},
 		},
 		{
-			name:  "prompt in print",
-			local: "[cli.beta.args]\nprint = [\"run\", \"{prompt}\"]\n",
-			want:  []string{"[cli.beta.args] print: {prompt} is only allowed in prompt"},
+			name:  "effort_args without its placeholder",
+			local: "[cli.alpha]\neffort_args = [\"--effort\"]\n",
+			want:  []string{"[cli.alpha] effort_args: must contain {effort}"},
 		},
 		{
-			name:  "prompt without end of options",
-			local: "[cli.beta.args]\nprompt = [\"{prompt}\"]\n",
-			want:  []string{`[cli.beta.args] prompt: must end with "--", "{prompt}" and hold {prompt} only there`},
+			name:  "prompt in exec_args",
+			local: "[cli.beta]\nexec_args = [\"run\", \"{prompt}\"]\n",
+			want:  []string{"[cli.beta] exec_args: {prompt} is not allowed in exec_args"},
+		},
+		{
+			name:  "effort in model_args",
+			local: "[cli.beta]\nmodel_args = [\"-m\", \"{model}\", \"{effort}\"]\n",
+			want:  []string{"[cli.beta] model_args: {effort} is not allowed in model_args"},
+		},
+		{
+			name:  "model in effort_args",
+			local: "[cli.alpha]\neffort_args = [\"--effort\", \"{effort}\", \"--model={model}\"]\n",
+			want:  []string{"[cli.alpha] effort_args: {model} is not allowed in effort_args"},
+		},
+		{
+			name:  "model in prompt_args",
+			local: "[cli.beta]\nprompt_args = [\"{model}\", \"{prompt}\"]\n",
+			want:  []string{"[cli.beta] prompt_args: {model} is not allowed in prompt_args"},
 		},
 		{
 			name:  "prompt not last",
-			local: "[cli.beta.args]\nprompt = [\"--\", \"{prompt}\", \"--verbose\"]\n",
-			want:  []string{"must end with"},
+			local: "[cli.beta]\nprompt_args = [\"--\", \"{prompt}\", \"--verbose\"]\n",
+			want:  []string{"[cli.beta] prompt_args: must hold {prompt} once, as its last element"},
 		},
 		{
 			name:  "prompt twice",
-			local: "[cli.beta.args]\nprompt = [\"{prompt}\", \"--\", \"{prompt}\"]\n",
-			want:  []string{"must end with"},
+			local: "[cli.beta]\nprompt_args = [\"{prompt}\", \"--\", \"{prompt}\"]\n",
+			want:  []string{"must hold {prompt} once"},
 		},
 		{
-			name:  "prompt template without the prompt",
-			local: "[cli.beta.args]\nprompt = [\"--task\"]\n",
-			want:  []string{"must end with"},
+			name:  "prompt_args without the prompt",
+			local: "[cli.beta]\nprompt_args = [\"--task\"]\n",
+			want:  []string{"[cli.beta] prompt_args: must contain {prompt}", "must hold {prompt} once"},
 		},
 		{
-			name:  "prompt elsewhere",
-			local: "[cli.beta.args]\nverbose = [\"{prompt}\"]\n",
-			want:  []string{"[cli.beta.args] verbose: {prompt} is only allowed in prompt"},
+			name:  "empty prompt_args",
+			local: "[cli.beta]\nprompt_args = []\n",
+			want:  []string{"[cli.beta] prompt_args: must contain {prompt}"},
 		},
 		{
 			name:  "prompt inside a longer token",
-			local: "[cli.beta.args]\nprompt = [\"--\", \"--p={prompt}\"]\n",
-			want:  []string{`[cli.beta.args] prompt: {prompt} must be a whole token, found in "--p={prompt}"`, "must end with"},
+			local: "[cli.beta]\nprompt_args = [\"--\", \"--p={prompt}\"]\n",
+			want:  []string{`[cli.beta] prompt_args: {prompt} must be a whole token, found in "--p={prompt}"`, "must hold {prompt} once"},
 		},
 		{
-			name:  "value outside config.*",
-			local: "[cli.beta.args]\nverbose = [\"{value}\"]\n",
-			want:  []string{"[cli.beta.args] verbose: {value} is only allowed in config.* mappings"},
+			name:  "removed value placeholder",
+			local: "[cli.beta]\nexec_args = [\"{value}\"]\n",
+			want:  []string{`[cli.beta] exec_args: unknown placeholder {value} in "{value}"`},
 		},
 		{
 			name:  "unknown placeholder",
-			local: "[cli.beta.args]\nmodel = [\"-m\", \"{mdl}\"]\n",
-			want:  []string{`[cli.beta.args] model: unknown placeholder {mdl} in "{mdl}"`},
+			local: "[cli.beta]\nmodel_args = [\"-m\", \"{model}\", \"{mdl}\"]\n",
+			want:  []string{`[cli.beta] model_args: unknown placeholder {mdl} in "{mdl}"`},
+		},
+		{
+			name:  "selection flag not a flag",
+			local: "[cli.beta]\nselection_flags = model, -, ---m, --m=x\n",
+			want: []string{`[cli.beta] selection_flags: "model" is not a flag spelling`, `"-" is not a flag spelling`,
+				`"---m" is not a flag spelling`, `"--m=x" is not a flag spelling`},
+		},
+		{
+			name:  "context flag not a flag",
+			local: "[cli.beta]\ncontext_flags = profile\n",
+			want:  []string{`[cli.beta] context_flags: "profile" is not a flag spelling`},
+		},
+		{
+			name:  "config flag not a flag",
+			local: "[cli.beta]\nconfig_flags = c\nselection_config_keys = model\n",
+			want:  []string{`[cli.beta] config_flags: "c" is not a flag spelling`},
+		},
+		{
+			name:  "selection config key with a value",
+			local: "[cli.alpha]\nselection_config_keys = model=x\n",
+			want:  []string{`[cli.alpha] selection_config_keys: "model=x" is not a config key`},
+		},
+		{
+			name:  "selection config keys without config flags",
+			local: "[cli.beta]\nselection_config_keys = model\n",
+			want:  []string{"[cli.beta] selection_config_keys: set together with config_flags"},
+		},
+		{
+			name:  "config flags without selection config keys",
+			local: "[cli.beta]\nconfig_flags = -c\n",
+			want:  []string{"[cli.beta] selection_config_keys: set together with config_flags"},
 		},
 		{
 			name:  "at sign in model section",
@@ -153,11 +204,15 @@ func TestValidate_Allowed(t *testing.T) {
 		name  string
 		local string
 	}{
-		{name: "options before the end of options", local: "[cli.beta.args]\nprompt = [\"--task\", \"--\", \"{prompt}\"]\n"},
-		{name: "value in config.*", local: "[cli.beta.args]\nconfig.project_doc = [\"-c\", \"{value}\"]\n"},
-		{name: "model and effort inside tokens", local: "[cli.alpha.args]\neffort = [\"-c\", \"model_reasoning_effort=\\\"{effort}\\\"\", \"--m={model}\"]\n"},
-		{name: "braces that are not placeholders", local: "[cli.beta.args]\nverbose = [\"--json={\\\"a\\\": 1}\", \"{}\"]\n"},
-		{name: "no effort mapping when no model has efforts", local: ""},
+		{name: "options before the end of options", local: "[cli.beta]\nprompt_args = [\"--task\", \"--\", \"{prompt}\"]\n"},
+		{name: "prompt without the end of options", local: "[cli.beta]\nprompt_args = [\"{prompt}\"]\n"},
+		{name: "model and effort inside tokens", local: "[cli.alpha]\neffort_args = [\"-c\", \"model_reasoning_effort=\\\"{effort}\\\"\"]\nmodel_args = [\"--m={model}\"]\n"},
+		{name: "braces that are not placeholders", local: "[cli.beta]\nexec_args = [\"--json={\\\"a\\\": 1}\", \"{}\"]\n"},
+		{name: "empty exec_args", local: "[cli.alpha]\nexec_args = []\n"},
+		{name: "a third cli configured in a local layer", local: "[cli.gamma]\ncommand = gamma\nexec_args = [\"run\"]\n" +
+			"model_args = [\"--model\", \"{model}\"]\neffort_args = [\"--effort\", \"{effort}\"]\nprompt_args = [\"--\", \"{prompt}\"]\n" +
+			"selection_flags = --model, -m\n[model.gamma-one]\ncli = gamma\nname = gamma-one\nefforts = low, high\n"},
+		{name: "no effort_args when no model has efforts", local: ""},
 		{name: "model of a disabled cli is dropped, not unknown", local: "[cli.beta]\nenabled = false\n"},
 	}
 	for _, tc := range tests {

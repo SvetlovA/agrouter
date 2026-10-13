@@ -102,7 +102,7 @@ type section struct {
 }
 
 // merged is the per-section, per-key union of the layers. ini.v1's own lookups are avoided because
-// they inherit keys from parent sections ([cli.x.args] would see [cli.x]'s keys).
+// they inherit keys from parent sections ([cli.x.availability] would see [cli.x]'s keys).
 type merged struct {
 	order    []string
 	sections map[string]*section
@@ -144,7 +144,7 @@ func (m *merged) decode() (*Config, error) {
 	cfg := &Config{Efforts: map[string]Effort{}}
 	disabled := map[string]bool{} // CLI names with enabled = false
 	for _, name := range m.order {
-		if cliName, ok := strings.CutPrefix(name, "cli."); ok && !strings.HasSuffix(name, ".args") {
+		if cliName, sub, ok := cliSection(name); ok && sub == "" {
 			on, err := m.sections[name].enabled()
 			if err != nil {
 				return nil, err
@@ -180,17 +180,15 @@ func (m *merged) decodeSection(cfg *Config, s *section, disabled map[string]bool
 	switch name := s.name; {
 	case name == "agrouter":
 		return s.decodeAgrouter(&cfg.Agrouter)
-	case strings.HasPrefix(name, "cli.") && strings.HasSuffix(name, ".args"):
-		// decoded with its [cli.*] section
-		cliName := strings.TrimSuffix(strings.TrimPrefix(name, "cli."), ".args")
-		if _, known := disabled[cliName]; !known {
-			return fmt.Errorf("[%s]: no [cli.%s] section", name, cliName)
-		}
 	case strings.HasPrefix(name, "cli."):
-		if disabled[strings.TrimPrefix(name, "cli.")] {
+		cliName, sub, _ := cliSection(name)
+		if sub != "" {
+			return checkCLISubsection(name, cliName, sub, disabled)
+		}
+		if disabled[cliName] {
 			return nil
 		}
-		cli, err := m.decodeCLI(s)
+		cli, err := s.decodeCLI()
 		if err != nil {
 			return err
 		}
@@ -255,29 +253,68 @@ func (s *section) decodeAgrouter(a *Agrouter) error {
 	return nil
 }
 
-func (m *merged) decodeCLI(s *section) (CLI, error) {
-	cli := CLI{Name: strings.TrimPrefix(s.name, "cli."), Args: map[string][]string{}}
+// cliSection splits a [cli.*] section name into the CLI name and the subsection after its first ".",
+// empty for the CLI section itself. CLI names cannot contain ".".
+func cliSection(name string) (cliName, sub string, ok bool) {
+	rest, ok := strings.CutPrefix(name, "cli.")
+	if !ok {
+		return "", "", false
+	}
+	cliName, sub, _ = strings.Cut(rest, ".")
+	return cliName, sub, true
+}
+
+// checkCLISubsection accepts [cli.<name>.availability] and [cli.<name>.availability.<check>], which
+// belong to an existing [cli.<name>] section, and rejects every other subsection, including the
+// removed [cli.<name>.args]. A disabled CLI's subsections are skipped.
+func checkCLISubsection(name, cliName, sub string, disabled map[string]bool) error {
+	switch {
+	case sub == "args":
+		return fmt.Errorf("[%s]: argument mappings were removed; set exec_args, model_args, effort_args and prompt_args in [cli.%s], "+
+			"and pass other native options after \"--\" with exec", name, cliName)
+	case sub != "availability" && !strings.HasPrefix(sub, "availability."):
+		return fmt.Errorf("[%s]: unknown section (CLI names cannot contain \".\")", name)
+	}
+	if _, known := disabled[cliName]; !known {
+		return fmt.Errorf("[%s]: no [cli.%s] section", name, cliName)
+	}
+	// decoded with readiness checks; accepted as is until then
+	return nil
+}
+
+func (s *section) decodeCLI() (CLI, error) {
+	cli := CLI{Name: strings.TrimPrefix(s.name, "cli.")}
 	for _, k := range s.keys {
+		v := s.values[k].value
+		var err error
 		switch k {
 		case "command":
-			cli.Command = s.values[k].value
+			cli.Command = v
 		case "description":
-			cli.Description = s.values[k].value
+			cli.Description = v
+		case "exec_args":
+			cli.ExecArgs, err = parseTemplate(v)
+		case "model_args":
+			cli.ModelArgs, err = parseTemplate(v)
+		case "effort_args":
+			cli.EffortArgs, err = parseTemplate(v)
+		case "prompt_args":
+			cli.PromptArgs, err = parseTemplate(v)
+		case "selection_flags":
+			cli.SelectionFlags = splitList(v)
+		case "config_flags":
+			cli.ConfigFlags = splitList(v)
+		case "selection_config_keys":
+			cli.SelectionConfigKeys = splitList(v)
+		case "context_flags":
+			cli.ContextFlags = splitList(v)
 		case "enabled":
 		default:
 			return CLI{}, s.unknownKey(k)
 		}
-	}
-	args, ok := m.sections[s.name+".args"]
-	if !ok {
-		return cli, nil
-	}
-	for _, k := range args.keys {
-		tmpl, err := parseTemplate(args.values[k].value)
 		if err != nil {
-			return CLI{}, args.keyError(k, err)
+			return CLI{}, s.keyError(k, err)
 		}
-		cli.Args[k] = tmpl
 	}
 	return cli, nil
 }
@@ -362,7 +399,7 @@ func (s *section) keyError(key string, err error) error {
 	return fmt.Errorf("[%s] %s = %q (%s): %w", s.name, key, e.value, origin(e.layer, e.path), err)
 }
 
-// parseTemplate decodes a [cli.*.args] value: a JSON array of strings, possibly empty.
+// parseTemplate decodes a [cli.*] *_args value: a JSON array of strings, possibly empty.
 func parseTemplate(v string) ([]string, error) {
 	if !strings.HasPrefix(strings.TrimSpace(v), "[") {
 		return nil, errors.New("template must be a JSON array of strings")

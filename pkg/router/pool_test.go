@@ -112,8 +112,8 @@ func repeatAnswers(n int, a map[string]jev.Answer) []map[string]jev.Answer {
 }
 
 func TestPoolRelevanceWeights(t *testing.T) {
-	cfg, cat := embedded(t)
-	opts := ids(Eligible(cfg, cat, &args.Request{CLI: "claude"}).Options)
+	_, cat := embedded(t)
+	opts := ids(Eligible(cat, &args.Request{CLI: "claude"}).Options)
 	hard := chunkAnswers(favoring(opts, optHard, 0.5), 0.95)
 	fill := chunkAnswers(favoring(opts, optEasy, 0.99), 0.01)
 	zero := chunkAnswers(favoring(opts, optEasy, 0.99), 0)
@@ -239,7 +239,7 @@ func TestPoolNamesOtherThanOptionIDs(t *testing.T) {
 func TestRouteChunked(t *testing.T) {
 	cfg, cat := embedded(t)
 	req := &args.Request{CLI: "claude"}
-	el := Eligible(cfg, cat, req)
+	el := Eligible(cat, req)
 	c := captured("HARD: keep the public API stable while fixing the parser\n" + filler(600_000))
 	split, err := c.Split(newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget)
 	require.NoError(t, err)
@@ -318,7 +318,7 @@ func TestRouteChunked(t *testing.T) {
 func TestRouteChunkedConfidenceNotAveraged(t *testing.T) {
 	cfg, cat := embedded(t)
 	req := &args.Request{CLI: "claude"}
-	el := Eligible(cfg, cat, req)
+	el := Eligible(cat, req)
 	c := captured("HARD: migrate the schema\n" + filler(200_000))
 	tops := make([][]Score, 0, 2)
 	for _, conf := range []float64{0.01, 0.99} {
@@ -346,7 +346,7 @@ func TestRouteChunkedConfidenceNotAveraged(t *testing.T) {
 func TestRouteChunkGoldenRequest(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	req := &args.Request{CLI: "alpha"}
-	el := Eligible(cfg, cat, req)
+	el := Eligible(cat, req)
 	client := chunked(t, func(req jev.Request, _ prompt.ChunkState) (map[string]jev.Answer, error) {
 		return stageAnswers(req, "fast", 0.9, 0.5), nil
 	})
@@ -396,7 +396,7 @@ func rejecting(t *testing.T, reject func(prompt.ChunkState) bool) *mocks.JevClie
 func TestRouteSingleRequest422Resplits(t *testing.T) {
 	cfg, cat := embedded(t)
 	req := &args.Request{CLI: "claude"}
-	el := Eligible(cfg, cat, req)
+	el := Eligible(cat, req)
 	client := rejecting(t, func(prompt.ChunkState) bool { return false })
 	r := newRouter(t, cfg, cat, client)
 	c := captured("HARD: rename the package\n" + filler(40_000))
@@ -426,7 +426,7 @@ func TestRouteSingleRequest422Resplits(t *testing.T) {
 func TestRouteChunk422ResplitsOnce(t *testing.T) {
 	cfg, cat := embedded(t)
 	req := &args.Request{CLI: "claude"}
-	el := Eligible(cfg, cat, req)
+	el := Eligible(cat, req)
 	c := captured("HARD: port the scheduler\n" + filler(200_000))
 	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
 	split, err := c.Split(r.budget)
@@ -465,7 +465,7 @@ func TestRouteChunk422ResplitsOnce(t *testing.T) {
 func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 	cfg, cat := embedded(t)
 	req := &args.Request{CLI: "claude"}
-	el := Eligible(cfg, cat, req)
+	el := Eligible(cat, req)
 	big := captured("START HARD: port the scheduler\n" + filler(200_000))
 	tail := captured(filler(145_000))
 	tail.Files = []string{"short tail file\n"} // a separate short chunk regardless of question size
@@ -570,7 +570,7 @@ func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 func TestRouteChunkedCannotDecideCLIUnknown(t *testing.T) {
 	cfg, cat := embedded(t)
 	req := &args.Request{}
-	el := Eligible(cfg, cat, req)
+	el := Eligible(cat, req)
 	client := chunked(t, func(jev.Request, prompt.ChunkState) (map[string]jev.Answer, error) {
 		return nil, context.DeadlineExceeded
 	})
@@ -586,7 +586,7 @@ func TestRouteChunkedStopsOnDeadline(t *testing.T) {
 func testRouteChunkedStopsOnDeadline(t *testing.T) {
 	cfg, cat := embedded(t)
 	req := &args.Request{CLI: "claude"}
-	el := Eligible(cfg, cat, req)
+	el := Eligible(cat, req)
 	var mu sync.Mutex
 	started := 0
 	client := &mocks.JevClientMock{AskFunc: func(ctx context.Context, _ jev.Request) (map[string]jev.Answer, error) {
@@ -617,7 +617,7 @@ func TestRouteChunkedAnsweredAtDeadlineStands(t *testing.T) {
 func testRouteChunkedAnsweredAtDeadlineStands(t *testing.T) {
 	cfg, cat := embedded(t)
 	req := &args.Request{CLI: "claude"}
-	el := Eligible(cfg, cat, req)
+	el := Eligible(cat, req)
 	client := &mocks.JevClientMock{AskFunc: func(ctx context.Context, req jev.Request) (map[string]jev.Answer, error) {
 		<-ctx.Done() // every chunk answers just as the deadline passes
 		return stageAnswers(req, "claude-sonnet-5-5@low", 0.9, 0.5), nil

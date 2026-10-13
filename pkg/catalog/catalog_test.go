@@ -20,20 +20,18 @@ routing_policy = Prefer cheap.
 complexity_policy = Judge the codebase.
 
 [cli.alpha]
-command = alpha
-[cli.alpha.args]
-print = []
-prompt = ["--", "{prompt}"]
-model = ["--model", "{model}"]
-effort = ["--effort", "{effort}"]
+command     = alpha
+exec_args   = []
+prompt_args = ["--", "{prompt}"]
+model_args  = ["--model", "{model}"]
+effort_args = ["--effort", "{effort}"]
 
 [cli.beta]
-command = beta
-[cli.beta.args]
-print = []
-prompt = ["--", "{prompt}"]
-model = ["--model", "{model}"]
-effort = ["--effort", "{effort}"]
+command     = beta
+exec_args   = []
+prompt_args = ["--", "{prompt}"]
+model_args  = ["--model", "{model}"]
+effort_args = ["--effort", "{effort}"]
 
 [model.alpha-big]
 cli = alpha

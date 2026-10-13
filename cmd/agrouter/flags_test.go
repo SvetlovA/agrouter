@@ -38,7 +38,6 @@ func TestParseArgs_FlagsAroundPositional(t *testing.T) {
 			assert.Equal(t, positional("fix it"), req.Prompt)
 			assert.Equal(t, "m", req.Model)
 			assert.Equal(t, "high", req.Effort)
-			assert.Empty(t, req.Args)
 			assert.Empty(t, req.Raw)
 		})
 	}
@@ -110,7 +109,6 @@ func TestParseArgs_OwnFlags(t *testing.T) {
 		cmd, err := parseArgs([]string{"--verbose", "x"})
 		require.NoError(t, err)
 		assert.True(t, cmd.verbose)
-		assert.Empty(t, cmd.req.Args)
 		cmd, err = parseArgs([]string{"exec", "tool-a", "x", "--", "--verbose"})
 		require.NoError(t, err)
 		assert.False(t, cmd.verbose)
@@ -127,16 +125,11 @@ func TestParseArgs_OwnFlags(t *testing.T) {
 	t.Run("--jev-api-key split form", func(t *testing.T) {
 		req := parseOK(t, []string{"--jev-api-key", "k-1", "x"})
 		assert.Equal(t, args.Optional{Value: "k-1", Set: true}, req.APIKey)
-		assert.Empty(t, req.Args)
 	})
-	t.Run("--model and --effort are constraints, not mapped args", func(t *testing.T) {
+	t.Run("--model and --effort are constraints", func(t *testing.T) {
 		req := parseOK(t, []string{"--model", "m-1", "--effort=high", "x"})
 		assert.Equal(t, "m-1", req.Model)
-		assert.Equal(t, args.SourceFlag, req.ModelSource)
 		assert.Equal(t, "high", req.Effort)
-		assert.Equal(t, args.SourceFlag, req.EffortSource)
-		assert.Equal(t, "--effort high", req.EffortSpell)
-		assert.Empty(t, req.Args)
 	})
 	t.Run("--help", func(t *testing.T) {
 		cmd, err := parseArgs([]string{"--verbose", "--help"})
@@ -185,7 +178,6 @@ func TestParseArgs_PromptSources(t *testing.T) {
 		argv              []string
 		wantFlag, wantPos args.Optional
 		wantFile          args.Optional
-		wantArgs          []args.Arg
 	}{
 		{name: "-p alone", argv: []string{"-p", "fix it"}, wantFlag: positional("fix it")},
 		{name: "--prompt = form", argv: []string{"--prompt=fix it"}, wantFlag: positional("fix it")},
@@ -193,8 +185,7 @@ func TestParseArgs_PromptSources(t *testing.T) {
 		{name: "empty -p is set", argv: []string{"-p", ""}, wantFlag: positional("")},
 		{name: "--prompt-file alone", argv: []string{"--prompt-file", "task.md"}, wantFile: positional("task.md")},
 		{name: "every source", argv: []string{"--prompt-file=task.md", "positional", "-p", "flag", "--verbose"},
-			wantFlag: positional("flag"), wantPos: positional("positional"), wantFile: positional("task.md"),
-			wantArgs: nil},
+			wantFlag: positional("flag"), wantPos: positional("positional"), wantFile: positional("task.md")},
 		{name: "slash values survive", argv: []string{"-p", "/review", "--prompt-file", "/tmp/task.md"},
 			wantFlag: positional("/review"), wantFile: positional("/tmp/task.md")},
 	}
@@ -204,7 +195,6 @@ func TestParseArgs_PromptSources(t *testing.T) {
 			assert.Equal(t, tc.wantFlag, req.PromptFlag)
 			assert.Equal(t, tc.wantPos, req.Prompt)
 			assert.Equal(t, tc.wantFile, req.PromptFile)
-			assert.Equal(t, tc.wantArgs, req.Args)
 			assert.Empty(t, req.FileText, "the file is read by the app, not the parser")
 		})
 	}
@@ -227,7 +217,6 @@ func TestParseArgs_Docs(t *testing.T) {
 			req := parseOK(t, tc.argv)
 			assert.Equal(t, tc.want, req.Docs)
 			assert.Equal(t, positional("fix it"), req.Prompt)
-			assert.Empty(t, req.Args, "--doc is not a mapped argument")
 		})
 	}
 }
@@ -252,7 +241,6 @@ func TestParseArgs_Raw(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := parseOK(t, tc.argv)
 			assert.Equal(t, tc.want, req.Raw)
-			assert.Empty(t, req.Args)
 			if tc.name == "prompt text after -- is not a prompt" {
 				assert.False(t, req.Prompt.Set)
 				assert.False(t, req.PromptFlag.Set)
