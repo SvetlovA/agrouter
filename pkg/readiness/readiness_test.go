@@ -118,7 +118,8 @@ func TestCheck_ExecutableMissing(t *testing.T) {
 }
 
 func TestCheck_ExecutableNotExecutable(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "tool.txt")
+	// no execute bit on Unix and no PATHEXT extension on Windows: present, but not runnable
+	path := filepath.Join(t.TempDir(), "tool")
 	require.NoError(t, os.WriteFile(path, []byte("text"), 0o600))
 	cli := helperCLI()
 	cli.Command = path
