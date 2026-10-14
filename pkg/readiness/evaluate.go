@@ -13,6 +13,7 @@ import (
 const (
 	ReasonResetPassed      = "quota_reset_passed"         // a block whose verified reset is already past: stale
 	ReasonDelegatedModel   = "delegated_model_unverified" // no model is set and some model has its own block
+	ReasonScopeUnmatched   = "quota_scope_unmatched"      // a model-scoped block whose label names no catalog model
 	ReasonEvidenceInvalid  = "evidence_invalid"           // a status or window the evaluation does not know
 	ReasonWindowNotChecked = "window_not_reported"        // no evidence covers a subscription window
 )
@@ -57,7 +58,9 @@ type Evaluation struct {
 
 // Evaluate judges opts, the eligible options of r.CLI, against r. Model-scoped evidence matches an
 // option when its label equals, ignoring case, the option's model name, section or one of the
-// model's aliases. Evaluate never adds an option, so caller-fixed constraints are never broadened.
+// model's aliases. A model-scoped block whose label names no catalog model of the CLI cannot be
+// placed, so it leaves every other model unknown. Evaluate never adds an option, so caller-fixed
+// constraints are never broadened.
 func Evaluate(r Report, opts []catalog.Option, models []config.Model, unknown string, now time.Time) *Evaluation {
 	ev := &Evaluation{CLI: r.CLI, report: r, models: models, now: now}
 	for _, o := range opts {
@@ -105,6 +108,19 @@ func (ev *Evaluation) names(section, name string) []string {
 		}
 	}
 	return out
+}
+
+// cataloged reports whether any label names a catalog model of the CLI by name, section or alias.
+func (ev *Evaluation) cataloged(labels []string) bool {
+	return slices.ContainsFunc(ev.models, func(m config.Model) bool {
+		if m.CLI != ev.CLI {
+			return false
+		}
+		names := append([]string{m.Section, m.Name}, m.Aliases...)
+		return slices.ContainsFunc(labels, func(l string) bool {
+			return slices.ContainsFunc(names, func(n string) bool { return n != "" && strings.EqualFold(n, l) })
+		})
+	})
 }
 
 // applies reports whether s covers a model known by names; a delegated model is covered only by
@@ -172,6 +188,9 @@ func (ev *Evaluation) quota(names []string, delegated bool) Verdict {
 				t.setUnknown(ReasonDelegatedModel)
 			}
 		case !applies(e.Scope, names, delegated):
+			if e.Status == StatusUnavailable && !ev.cataloged(e.Scope.Models) {
+				t.setUnknown(ReasonScopeUnmatched)
+			}
 		case e.Window != "" && e.Window != WindowFiveHour && e.Window != WindowWeekly:
 			t.setUnknown(ReasonEvidenceInvalid)
 		default:
