@@ -14,6 +14,7 @@ const (
 	ReasonResetPassed      = "quota_reset_passed"         // a block whose verified reset is already past: stale
 	ReasonDelegatedModel   = "delegated_model_unverified" // no model is set and some model has its own block
 	ReasonScopeUnmatched   = "quota_scope_unmatched"      // a model-scoped block whose label names no catalog model
+	ReasonModelUncataloged = "model_uncataloged"          // a model outside the catalog beside another model's block
 	ReasonEvidenceInvalid  = "evidence_invalid"           // a status or window the evaluation does not know
 	ReasonWindowNotChecked = "window_not_reported"        // no evidence covers a subscription window
 )
@@ -81,7 +82,8 @@ func Evaluate(r Report, opts []catalog.Option, models []config.Model, unknown st
 
 // Model judges a model the child would run outside the eligible options, such as its verified
 // default. An empty name is a delegated model: unknown when any model-scoped block exists, since the
-// child's choice cannot be matched against it.
+// child's choice cannot be matched against it. A name outside the catalog is matched only by its own
+// label, so a block on a catalog model leaves it unknown: the label may be another spelling of it.
 func (ev *Evaluation) Model(name string) Verdict {
 	if name == "" {
 		return ev.judge(nil, true)
@@ -188,8 +190,12 @@ func (ev *Evaluation) quota(names []string, delegated bool) Verdict {
 				t.setUnknown(ReasonDelegatedModel)
 			}
 		case !applies(e.Scope, names, delegated):
-			if e.Status == StatusUnavailable && !ev.cataloged(e.Scope.Models) {
+			switch {
+			case e.Status != StatusUnavailable:
+			case !ev.cataloged(e.Scope.Models):
 				t.setUnknown(ReasonScopeUnmatched)
+			case !ev.cataloged(names):
+				t.setUnknown(ReasonModelUncataloged)
 			}
 		case e.Window != "" && e.Window != WindowFiveHour && e.Window != WindowWeekly:
 			t.setUnknown(ReasonEvidenceInvalid)

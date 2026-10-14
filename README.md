@@ -238,6 +238,7 @@ The `<reason>` in these lines, and the reasons in the selection line's `readines
 | `quota_reset_passed` | unknown | a block whose reset time has already passed |
 | `delegated_model_unverified` | unknown | no model is set and some model has its own quota block |
 | `quota_scope_unmatched` | unknown | a model's own quota block names no catalog model, alias or section; add the label as an alias to place it |
+| `model_uncataloged` | unknown | the child's verified default is not in the catalog and some catalog model has its own quota block; add the default as an alias to place it |
 | `evidence_invalid` | unknown | evidence with a status or window the evaluation does not know |
 
 **Note:** a block stops exec; an unknown is one warning under `unknown = allow` and exit `2` under `unknown = block`. `not_subscription` (API-key or other-provider auth) needs no quota windows and is neither.
