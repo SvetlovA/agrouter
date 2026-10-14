@@ -7,49 +7,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCheckNative(t *testing.T) {
-	const secret = "secret-model-value"
+func TestNativeOptions(t *testing.T) {
 	tests := []struct {
-		name string
-		cli  string
-		raw  []string
-		hit  string // the spelling the error names, empty for no error
+		name      string
+		raw, want []string
 	}{
-		{name: "no native tokens", cli: "beta"},
-		{name: "unrelated options", cli: "beta", raw: []string{"--sandbox", "read-only", "-c", "features.x=true", "--json"}},
-		{name: "bare long flag", cli: "beta", raw: []string{"--model", secret}, hit: "--model"},
-		{name: "long flag with =", cli: "beta", raw: []string{"--model=" + secret}, hit: "--model"},
-		{name: "bare short flag", cli: "beta", raw: []string{"-m", secret}, hit: "-m"},
-		{name: "attached short flag", cli: "beta", raw: []string{"-m" + secret}, hit: "-m"},
-		{name: "short flag with =", cli: "beta", raw: []string{"-m=" + secret}, hit: "-m"},
-		{name: "effort flag", cli: "alpha", raw: []string{"--json", "--effort", secret}, hit: "--effort"},
-		{name: "longer flag sharing a prefix", cli: "beta", raw: []string{"--model-provider", "x", "--models"}},
-		{name: "config flag with a selection key", cli: "beta", raw: []string{"-c", "model=" + secret}, hit: "-c model"},
-		{name: "attached config flag", cli: "beta", raw: []string{"-cmodel_reasoning_effort=" + secret}, hit: "-c model_reasoning_effort"},
-		{name: "short config flag with =", cli: "beta", raw: []string{"-c=model=" + secret}, hit: "-c model"},
-		{name: "long config flag with =", cli: "beta", raw: []string{"--config=model=" + secret}, hit: "--config model"},
-		{name: "long config flag, separate value", cli: "beta", raw: []string{"--config", "model=" + secret}, hit: "--config model"},
-		{name: "TOML-quoted value", cli: "beta", raw: []string{"-c", `model_reasoning_effort="` + secret + `"`},
-			hit: "-c model_reasoning_effort"},
-		{name: "quoted key and spaces", cli: "beta", raw: []string{"-c", ` "model" = "` + secret + `"`}, hit: "-c model"},
-		{name: "dotted key is not a selection key", cli: "beta", raw: []string{"-c", "profiles.x.model=" + secret}},
-		{name: "config value without =", cli: "beta", raw: []string{"-c", "model"}},
-		{name: "config flag at the end", cli: "beta", raw: []string{"-c"}},
-		{name: "config flags not configured", cli: "alpha", raw: []string{"-c", "model=" + secret}},
-		{name: "after the child's --", cli: "beta", raw: []string{"--json", "--", "--model", secret, "-c", "model=x"}},
-		{name: "a value that is a reserved spelling", cli: "beta", raw: []string{"--add-dir", "-m"}, hit: "-m"},
+		{name: "empty", want: []string{}},
+		{name: "model and effort", raw: []string{"--model", "native", "--effort", "native", "--json"}, want: []string{"--json"}},
+		{name: "equals values", raw: []string{"--model=native", "--effort=native", "--json"}, want: []string{"--json"}},
+		{name: "short forms", raw: []string{"-m", "a", "-mb", "-m=c", "-m", ""}, want: []string{}},
+		{name: "prefixes are unrelated", raw: []string{"--models", "--model-provider", "x", "--efforts"}, want: []string{"--models", "--model-provider", "x", "--efforts"}},
+		{name: "settings and config unchanged", raw: []string{"--profile", "work", "-c", `model="native"`, "--config=reasoning=native"}, want: []string{"--profile", "work", "-c", `model="native"`, "--config=reasoning=native"}},
+		{name: "empty values and repeats", raw: []string{"", "two words", "-v", "-v"}, want: []string{"", "two words", "-v", "-v"}},
+		{name: "child separator stops scanning", raw: []string{"-m", "native", "--", "-m", "text", "--effort=x"}, want: []string{"--", "-m", "text", "--effort=x"}},
+		{name: "dangling selection", raw: []string{"--json", "-m"}, want: []string{"--json"}},
+		{name: "dangling model before another option", raw: []string{"-m", "--json"}, want: []string{"--json"}},
+		{name: "selection before separator", raw: []string{"--effort", "--", "--model", "text"}, want: []string{"--", "--model", "text"}},
+		{name: "selection before another option", raw: []string{"--model", "--effort", "native", "--json"}, want: []string{"--json"}},
+		{name: "unrelated attached flag value", raw: []string{"--add-dir=-m"}, want: []string{"--add-dir=-m"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := CheckNative(fixtureCLI(t, tc.cli), tc.raw)
-			if tc.hit == "" {
-				require.NoError(t, err)
-				return
-			}
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "native argument "+tc.hit+" after \"--\" selects the "+tc.cli+" model or effort")
-			assert.Contains(t, err.Error(), "--model/--effort")
-			assert.NotContains(t, err.Error(), secret, "the value is never echoed")
+			original := append([]string(nil), tc.raw...)
+			assert.Equal(t, tc.want, nativeOptions(tc.raw))
+			assert.Equal(t, original, tc.raw, "the caller's native slice stays unchanged")
 		})
 	}
 }
@@ -89,35 +70,4 @@ func TestCheckSeparator(t *testing.T) {
 		req.Raw = []string{"--"}
 		require.NoError(t, CheckSeparator(noSeparator, &req))
 	})
-}
-
-func TestContextChanged(t *testing.T) {
-	cli := fixtureCLI(t, "alpha")
-	cli.ContextFlags = []string{"--profile", "-P"}
-	cli.ConfigFlags = []string{"-c", "--config"}
-	cli.ContextConfigKeys = []string{"provider"}
-	tests := []struct {
-		name string
-		raw  []string
-		want bool
-	}{
-		{name: "no native tokens"},
-		{name: "unrelated options", raw: []string{"--json", "--profiles", "-v"}},
-		{name: "bare long flag", raw: []string{"--json", "--profile", "work"}, want: true},
-		{name: "long flag with =", raw: []string{"--profile=work"}, want: true},
-		{name: "attached short flag", raw: []string{"-Pwork"}, want: true},
-		{name: "after the child's --", raw: []string{"--", "--profile", "work"}},
-		{name: "config key as the next token", raw: []string{"-c", "provider=local"}, want: true},
-		{name: "attached quoted config key", raw: []string{`--config="provider"=local`}, want: true},
-		{name: "dotted config subkey", raw: []string{"-cprovider.local.url=x"}, want: true},
-		{name: "unrelated config key", raw: []string{"-c", "providers_cache=1"}},
-		{name: "config value is no flag", raw: []string{"-c", "--profile=x"}},
-		{name: "config flag without a value", raw: []string{"-c"}},
-		{name: "config key after the child's --", raw: []string{"--", "-c", "provider=local"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, ContextChanged(cli, tc.raw))
-		})
-	}
 }

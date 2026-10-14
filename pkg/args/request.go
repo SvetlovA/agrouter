@@ -31,7 +31,7 @@ type Request struct {
 	PromptFile Optional // --prompt-file path, as given
 	FileText   string   // the --prompt-file contents, read by the caller before capture
 	Docs       []string // --doc paths, as given, in order; routing only, never in the child's argv
-	Raw        []string // exec only: native tokens after the first "--", passed to the child unchanged
+	Raw        []string // exec only: native tokens after the first "--", passed to the child except reserved model/effort selections
 }
 
 // ArgvPrompt is the {prompt} text: the prompt texts given on the command line joined in prompt

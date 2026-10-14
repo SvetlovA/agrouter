@@ -385,16 +385,6 @@ func (s *section) decodeCLI() (CLI, error) {
 			cli.EffortArgs, err = parseTemplate(v)
 		case "prompt_args":
 			cli.PromptArgs, err = parseTemplate(v)
-		case "selection_flags":
-			cli.SelectionFlags = splitList(v)
-		case "config_flags":
-			cli.ConfigFlags = splitList(v)
-		case "selection_config_keys":
-			cli.SelectionConfigKeys = splitList(v)
-		case "context_flags":
-			cli.ContextFlags = splitList(v)
-		case "context_config_keys":
-			cli.ContextConfigKeys = splitList(v)
 		case "enabled":
 		default:
 			return CLI{}, s.unknownKey(k)

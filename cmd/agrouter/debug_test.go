@@ -56,7 +56,7 @@ func TestDebug_Redaction(t *testing.T) {
 	}, lines[1:10], "the exec CLI restricts routing like --cli")
 	assert.True(t, strings.HasPrefix(lines[10], "stage model: choice fast, confidence 0.900, top [fast 1.000"), lines[10])
 	assert.True(t, strings.HasPrefix(lines[11], "stage effort: choice low, confidence 0.900, top [low 1.000"), lines[11])
-	assert.Equal(t, "command: "+helperCommand(t)+" -p --model fast-1 --effort low <2 raw argument(s)> -- <prompt>", lines[12])
+	assert.Equal(t, "command: "+helperCommand(t)+" -p <2 raw argument(s)> --model fast-1 --effort low -- <prompt>", lines[12])
 	assert.NotContains(t, r.stderr, secret)
 	assert.NotContains(t, r.stderr, "raw-two")
 	assert.NotContains(t, r.stderr, testKey)

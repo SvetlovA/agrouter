@@ -1,5 +1,16 @@
 # Exec native arguments and subscription readiness
 
+## User revision implemented after external review (2026-10-14)
+
+The original implementation below followed the initial contract. The user then requested simpler native passthrough. Ralphex stopped with `TASK_FAILED` because duplicate model flags are rejected by the child; emitting both selections cannot implement precedence. The revised contract supersedes the historical selection-conflict and context metadata requirements below.
+
+- [x] Remove `selection_flags`, `config_flags`, `selection_config_keys`, `context_flags` and related `context_config_keys` fields, validation, embedded config and checks. Keep invocation templates; no replacement metadata catalog.
+- [x] Remove native context detection and probe suppression. Readiness and default metadata use agrouter's configured context; native settings/profile/provider/config overrides apply only to the child.
+- [x] Reserve agrouter's `--model`/`-m` and `--effort` spellings in native options and remove them, including attached forms. Model/effort are the narrow exception to unchanged forwarding. Native selections do not constrain Jev; on fallback they cannot replace the reported child defaults.
+- [x] Add agrouter's `-m` alias. Emit native options, then generated model/effort, then the child's own `--` and positional tokens, then prompt_args. Preserve stdin and other native tokens. The requested native-only and caller-fixed model examples are covered by synthetic end-to-end tests.
+- [x] Verify precedence without inference using the installed version's official source: [explicit model wins over config model](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/core/src/config/mod.rs#L3747); [repeated config keys apply in argument order and the last value wins](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/config/src/overrides.rs#L8). The [profile layer precedes CLI overrides](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/config/src/loader/mod.rs#L275), so the generated effort also wins a profile default. The Opus partner challenged template-shape inference and we chose the smaller reserved-spelling filter with no config-key parsing.
+- [x] Run all tests (97.2% overall coverage, every production package above 92%), build, host/Linux/macOS/Windows/eval lint and Opus high partner review. Final peer verdict: no actionable findings. No inference checks, commit, or Ralphex restart.
+
 ## Overview
 
 Combine the three current backlog items into one change:

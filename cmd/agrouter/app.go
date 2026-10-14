@@ -137,10 +137,6 @@ func (a *app) run(argv []string) int {
 		if len(catalog.ByCLI(cat.Options, req.CLI)) == 0 {
 			return a.fail(fmt.Errorf("exec %s: not a configured, enabled CLI", req.CLI))
 		}
-		cli, _ := cfg.CLIByName(req.CLI)
-		if err = args.CheckNative(cli, req.Raw); err != nil {
-			return a.fail(err)
-		}
 	}
 
 	d, err := a.route(cfg, cat, rt, req)
@@ -257,7 +253,7 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 		if err := args.CheckSeparator(execCLI, req); err != nil {
 			return routed{}, err
 		}
-		pf = a.startPreflight(ctx, execCLI, req.Raw)
+		pf = a.startPreflight(ctx, execCLI)
 		// an early return stops the probes before leaving
 		defer func() { cancel(); pf.wait() }()
 	}

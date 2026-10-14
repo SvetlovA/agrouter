@@ -117,47 +117,6 @@ func TestValidate_Violations(t *testing.T) {
 			want:  []string{`[cli.beta] model_args: unknown placeholder {mdl} in "{mdl}"`},
 		},
 		{
-			name:  "selection flag not a flag",
-			local: "[cli.beta]\nselection_flags = model, -, ---m, --m=x\n",
-			want: []string{`[cli.beta] selection_flags: "model" is not a flag spelling`, `"-" is not a flag spelling`,
-				`"---m" is not a flag spelling`, `"--m=x" is not a flag spelling`},
-		},
-		{
-			name:  "context flag not a flag",
-			local: "[cli.beta]\ncontext_flags = profile\n",
-			want:  []string{`[cli.beta] context_flags: "profile" is not a flag spelling`},
-		},
-		{
-			name:  "config flag not a flag",
-			local: "[cli.beta]\nconfig_flags = c\nselection_config_keys = model\n",
-			want:  []string{`[cli.beta] config_flags: "c" is not a flag spelling`},
-		},
-		{
-			name:  "selection config key with a value",
-			local: "[cli.alpha]\nselection_config_keys = model=x\n",
-			want:  []string{`[cli.alpha] selection_config_keys: "model=x" is not a config key`},
-		},
-		{
-			name:  "context config key with a value",
-			local: "[cli.alpha]\ncontext_config_keys = profile=x\n",
-			want:  []string{`[cli.alpha] context_config_keys: "profile=x" is not a config key`},
-		},
-		{
-			name:  "context config keys without config flags",
-			local: "[cli.beta]\ncontext_config_keys = profile\n",
-			want:  []string{"[cli.beta] context_config_keys: needs config_flags"},
-		},
-		{
-			name:  "selection config keys without config flags",
-			local: "[cli.beta]\nselection_config_keys = model\n",
-			want:  []string{"[cli.beta] selection_config_keys: set together with config_flags"},
-		},
-		{
-			name:  "config flags without selection config keys",
-			local: "[cli.beta]\nconfig_flags = -c\n",
-			want:  []string{"[cli.beta] selection_config_keys: set together with config_flags"},
-		},
-		{
 			name:  "at sign in model section",
 			local: "[model.beta@two]\ncli = beta\nname = beta-two\n",
 			want:  []string{"[model.beta@two]: '@' is reserved"},
@@ -221,7 +180,7 @@ func TestValidate_Allowed(t *testing.T) {
 		{name: "empty exec_args", local: "[cli.alpha]\nexec_args = []\n"},
 		{name: "a third cli configured in a local layer", local: "[cli.gamma]\ncommand = gamma\nexec_args = [\"run\"]\n" +
 			"model_args = [\"--model\", \"{model}\"]\neffort_args = [\"--effort\", \"{effort}\"]\nprompt_args = [\"--\", \"{prompt}\"]\n" +
-			"selection_flags = --model, -m\n[model.gamma-one]\ncli = gamma\nname = gamma-one\nefforts = low, high\n"},
+			"[model.gamma-one]\ncli = gamma\nname = gamma-one\nefforts = low, high\n"},
 		{name: "no effort_args when no model has efforts", local: ""},
 		{name: "model of a disabled cli is dropped, not unknown", local: "[cli.beta]\nenabled = false\n"},
 	}

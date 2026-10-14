@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SvetlovA/agrouter/pkg/args"
 	"github.com/SvetlovA/agrouter/pkg/config"
 	"github.com/SvetlovA/agrouter/pkg/readiness"
 	"github.com/SvetlovA/agrouter/pkg/router"
@@ -26,34 +25,23 @@ var _ ReadinessChecker = readiness.Checker{}
 
 // preflight is the exec CLI's readiness check, running while the input is captured.
 type preflight struct {
-	done    chan struct{}
-	report  readiness.Report
-	changed bool // native arguments switch the child's context: only the executable was looked up
+	done   chan struct{}
+	report readiness.Report
 }
 
 // checked is what exec's preflight found, kept for the selection line: the report with the child's
-// defaults, its evaluation over the eligible options, and the context switch.
+// defaults and its evaluation over the eligible options.
 type checked struct {
-	report  readiness.Report
-	ev      *readiness.Evaluation
-	changed bool
+	report readiness.Report
+	ev     *readiness.Evaluation
 }
 
-// startPreflight checks cli under ctx in the background. Native arguments that switch the child's
-// context make the probes moot: only the executable is looked up, and the rest is unknown.
-func (a *app) startPreflight(ctx context.Context, cli config.CLI, raw []string) *preflight {
-	changed := args.ContextChanged(cli, raw)
-	p := &preflight{done: make(chan struct{}), changed: changed}
-	probed := cli
-	if changed {
-		probed.Availability = nil
-	}
+// startPreflight checks cli under ctx in the background, using agrouter's configured context.
+func (a *app) startPreflight(ctx context.Context, cli config.CLI) *preflight {
+	p := &preflight{done: make(chan struct{})}
 	go func() {
 		defer close(p.done)
-		p.report = a.checker.Check(ctx, probed)
-		if changed {
-			p.report = p.report.ContextChanged(a.clock())
-		}
+		p.report = a.checker.Check(ctx, cli)
 	}()
 	return p
 }
@@ -77,7 +65,7 @@ func (a *app) applyPreflight(cli config.CLI, models []config.Model, p *preflight
 	if ev.Unknown != "" {
 		a.warnUnknown(cli, ev.Unknown)
 	}
-	return &checked{report: report, ev: ev, changed: p.changed}, nil
+	return &checked{report: report, ev: ev}, nil
 }
 
 // warnUnknown is the one warning that cli's availability is unverified for reason.

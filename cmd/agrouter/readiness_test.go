@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -221,7 +222,7 @@ func TestApp_ExecPreflightFiltersOptions(t *testing.T) {
 	})
 }
 
-func TestApp_ExecPreflightContextFlag(t *testing.T) {
+func TestApp_ExecPreflightIgnoresNativeContext(t *testing.T) {
 	tests := []struct {
 		name   string
 		native []string
@@ -232,21 +233,19 @@ func TestApp_ExecPreflightContextFlag(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t)
-			e.globalConfig(syntheticCLIs(t) + "\n[cli.alpha]\ncontext_flags = --profile\nconfig_flags = -c\n" +
-				"selection_config_keys = model\ncontext_config_keys = provider\n" + availability())
+			e.globalConfig(syntheticCLIs(t) + availability())
 			checker := reportChecker(func(cli config.CLI) readiness.Report {
-				assert.Nil(t, cli.Availability, "no probe runs for another context")
-				return readiness.Report{CLI: cli.Name, Evidence: []readiness.Evidence{
-					{Dimension: readiness.DimensionExecutable, Status: readiness.StatusAvailable},
-					unknownQuota(readiness.ReasonNotConfigured),
-				}}
+				assert.NotNil(t, cli.Availability, "native arguments never change the configured probe")
+				return withQuota(cli, readiness.Evidence{Dimension: readiness.DimensionQuota, Status: readiness.StatusNotApplicable})
 			})
 			e.checker = checker
 			argv := append([]string{"exec", "alpha", "--model=fast-1", "--effort=low", "fix it", "--"}, tc.native...)
 			r := e.run(argv, nil)
 
 			require.Equal(t, 0, r.code, r.stderr)
-			assert.True(t, strings.HasPrefix(r.stderr, "agrouter: warning: alpha availability unknown: context_changed\n"), r.stderr)
+			assert.NotContains(t, r.stderr, "availability unknown")
+			child, _, _ := e.child()
+			assert.Equal(t, slices.Concat([]string{"-p"}, tc.native, []string{"--model", "fast-1", "--effort", "low", "--", "fix it"}), child)
 			assert.Len(t, checker.CheckCalls(), 1)
 		})
 	}

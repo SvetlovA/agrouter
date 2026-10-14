@@ -1,6 +1,7 @@
 package args
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/SvetlovA/agrouter/pkg/config"
@@ -16,28 +17,37 @@ type Choice struct {
 // Result is the child's argv.
 type Result struct {
 	Argv []string
-	// promptAt is the index of the {prompt} token in Argv, -1 when there is none; native passthrough is
-	// Argv[rawAt:rawAt+rawLen]. They serve the redacted rendering.
+	// promptAt is the {prompt} index, -1 when absent. Native options and the child's own separator
+	// and positional tokens occupy separate ranges around the generated selection arguments.
 	promptAt int
 	rawAt    int
 	rawLen   int
+	tailAt   int
+	tailLen  int
 }
 
-// Build turns req into the argv for cli: command, exec_args, model_args and effort_args for the
-// selected values, the native tokens after "--" unchanged, then prompt_args, emitted only when there
-// is a command-line prompt. The prompt goes last, so nothing after it is parsed as a child option.
+// Build emits native options before the configured model and effort arguments, so agrouter's values
+// take precedence. The child's own "--" and positional tokens follow the selection. PromptArgs are
+// last and only emitted for a command-line prompt.
 func Build(cli config.CLI, req *Request, choice Choice) Result {
 	res := Result{promptAt: -1}
 	res.Argv = append(res.Argv, cli.Command)
 	res.Argv = append(res.Argv, cli.ExecArgs...)
+	raw := nativeOptions(req.Raw)
+	end := slices.Index(raw, config.EndOfOptions)
+	if end < 0 {
+		end = len(raw)
+	}
+	res.rawAt, res.rawLen = len(res.Argv), end
+	res.Argv = append(res.Argv, raw[:end]...)
 	if choice.Model != "" {
 		res.Argv = appendTemplate(res.Argv, cli.ModelArgs, config.PlaceholderModel, choice.Model)
 	}
 	if choice.Effort != "" {
 		res.Argv = appendTemplate(res.Argv, cli.EffortArgs, config.PlaceholderEffort, choice.Effort)
 	}
-	res.rawAt, res.rawLen = len(res.Argv), len(req.Raw)
-	res.Argv = append(res.Argv, req.Raw...)
+	res.tailAt, res.tailLen = len(res.Argv), len(raw)-end
+	res.Argv = append(res.Argv, raw[end:]...)
 	if p := req.ArgvPrompt(); p != "" {
 		for _, tok := range cli.PromptArgs {
 			if tok == config.PlaceholderPrompt {

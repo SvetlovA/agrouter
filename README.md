@@ -55,13 +55,13 @@ The prompt can come from four sources, in any combination: `-p TEXT`, the one po
 | Option | Meaning |
 |---|---|
 | `--cli=NAME` | decision mode: route only within one CLI (`claude`, `codex`, ...); exec takes its CLI from the operand |
-| `--model=M`, `--effort=E` | fix the model or effort; Jev chooses the rest. Values outside the catalog are passed through for the CLI to validate |
+| `-m M`, `--model=M`, `--effort=E` | fix the model or effort; Jev chooses the rest. Values outside the catalog are passed through for the CLI to validate |
 | `-p TEXT`, `--prompt=TEXT`, `--print=TEXT` | the prompt, before the positional prompt, `--prompt-file` and stdin |
 | `--prompt-file=PATH` | read prompt text from a file |
 | `--doc=PATH` | a project doc (`CLAUDE.md`, `AGENTS.md`, ...) for routing only; repeatable, never passed to the child |
 | `--verbose` | full agrouter decision details; never affects routing. Before `--` it is agrouter's only; after `--` it is the child's own option |
 | `--jev-api-key=KEY` | Jev API key; an empty value clears it |
-| `-- native args...` | exec only: appended to the child's argv unchanged and in order, including empty tokens, repeats and later `--`. A native spelling that selects the model or effort is exit `2` (see [Invocation descriptors](#invocation-descriptors)) |
+| `-- native args...` | exec only: passed to the child in order, including empty tokens, repeats and later `--`. Agrouter replaces native `--model`/`-m` and `--effort`; its generated selections follow native options (see [Invocation descriptors](#invocation-descriptors)) |
 | `--help`, `--version` | print help or the version and exit |
 
 Whenever stdin is not a terminal, agrouter reads it to EOF within `[agrouter] timeout` before routing. A script that passes the prompt only as an argument or a file should close stdin or redirect it from `/dev/null`; an inherited pipe that stays open uses up the timeout, and Jev cannot decide.
@@ -220,7 +220,7 @@ Exec then routes only over the CLI's options that are left. It never switches to
 | nothing is left: subscription quota exhausted | `<quota_error_prefix><quota_error_message>; <windows> subscription quota exhausted[; resets at <RFC 3339>]` | `127` |
 | nothing is left under `unknown = block` | `agrouter: <cli> availability unverified: <reason>` | `2` |
 
-A preflight block prints no selection line, nothing on stdout, and makes no Jev request. (A block on a delegated model's default comes after routing; see [Exec fallback](#exec-fallback).) The reset is the latest reset of the exhausted windows, since a weekly window outlasts a five-hour one, and is left out when any of them is unverified. `quota_error_prefix` (default `agrouter: `) and `quota_error_message` come from config, so the line can match a caller's own limit pattern, for example a severity prefix such as `ERROR: agrouter: `. An unknown availability is never reported as a quota block. Native arguments after `--` that switch the child's context (`context_flags`, or a config flag with a `context_config_keys` key) make the probes moot: only the executable is checked, and the rest is unknown (`context_changed`).
+A preflight block prints no selection line, nothing on stdout, and makes no Jev request. (A block on a delegated model's default comes after routing; see [Exec fallback](#exec-fallback).) The reset is the latest reset of the exhausted windows, since a weekly window outlasts a five-hour one, and is left out when any of them is unverified. `quota_error_prefix` (default `agrouter: `) and `quota_error_message` come from config, so the line can match a caller's own limit pattern, for example a severity prefix such as `ERROR: agrouter: `. An unknown availability is never reported as a quota block. Readiness uses agrouter's configured context. Native arguments after `--` never alter or disable probes; native settings, profile and provider overrides apply only to the child.
 
 The `<reason>` in these lines, and the reasons in the selection line's `readiness`, are fixed codes:
 
@@ -230,7 +230,6 @@ The `<reason>` in these lines, and the reasons in the selection line's `readines
 | `quota_exhausted`, `quota_denied` | block (`127`) | a quota window is used up, or the backend refuses it whatever its usage |
 | `unsupported_model` | excludes the model | the CLI reports it cannot run that model |
 | `availability_not_configured`, `availability_disabled` | unknown | no availability section, or `enabled = false`: only the executable was checked |
-| `context_changed` | unknown | native arguments switch the child's provider, profile or settings |
 | `transport_unsupported`, `version_unsupported` | unknown | the check's transport is not known, or the CLI is older than `min_version` |
 | `probe_missing`, `probe_timeout`, `probe_failed`, `probe_response_too_large`, `probe_malformed`, `probe_throttled` | unknown | the probe could not start, ran out of time, exited nonzero, answered too much, answered off-schema, or was rate-limited |
 | `not_reported`, `window_not_reported`, `usage_permission_not_reported` | unknown | the probe did not report a value, a quota window, or whether usage is allowed |
@@ -267,7 +266,7 @@ Note: the first line is readable without parsing JSON; the second carries the sa
 | `router` | agrouter chose it: Jev, or the one option left |
 | `caller` | `--model` or `--effort` fixed it |
 | `verified_child_default` | the child's own default, as its prompt-free probe reported it for this working directory and settings |
-| `child_default_unknown` | the child's default is not known: `default_not_reported`; `context_changed` when native arguments switch the child's context; or `default_for_other_model` when the probe reported the default effort of the child's default model, but agrouter or the caller set another model |
+| `child_default_unknown` | the child's default is not known: `default_not_reported`; or `default_for_other_model` when the probe reported the default effort of the child's default model, but agrouter or the caller set another model |
 
 Values Jev chose before the failure (the model when only the effort stage failed) and values the caller fixed keep their source and are never listed as fallbacks. Top-level `model`/`effort` stay `null` whenever agrouter passes no selection flag, even when `effective` shows a verified default. A catalog default or a model list's recommendation is never reported as verified. An intentional omission (a model without effort levels, the effort of a passed-through `--model`) is no fallback and prints no warning.
 
@@ -308,7 +307,7 @@ CLI names, model IDs and aliases, and effort labels come from the merged config.
 Each `[cli.<name>]` section says how agrouter builds that CLI's argv. CLI names cannot contain `.`.
 
 ```text
-argv = command + exec_args + model_args + effort_args + native args after "--" + prompt_args
+argv = command + exec_args + native options + model_args + effort_args + native "--" and its remaining tokens + prompt_args
 ```
 
 **Note:** agrouter emits each part left to right. `model_args` and `effort_args` appear only for a value routing selected or the caller fixed; `prompt_args` only when there is a `-p`, positional or `--prompt-file` prompt.
@@ -319,14 +318,19 @@ argv = command + exec_args + model_args + effort_args + native args after "--" +
 | `model_args` | how to pass the model, with `{model}`; required |
 | `effort_args` | how to pass the effort, with `{effort}`; required when a model of the CLI has efforts |
 | `prompt_args` | how to pass the prompt; `{prompt}` must be its last element and a whole token; required |
-| `selection_flags` | native spellings that select the model or effort, for example `--model, -m, --effort` |
-| `config_flags`, `selection_config_keys` | a native config flag (`-c`) and the keys that select the model or effort through it; set together |
-| `context_flags` | native spellings that switch the CLI's provider, profile or settings |
-| `context_config_keys` | config keys that switch them through a `config_flags` flag, dotted subkeys included (for example `profile` also covers `-c profile.x=y`); needs `config_flags` |
 
-Template keys are JSON arrays of strings; the flag and key lists are comma-separated. Only `{model}`, `{effort}` and `{prompt}` are placeholders, each only in its own key. An unset model or effort leaves its args out, so the CLI's own default applies.
+Template keys are JSON arrays of strings. Only `{model}`, `{effort}` and `{prompt}` are placeholders, each only in its own key. An unset model or effort leaves its args out, so the CLI's own default applies.
 
-agrouter has no other per-CLI argument mapping: pass every other native option after `--` with exec. Before routing, exec scans the native tokens up to the child's own `--`. A selection flag (`--model x`, `--model=x`, `-mx`) or a config flag with a selection key (`-c model=x`, `-cmodel=x`, `--config=model=x`) is exit `2`, naming the spelling but never its value. Use agrouter's `--model`/`--effort` instead, so routing knows the constraint. There is no option-arity table, so a native value that is literally a reserved spelling is rejected too.
+Pass child options after agrouter's `--`. They never supply routing constraints or readiness context. Agrouter reserves `--model`, `-m` and `--effort`: their native occurrences are removed before the child's own `--`, including `--model=x`, `-mx` and `-m=x`. To fix a model or effort, put it before agrouter's separator. A native-only model leaves Jev free to choose:
+
+```sh
+agrouter exec codex -p "Fix the bug" -- -m native-model
+agrouter exec codex -m chosen-model -p "Fix the bug" -- -m native-model
+```
+
+The first command uses Jev's model; the second uses `chosen-model`. The child receives one model selection. The reserved native spellings are also removed on routing failure, so fallback uses the child's defaults. Tokens after the child's own `--` are positional and remain unchanged.
+
+All other native arguments, including configuration overrides, retain their contents and order. Generated model/effort arguments follow native options, so the child's override semantics give agrouter's selections precedence. For example, a native `-c model_reasoning_effort=...` precedes the generated effort override. There is no native option-arity table; a separate value literally spelled `-m`, `--model` or `--effort` is reserved too. Use an attached value such as `--add-dir=-m` to pass that text to another option. `-mVALUE` is the attached short-model form, so single-dash option names starting with `-m` are reserved too.
 
 When `prompt_args` puts the prompt after `--` and the native tokens already hold a `--`, a command-line prompt is exit `2`: the child would read the prompt's `--` as prompt text. Pass the prompt on stdin, or drop the extra `--`.
 
@@ -371,7 +375,6 @@ description = Example agent CLI.
 exec_args   = ["run"]
 model_args  = ["--model", "{model}"]
 prompt_args = ["--", "{prompt}"]
-selection_flags = --model
 
 [cli.tool-x.availability]
 checks = ready
@@ -406,7 +409,7 @@ Limitations:
 
 - The built-in transports read experimental, undocumented CLI protocols. `min_version` guards the versions they were checked against; when a CLI upgrade changes the protocol, the check reports unknown (or stops exec under `unknown = block`). agrouter never falls back to an inference probe or to an auth-only check.
 - A `json-helper` has no `min_version` check: the helper decides what it supports.
-- A probe cannot see native options after `--`. Options in `context_flags`, and config flags with a `context_config_keys` key, switch the child's provider, profile or settings, so with one of them exec checks only the executable.
+- Probes and effective/default metadata describe agrouter's configured context. Native settings, profile, provider and config overrides are passed only to the child; they do not change the probe or its reported defaults.
 - Evidence is not cached: every exec probes again.
 
 To see what the stream-json control check reads, send the same prompt-free requests on stdin yourself. Nothing here is a user message, so the CLI answers from its login and settings without asking a model:
@@ -430,8 +433,9 @@ agrouter no longer translates child options. Pass them after `--` with exec inst
 | `agrouter exec --cli=NAME ...` | `agrouter exec NAME ...` |
 | `AGROUTER_CLI` | `exec <cli>`, or `--cli=NAME` in decision mode; when set it is ignored with a warning |
 | `--permission-mode`, `--dangerously-*`, `--output-format`, `--sandbox`, `-c`/`--config` | the CLI's own spelling after `--`: `agrouter exec <cli> -- --output-format stream-json` |
-| native `--model`/`--effort` or `-c model=...` after `--` | agrouter's `--model`/`--effort` before `--` (a native selection is exit `2`) |
-| `[cli.<name>.args]` sections | `exec_args`, `model_args`, `effort_args`, `prompt_args` and the native flag lists in `[cli.<name>]` |
+| native `--model`/`-m`/`--effort` selections after `--` | replaced by agrouter's selection; fix values with `--model`/`-m` or `--effort` before `--` |
+| `[cli.<name>.args]` sections | `exec_args`, `model_args`, `effort_args`, `prompt_args` in `[cli.<name>]` |
+| `selection_flags`, `config_flags`, `selection_config_keys`, `context_flags`, `context_config_keys` | remove these keys; invocation templates and agrouter's reserved selection spellings replace the metadata lists |
 | `skipped` in decision JSON and its skip warnings | none: nothing is mapped, so nothing is skipped |
 | raw tokens after `--` in decision mode | none: decision mode rejects `--` |
 
@@ -523,7 +527,7 @@ Leave `task_model`, `review_model`, `plan_model`, `codex_model` and `codex_reaso
 | Code | Meaning |
 |---|---|
 | `0` | decision printed, or `--help`/`--version` |
-| `2` | agrouter error before any child starts: unknown flag (including the removed `--permission-mode`, `--dangerously-*`, `--output-format`, `--sandbox` and `-c`), second positional, second `-p`/`--prompt`/`--print` or `--prompt-file`, a missing, unknown or disabled exec CLI, a `--cli` conflicting with it, `--` in decision mode, a native model or effort selection after `--`, a command-line prompt after a second `--`, no prompt, a bad `--prompt-file` or `--doc` file, the timeout passing while the `--prompt-file` is read, config error, or Jev cannot decide with more than one CLI left (decision mode then also prints the decision JSON with `null` values and reasons) |
+| `2` | agrouter error before any child starts: unknown flag (including the removed `--permission-mode`, `--dangerously-*`, `--output-format`, `--sandbox` and `-c`), second positional, second `-p`/`--prompt`/`--print` or `--prompt-file`, a missing, unknown or disabled exec CLI, a `--cli` conflicting with it, `--` in decision mode, a command-line prompt after a second `--`, no prompt, a bad `--prompt-file` or `--doc` file, the timeout passing while the `--prompt-file` is read, config error, or Jev cannot decide with more than one CLI left (decision mode then also prints the decision JSON with `null` values and reasons) |
 | `2` | exec mode: availability unverified under `unknown = block` (`agrouter: <cli> availability unverified: <reason>`), before routing or, for a delegated model's default, after it |
 | `127` | exec mode: the chosen CLI could not be started; or before routing: its executable is missing, its authentication failed, or its subscription quota is exhausted (one quota line in the configured wording); or after routing: the child's verified default model is quota-blocked |
 | other | exec mode: the child's exit code (`128+signal` on Unix when it was killed) |

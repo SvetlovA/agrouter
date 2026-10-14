@@ -35,18 +35,12 @@ routing_policy = Choose the option with the lowest cost that can reliably satisf
 # complexity_policy: how the --doc stage judges the project the docs describe before routing.
 complexity_policy = Judge the codebase as a whole: its size, architecture, dependencies and constraints, not any single task in it.
 
-# how agrouter invokes each CLI. argv = command + exec_args + model_args + effort_args
-# + the native arguments after exec's "--" + prompt_args. Only {model}, {effort} and {prompt}
-# are placeholders, each only in its own key; model_args/effort_args are left out when the
-# model/effort is left to the CLI. Other native options are not configured here: pass them
-# after "--" with exec, where they reach the CLI unchanged.
+# how agrouter invokes each CLI. argv = command + exec_args + native options + model_args
+# + effort_args + any native "--" and its remaining tokens + prompt_args. Only {model}, {effort}
+# and {prompt} are placeholders, each only in its own key; model_args/effort_args are left out
+# when the value is left to the CLI. Agrouter replaces native --model/-m and --effort selections;
+# other native arguments pass through unchanged. Emit selections after native options so they win.
 # exec_args, model_args and prompt_args are required; effort_args when a model has efforts.
-# selection_flags: native spellings that choose the model or effort. After "--" they are
-# rejected (exit 2): use agrouter's --model/--effort, so routing knows the constraint.
-# config_flags + selection_config_keys: a config flag (key=value) whose key chooses the model
-# or effort is rejected the same way.
-# context_flags: native spellings that switch the CLI's provider, profile or settings.
-# context_config_keys: config keys (and their dotted subkeys) that switch them through config_flags.
 
 [cli.claude]
 command         = claude
@@ -58,8 +52,6 @@ effort_args     = ["--effort", "{effort}"]
 # always emitted last and only when there is a prompt: {prompt} = the -p, positional and --prompt-file text,
 # after "--" so text starting with "-" is never parsed as a flag. claude -p reads stdin, and appends it after the prompt argument
 prompt_args     = ["--", "{prompt}"]
-selection_flags = --model, --effort
-context_flags   = --settings, --setting-sources
 
 # exec-only, prompt-free availability check before routing. unknown = allow runs the CLI with one
 # warning when the check cannot verify; block exits 2 instead. enabled = false skips the check.
@@ -89,11 +81,6 @@ model_args            = ["--model", "{model}"]
 effort_args           = ["-c", "model_reasoning_effort=\"{effort}\""]
 # codex exec reads stdin when no prompt argument is given, and appends it as a <stdin> block when one is
 prompt_args           = ["--", "{prompt}"]
-selection_flags       = --model, -m
-config_flags          = -c, --config
-selection_config_keys = model, model_reasoning_effort
-context_flags         = --profile, -p, --oss, --local-provider, --ignore-user-config
-context_config_keys   = profile, model_provider, model_providers
 
 [cli.codex.availability]
 checks              = limits

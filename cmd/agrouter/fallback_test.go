@@ -133,22 +133,18 @@ func TestApp_ExecFallback(t *testing.T) {
 func TestApp_ExecFallbackDefaultsAndReadiness(t *testing.T) {
 	deepBlocked := exhausted(readiness.WindowWeekly, time.Hour, "strong")
 
-	t.Run("context flag makes the defaults unknown", func(t *testing.T) {
+	t.Run("native settings do not change the configured probe defaults", func(t *testing.T) {
 		e := newEnv(t)
-		e.globalConfig(syntheticCLIs(t) + "\n[cli.alpha]\ncontext_flags = --profile\n[agrouter]\ntimeout = 300ms\n")
+		e.globalConfig(syntheticCLIs(t) + "\n[agrouter]\ntimeout = 300ms\n")
 		e.jev.pick, e.jev.failStage = "fast@low", "model"
 		e.checker = defaultsChecker("m-2", "high")
 		r := e.run([]string{"exec", "alpha", "fix it", "--", "--profile", "work"}, nil)
-
 		require.Equal(t, exitOK, r.code, r.stderr)
-		first, rest, _ := strings.Cut(r.stderr, "\n")
-		assert.Equal(t, "agrouter: warning: alpha availability unknown: context_changed", first)
-		warning, s := fallbackLog(t, rest)
-		assert.True(t, strings.HasSuffix(warning, "model unknown (native arguments change the child's context), "+
-			"effort unknown (native arguments change the child's context)"), warning)
-		assert.Equal(t, map[string]any{"model": unknownDefault(defaultContextChanged), "effort": unknownDefault(defaultContextChanged)},
-			s["effective"])
-		assert.Equal(t, map[string]any{"unknown": "context_changed"}, s["readiness"])
+		warning, selection := fallbackLog(t, r.stderr)
+		assert.Contains(t, warning, "model m-2 (verified child default), effort high (verified child default)")
+		assert.Equal(t, map[string]any{"model": verified("m-2"), "effort": verified("high")}, selection["effective"])
+		child, _, _ := e.child()
+		assert.Equal(t, []string{"-p", "--profile", "work", "--", "fix it"}, child)
 	})
 
 	t.Run("a blocked verified default stops the fallback", func(t *testing.T) {

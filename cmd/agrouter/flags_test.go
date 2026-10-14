@@ -29,6 +29,8 @@ func TestParseArgs_FlagsAroundPositional(t *testing.T) {
 	}{
 		{"prompt first, split form", []string{"fix it", "--model", "m", "--effort", "high", "--verbose"}},
 		{"prompt last, = form", []string{"--model=m", "--effort=high", "--verbose", "fix it"}},
+		{"model short alias", []string{"-m", "m", "--effort=high", "fix it", "--verbose"}},
+		{"attached model short alias", []string{"-mm", "--effort=high", "fix it", "--verbose"}},
 		{"prompt in the middle, mixed", []string{"--model", "m", "fix it", "--effort=high", "--verbose"}},
 	}
 	for _, tc := range tests {

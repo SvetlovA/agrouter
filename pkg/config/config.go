@@ -43,16 +43,6 @@ type CLI struct {
 	ModelArgs   []string // emitted with {model} substituted when a model is selected
 	EffortArgs  []string // emitted with {effort} substituted when an effort is selected
 	PromptArgs  []string // emitted last, only for a command-line prompt; {prompt} is its last token
-	// SelectionFlags are the native spellings that select a model or effort, rejected after "--".
-	SelectionFlags []string
-	// ConfigFlags are the native config flag spellings (key=value); SelectionConfigKeys are the keys
-	// that select a model or effort through them, rejected after "--" like SelectionFlags.
-	ConfigFlags         []string
-	SelectionConfigKeys []string
-	// ContextFlags are native spellings that change the child's provider, profile or settings context;
-	// ContextConfigKeys are the config keys that change it through ConfigFlags, dotted subkeys included.
-	ContextFlags      []string
-	ContextConfigKeys []string
 	// Availability is the [cli.<name>.availability] section; nil when the CLI has none.
 	Availability *Availability
 }

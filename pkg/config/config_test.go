@@ -26,11 +26,6 @@ exec_args             = ["-p"]
 model_args            = ["--model", "{model}"]
 effort_args           = ["-c", "effort=\"{effort}\""]
 prompt_args           = ["--", "{prompt}"]
-selection_flags       = --model, -m
-config_flags          = -c, --config
-selection_config_keys = model, effort
-context_flags         = --profile
-context_config_keys   = provider
 
 [cli.alpha.availability]
 checks = usage
@@ -115,15 +110,10 @@ func TestLoad_Embedded(t *testing.T) {
 	assert.Equal(t, "Alpha agent.", alpha.Description)
 	assert.Equal(t, CLI{
 		Name: "alpha", Command: "alpha", Description: "Alpha agent.",
-		ExecArgs:            []string{"-p"},
-		ModelArgs:           []string{"--model", "{model}"},
-		EffortArgs:          []string{"-c", `effort="{effort}"`},
-		PromptArgs:          []string{"--", "{prompt}"},
-		SelectionFlags:      []string{"--model", "-m"},
-		ConfigFlags:         []string{"-c", "--config"},
-		SelectionConfigKeys: []string{"model", "effort"},
-		ContextFlags:        []string{"--profile"},
-		ContextConfigKeys:   []string{"provider"},
+		ExecArgs:   []string{"-p"},
+		ModelArgs:  []string{"--model", "{model}"},
+		EffortArgs: []string{"-c", `effort="{effort}"`},
+		PromptArgs: []string{"--", "{prompt}"},
 		Availability: &Availability{
 			Enabled: true, Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow, QuotaErrorPrefix: DefaultQuotaErrorPrefix,
 			Checks: []Check{{Name: "usage", Transport: TransportJSONHelper}},
@@ -162,7 +152,6 @@ routing_policy = Prefer the strongest option.
 
 [cli.alpha]
 exec_args     = ["--print"]
-context_flags = --settings
 
 [model.alpha-big]
 description = Global description.
@@ -196,7 +185,6 @@ name = local-new
 	assert.Equal(t, []string{"--print"}, alpha.ExecArgs, "global overrides one descriptor key")
 	assert.Equal(t, []string{"--use-model", "{model}"}, alpha.ModelArgs, "local overrides one descriptor key")
 	assert.Equal(t, []string{"-c", `effort="{effort}"`}, alpha.EffortArgs, "other descriptor keys stay embedded")
-	assert.Equal(t, []string{"--settings"}, alpha.ContextFlags, "a layer replaces a whole list")
 	assert.Equal(t, "alpha", alpha.Command)
 
 	assert.Equal(t, []string{"alpha-big", "alpha-small", "beta-one", "local-new"}, modelSections(cfg))
@@ -328,6 +316,16 @@ func TestLoad_RemovedQuestionKeys(t *testing.T) {
 				assert.NotContains(t, err.Error(), "sk-secret", "the old value is left out")
 			})
 		}
+	}
+}
+
+func TestLoad_RemovedNativeMetadata(t *testing.T) {
+	for _, key := range []string{"selection_flags", "config_flags", "selection_config_keys", "context_flags", "context_config_keys"} {
+		t.Run(key, func(t *testing.T) {
+			_, err := load(t, "", "[cli.alpha]\n"+key+" = obsolete\n")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "[cli.alpha] "+key)
+		})
 	}
 }
 

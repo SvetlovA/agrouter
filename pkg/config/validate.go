@@ -51,7 +51,7 @@ func (a Agrouter) validate() []error {
 }
 
 // validate checks the CLI's command and invocation descriptors: required keys, placeholders only in
-// their own key, {prompt} as the last prompt_args token, and the native flag lists.
+// their own key, {prompt} as the last prompt_args token.
 func (cli CLI) validate(models []Model) []error {
 	section := "cli." + cli.Name
 	var errs []error
@@ -63,7 +63,6 @@ func (cli CLI) validate(models []Model) []error {
 	}
 	hasEfforts := slices.ContainsFunc(models, func(m Model) bool { return m.CLI == cli.Name && len(m.Efforts) > 0 })
 	cli.validateTemplates(hasEfforts, add)
-	cli.validateFlags(add)
 	if cli.Availability != nil {
 		errs = append(errs, cli.Availability.validate(section+".availability")...)
 	}
@@ -146,49 +145,6 @@ func (cli CLI) validateTemplates(hasEfforts bool, add func(key, format string, a
 		slices.Index(cli.PromptArgs, PlaceholderPrompt) != n-1) {
 		add("prompt_args", "must hold %s once, as its last element", PlaceholderPrompt)
 	}
-}
-
-// validateFlags checks the native flag spellings and the selection and context config keys.
-func (cli CLI) validateFlags(add func(key, format string, a ...any)) {
-	for _, l := range []struct {
-		key   string
-		items []string
-	}{
-		{"selection_flags", cli.SelectionFlags},
-		{"config_flags", cli.ConfigFlags},
-		{"context_flags", cli.ContextFlags},
-	} {
-		for _, f := range l.items {
-			if !isFlagSpelling(f) {
-				add(l.key, "%q is not a flag spelling (-x or --name)", f)
-			}
-		}
-	}
-	for _, l := range []struct {
-		key   string
-		items []string
-	}{
-		{"selection_config_keys", cli.SelectionConfigKeys},
-		{"context_config_keys", cli.ContextConfigKeys},
-	} {
-		for _, k := range l.items {
-			if strings.ContainsAny(k, "= \t") {
-				add(l.key, "%q is not a config key", k)
-			}
-		}
-	}
-	if (len(cli.ConfigFlags) == 0) != (len(cli.SelectionConfigKeys) == 0) {
-		add("selection_config_keys", "set together with config_flags")
-	}
-	if len(cli.ContextConfigKeys) > 0 && len(cli.ConfigFlags) == 0 {
-		add("context_config_keys", "needs config_flags")
-	}
-}
-
-// isFlagSpelling reports whether f is a single option spelling such as -m or --model.
-func isFlagSpelling(f string) bool {
-	name := strings.TrimPrefix(strings.TrimPrefix(f, "-"), "-")
-	return strings.HasPrefix(f, "-") && name != "" && !strings.HasPrefix(name, "-") && !strings.ContainsAny(name, "= \t")
 }
 
 // checkPlaceholder reports whether placeholder ph is allowed in token tok of key, whose own

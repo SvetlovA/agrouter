@@ -31,8 +31,9 @@ const helpText = `agrouter asks TypeSafe's Jev which (cli, model, effort) should
 
 Without "exec" it prints that decision as JSON. With "exec" as the first token,
 followed by the CLI to run, it routes within that CLI and runs it; the CLI's own
-options go after "--" and are passed to it unchanged, in order. "--" is only
-accepted with exec.
+options go after "--". Agrouter replaces native --model/-m and --effort selections;
+other options are passed through in order, followed by the chosen model and effort.
+"--" is only accepted with exec.
 The default decision includes the selection, project complexity and Jev's
 confidence at each routing stage (cli, model, effort). --verbose prints indented
 JSON with every routing stage, chunk, candidate probability, complexity score,
@@ -122,7 +123,7 @@ type flagSet struct {
 	PromptFile func(string) `long:"prompt-file" value-name:"PATH" unquote:"false" description:"read prompt text from a file, after -p and the positional prompt"`
 	Doc        func(string) `long:"doc" value-name:"PATH" unquote:"false" description:"project doc for routing only, repeatable; never passed to the chosen CLI"`
 
-	Model  func(string) `long:"model" value-name:"MODEL" unquote:"false" description:"use this model; Jev chooses only its effort"`
+	Model  func(string) `short:"m" long:"model" value-name:"MODEL" unquote:"false" description:"use this model; Jev chooses only its effort"`
 	Effort func(string) `long:"effort" value-name:"EFFORT" unquote:"false" description:"use this effort; Jev chooses among options with it"`
 
 	Verbose bool `long:"verbose" description:"include full decision details (agrouter only; after -- it goes to the chosen CLI)"`
