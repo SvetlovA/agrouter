@@ -148,7 +148,7 @@ func (cli CLI) validateTemplates(hasEfforts bool, add func(key, format string, a
 	}
 }
 
-// validateFlags checks the native flag spellings and selection config keys.
+// validateFlags checks the native flag spellings and the selection and context config keys.
 func (cli CLI) validateFlags(add func(key, format string, a ...any)) {
 	for _, l := range []struct {
 		key   string
@@ -164,13 +164,24 @@ func (cli CLI) validateFlags(add func(key, format string, a ...any)) {
 			}
 		}
 	}
-	for _, k := range cli.SelectionConfigKeys {
-		if strings.ContainsAny(k, "= \t") {
-			add("selection_config_keys", "%q is not a config key", k)
+	for _, l := range []struct {
+		key   string
+		items []string
+	}{
+		{"selection_config_keys", cli.SelectionConfigKeys},
+		{"context_config_keys", cli.ContextConfigKeys},
+	} {
+		for _, k := range l.items {
+			if strings.ContainsAny(k, "= \t") {
+				add(l.key, "%q is not a config key", k)
+			}
 		}
 	}
 	if (len(cli.ConfigFlags) == 0) != (len(cli.SelectionConfigKeys) == 0) {
 		add("selection_config_keys", "set together with config_flags")
+	}
+	if len(cli.ContextConfigKeys) > 0 && len(cli.ConfigFlags) == 0 {
+		add("context_config_keys", "needs config_flags")
 	}
 }
 

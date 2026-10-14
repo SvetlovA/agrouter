@@ -49,8 +49,10 @@ type CLI struct {
 	// that select a model or effort through them, rejected after "--" like SelectionFlags.
 	ConfigFlags         []string
 	SelectionConfigKeys []string
-	// ContextFlags are native spellings that change the child's provider, profile or settings context.
-	ContextFlags []string
+	// ContextFlags are native spellings that change the child's provider, profile or settings context;
+	// ContextConfigKeys are the config keys that change it through ConfigFlags, dotted subkeys included.
+	ContextFlags      []string
+	ContextConfigKeys []string
 	// Availability is the [cli.<name>.availability] section; nil when the CLI has none.
 	Availability *Availability
 }

@@ -91,26 +91,33 @@ func TestCheckSeparator(t *testing.T) {
 	})
 }
 
-func TestContextFlag(t *testing.T) {
+func TestContextChanged(t *testing.T) {
 	cli := fixtureCLI(t, "alpha")
 	cli.ContextFlags = []string{"--profile", "-P"}
+	cli.ConfigFlags = []string{"-c", "--config"}
+	cli.ContextConfigKeys = []string{"provider"}
 	tests := []struct {
 		name string
 		raw  []string
-		want string
+		want bool
 	}{
 		{name: "no native tokens"},
 		{name: "unrelated options", raw: []string{"--json", "--profiles", "-v"}},
-		{name: "bare long flag", raw: []string{"--json", "--profile", "work"}, want: "--profile"},
-		{name: "long flag with =", raw: []string{"--profile=work"}, want: "--profile"},
-		{name: "attached short flag", raw: []string{"-Pwork"}, want: "-P"},
+		{name: "bare long flag", raw: []string{"--json", "--profile", "work"}, want: true},
+		{name: "long flag with =", raw: []string{"--profile=work"}, want: true},
+		{name: "attached short flag", raw: []string{"-Pwork"}, want: true},
 		{name: "after the child's --", raw: []string{"--", "--profile", "work"}},
+		{name: "config key as the next token", raw: []string{"-c", "provider=local"}, want: true},
+		{name: "attached quoted config key", raw: []string{`--config="provider"=local`}, want: true},
+		{name: "dotted config subkey", raw: []string{"-cprovider.local.url=x"}, want: true},
+		{name: "unrelated config key", raw: []string{"-c", "providers_cache=1"}},
+		{name: "config value is no flag", raw: []string{"-c", "--profile=x"}},
+		{name: "config flag without a value", raw: []string{"-c"}},
+		{name: "config key after the child's --", raw: []string{"--", "-c", "provider=local"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := ContextFlag(cli, tc.raw)
-			assert.Equal(t, tc.want, got)
-			assert.Equal(t, tc.want != "", ok)
+			assert.Equal(t, tc.want, ContextChanged(cli, tc.raw))
 		})
 	}
 }

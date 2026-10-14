@@ -138,6 +138,16 @@ func TestValidate_Violations(t *testing.T) {
 			want:  []string{`[cli.alpha] selection_config_keys: "model=x" is not a config key`},
 		},
 		{
+			name:  "context config key with a value",
+			local: "[cli.alpha]\ncontext_config_keys = profile=x\n",
+			want:  []string{`[cli.alpha] context_config_keys: "profile=x" is not a config key`},
+		},
+		{
+			name:  "context config keys without config flags",
+			local: "[cli.beta]\ncontext_config_keys = profile\n",
+			want:  []string{"[cli.beta] context_config_keys: needs config_flags"},
+		},
+		{
 			name:  "selection config keys without config flags",
 			local: "[cli.beta]\nselection_config_keys = model\n",
 			want:  []string{"[cli.beta] selection_config_keys: set together with config_flags"},

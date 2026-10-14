@@ -66,6 +66,12 @@ func TestApp_ExecFallback(t *testing.T) {
 			fallback: both, effective: map[string]any{"model": verified("m-2"), "effort": unknownDefault(defaultNotReported)}},
 		{name: "effort stage keeps Jev's model", stage: "effort", effort: "high",
 			warning: "agrouter: warning: Jev routing failed at the effort stage (jev_api_error); effort falls back to the " +
+				"alpha default, not a Jev selection: effort unknown (child reported it for another model)",
+			fallback:   effortOnly,
+			effective:  map[string]any{"model": chosenBy(sourceRouter, "fast-1"), "effort": unknownDefault(defaultOtherModel)},
+			childModel: "fast-1"},
+		{name: "effort stage on the child's default model", stage: "effort", model: "fast-1", effort: "high",
+			warning: "agrouter: warning: Jev routing failed at the effort stage (jev_api_error); effort falls back to the " +
 				"alpha default, not a Jev selection: effort high (verified child default)",
 			fallback: effortOnly, effective: map[string]any{"model": chosenBy(sourceRouter, "fast-1"), "effort": verified("high")},
 			childModel: "fast-1"},
@@ -213,13 +219,24 @@ func TestApp_ExecNoFallback(t *testing.T) {
 
 	t.Run("an effort left to a passed-through model", func(t *testing.T) {
 		e := newSyntheticEnv(t)
-		e.checker = defaultsChecker("", "high")
+		e.checker = defaultsChecker("made-up-9", "high")
 		r := e.run([]string{"exec", "alpha", "--model=made-up-9", "fix it"}, nil)
 
 		require.Equal(t, exitOK, r.code, r.stderr)
 		s := selectionLog(t, r.stderr)
 		assert.NotContains(t, s, "fallback", "an intentional omission is no fallback")
 		assert.Equal(t, map[string]any{"model": chosenBy(sourceCaller, "made-up-9"), "effort": verified("high")}, s["effective"])
+	})
+
+	t.Run("a default effort of another model is unknown", func(t *testing.T) {
+		e := newSyntheticEnv(t)
+		e.checker = defaultsChecker("m-2", "high")
+		r := e.run([]string{"exec", "alpha", "--model=made-up-9", "fix it"}, nil)
+
+		require.Equal(t, exitOK, r.code, r.stderr)
+		s := selectionLog(t, r.stderr)
+		assert.Equal(t, map[string]any{"model": chosenBy(sourceCaller, "made-up-9"), "effort": unknownDefault(defaultOtherModel)},
+			s["effective"])
 	})
 
 	t.Run("chunked routing keeps the pooled model", func(t *testing.T) {

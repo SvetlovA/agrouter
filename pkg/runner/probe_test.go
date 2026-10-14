@@ -94,9 +94,10 @@ func TestRunProbe_ResponseLimit(t *testing.T) {
 
 func TestRunProbe_Timeout(t *testing.T) {
 	c, dir := probeCommand(t, "sleep")
-	c.Timeout = 200 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
 	start := time.Now()
-	_, err := RunProbe(context.Background(), c, nil)
+	_, err := RunProbe(ctx, c, nil)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Less(t, time.Since(start), 10*time.Second)
 	waitPid(t, filepath.Join(dir, "pid"))
@@ -126,14 +127,16 @@ func TestRunProbe_StartErrors(t *testing.T) {
 	tests := []struct {
 		name string
 		argv []string
+		dir  string
 	}{
 		{name: "empty", argv: nil},
 		{name: "missing", argv: []string{filepath.Join(t.TempDir(), "no-such-probe")}},
 		{name: "not executable", argv: []string{notExec}},
+		{name: "start fails after lookup", argv: []string{os.Args[0]}, dir: filepath.Join(t.TempDir(), "no-such-dir")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := RunProbe(context.Background(), ProbeCommand{Argv: tt.argv}, nil)
+			_, err := RunProbe(context.Background(), ProbeCommand{Argv: tt.argv, Dir: tt.dir}, nil)
 			var se *StartError
 			require.ErrorAs(t, err, &se)
 		})

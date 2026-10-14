@@ -393,6 +393,8 @@ func (s *section) decodeCLI() (CLI, error) {
 			cli.SelectionConfigKeys = splitList(v)
 		case "context_flags":
 			cli.ContextFlags = splitList(v)
+		case "context_config_keys":
+			cli.ContextConfigKeys = splitList(v)
 		case "enabled":
 		default:
 			return CLI{}, s.unknownKey(k)

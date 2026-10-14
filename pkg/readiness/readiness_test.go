@@ -252,6 +252,15 @@ func TestCheck_ContextCanceled(t *testing.T) {
 	quota := evidenceOf(r, DimensionQuota)
 	require.Len(t, quota, 1)
 	assert.Equal(t, StatusUnknown, quota[0].Status)
+	assert.Equal(t, ReasonProbeTimeout, quota[0].Reason)
+}
+
+// a later check's reported default overrides an earlier one; an unreported one leaves it alone
+func TestReport_SetDefaults(t *testing.T) {
+	var r Report
+	r.setDefaults(Defaults{Model: new("m-1"), Effort: new("low")})
+	r.setDefaults(Defaults{Effort: new("high")})
+	assert.Equal(t, Defaults{Model: new("m-1"), Effort: new("high")}, r.Defaults)
 }
 
 func TestChecker_DefaultClock(t *testing.T) {

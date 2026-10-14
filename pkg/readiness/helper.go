@@ -8,8 +8,9 @@ import (
 	"fmt"
 	"io"
 	"regexp"
-	"slices"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/SvetlovA/agrouter/pkg/config"
 )
@@ -111,6 +112,10 @@ func parseHelper(data []byte, check string, now time.Time) ([]Evidence, Defaults
 		if (d.Model != nil && *d.Model == "") || (d.Effort != nil && *d.Effort == "") {
 			return nil, Defaults{}, errors.New("defaults: empty value (use null for unknown)")
 		}
+		// defaults reach stderr in the fallback warning: only a short token without spaces is taken
+		if (d.Model != nil && safeValue(d.Model) == nil) || (d.Effort != nil && safeValue(d.Effort) == nil) {
+			return nil, Defaults{}, errors.New("defaults: value must be at most 128 characters without spaces")
+		}
 		defaults = Defaults{Model: d.Model, Effort: d.Effort}
 	}
 	return evidence, defaults, nil
@@ -160,9 +165,16 @@ func statusReason(status Status, reason, blocked string) (string, error) {
 	return reason, nil
 }
 
+// checkModels rejects an empty model label, and one that could carry raw text to stderr: control
+// characters or more than 128 characters.
 func checkModels(models []string) error {
-	if slices.Contains(models, "") {
-		return errors.New("empty model name")
+	for _, m := range models {
+		switch {
+		case m == "":
+			return errors.New("empty model name")
+		case len(m) > 128 || strings.ContainsFunc(m, unicode.IsControl):
+			return errors.New("model name must be at most 128 characters without control characters")
+		}
 	}
 	return nil
 }

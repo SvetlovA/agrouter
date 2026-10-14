@@ -164,6 +164,11 @@ func TestRPC_Evidence(t *testing.T) {
 			defaults: Defaults{Model: new("m-hidden")}},
 		{fixture: "models_error", evidence: []Evidence{authOK, fiveHour, weekly},
 			defaults: Defaults{Model: new("m-hidden")}},
+		{fixture: "models_no_effort", evidence: []Evidence{authOK, fiveHour, weekly},
+			defaults: Defaults{Model: new("m-hidden")}},
+		// a cursor that never ends stops at the page bound instead of running into the deadline
+		{fixture: "models_endless", evidence: []Evidence{authOK, fiveHour, weekly},
+			defaults: Defaults{Model: new("m-hidden")}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.fixture, func(t *testing.T) {

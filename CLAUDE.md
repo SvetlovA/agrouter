@@ -13,7 +13,7 @@ pkg/args/              # request model, argv building from invocation descriptor
 pkg/prompt/            # prompt sources (-p, positional, --prompt-file, stdin), --doc, strict file reads, mentioned files, budget, chunking, doc splitting
 pkg/jev/               # hand-written TypeSafe HTTP client: types, validation, retry, deadline
 pkg/router/            # eligibility, complexity stage (--doc), staged routing (cli -> model -> effort), Jev questions, chunk fan-out and pooling, cannot-decide policy
-pkg/runner/            # child process, stdin replay, Unix process groups / Windows Job Objects, .cmd quoting
+pkg/runner/            # child process, stdin replay, Windows Job Objects, .cmd quoting; bounded prompt-free probes (own process group / Job Object, response limit)
 pkg/readiness/         # exec-only availability: executable lookup, prompt-free probes (json-helper, SDK control usage, JSON-RPC rate limits), evidence evaluation against options
 ```
 
@@ -39,7 +39,7 @@ Dependencies point one way: `config` <- `catalog` <- `router`; `config`, `catalo
 - Table-driven tests with testify; coverage 80%+ per package, mocks excluded.
 - Test behavior, not the current configuration contents. Do not pin the shipped model list, model versions, option counts, default values, invocation descriptors, or equality with a documentation config block. Use explicit synthetic fixtures for catalog, filtering, lookup, and request-format tests; keep a smoke test that embedded config loads and validates.
 - Readiness probes are tested with synthetic jsonl fixtures in `pkg/readiness/testdata/{control,rpc}` replayed by a fake peer; no test starts a real CLI.
-- Child processes: the test binary doubles as the fake CLI when `GO_WANT_HELPER_PROCESS=1` (`cmd/agrouter/app_test.go`, `pkg/runner/runner_test.go`); it records argv, stdin and env. Jev is an `httptest` server or the moq mock.
+- Child processes: the test binary doubles as the fake CLI when `GO_WANT_HELPER_PROCESS=1` (`cmd/agrouter/app_test.go`, `pkg/runner/runner_test.go`, `pkg/readiness/readiness_test.go`); it records argv, stdin and env. Jev is an `httptest` server or the moq mock.
 - Golden requests in `pkg/router/testdata` use a synthetic catalog, independent of the embedded defaults: `go test ./pkg/router -update` rewrites them.
 - Platform tests sit behind build tags (`runner_unix_test.go`, `runner_windows_test.go`) and only run on their own OS in CI.
 - `.gitattributes` forces LF so fixtures and embedded defaults are byte-identical on Windows.

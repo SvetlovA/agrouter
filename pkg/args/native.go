@@ -25,41 +25,60 @@ func CheckNative(cli config.CLI, raw []string) error {
 				return selectionError(cli.Name, f)
 			}
 		}
-		for _, f := range cli.ConfigFlags {
-			v, ok := flagValue(tok, f)
-			if !ok {
-				continue
-			}
-			if v == nil {
-				if i+1 >= len(raw) {
-					break
-				}
-				i++
-				v = &raw[i]
-			}
-			if key := configKey(*v); slices.Contains(cli.SelectionConfigKeys, key) {
+		if f, key, last, ok := configArg(cli, raw, i); ok {
+			if slices.Contains(cli.SelectionConfigKeys, key) {
 				return selectionError(cli.Name, f+" "+key)
 			}
+			i = last
 		}
 	}
 	return nil
 }
 
-// ContextFlag returns the first configured context spelling among the native tokens before the
-// child's own "--": a flag that switches the child's provider, profile or settings, so a probe of the
-// default context says nothing about the run. Like CheckNative it has no arity table.
-func ContextFlag(cli config.CLI, raw []string) (string, bool) {
-	for _, tok := range raw {
+// ContextChanged reports whether the native tokens before the child's own "--" switch the child's
+// provider, profile or settings, so a probe of the default context says nothing about the run: a
+// configured context flag, or a config flag whose key is a context key or one of its dotted subkeys.
+// Like CheckNative it has no arity table.
+func ContextChanged(cli config.CLI, raw []string) bool {
+	for i := 0; i < len(raw); i++ {
+		tok := raw[i]
 		if tok == config.EndOfOptions {
-			break
+			return false
 		}
 		for _, f := range cli.ContextFlags {
 			if _, ok := flagValue(tok, f); ok {
-				return f, true
+				return true
 			}
 		}
+		if _, key, last, ok := configArg(cli, raw, i); ok {
+			if slices.ContainsFunc(cli.ContextConfigKeys, func(k string) bool {
+				return key == k || strings.HasPrefix(key, k+".")
+			}) {
+				return true
+			}
+			i = last
+		}
 	}
-	return "", false
+	return false
+}
+
+// configArg reports whether raw[i] is one of cli's config flags, with its spelling, the key of its
+// key=value argument (attached, or the next token) and the index of the argument's token.
+func configArg(cli config.CLI, raw []string, i int) (flag, key string, last int, ok bool) {
+	for _, f := range cli.ConfigFlags {
+		v, ok := flagValue(raw[i], f)
+		if !ok {
+			continue
+		}
+		if v == nil {
+			if i+1 >= len(raw) {
+				return "", "", i, false
+			}
+			return f, configKey(raw[i+1]), i + 1, true
+		}
+		return f, configKey(*v), i, true
+	}
+	return "", "", i, false
 }
 
 // flagValue reports whether tok is flag f, and returns its attached value: nil for a bare flag,

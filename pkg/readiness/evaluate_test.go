@@ -150,6 +150,15 @@ func TestEvaluate(t *testing.T) {
 				Reason: ReasonUnsupportedModel, Scope: Scope{Models: []string{"small-model"}}},
 				exhausted(WindowWeekly, time.Hour, "big-model")),
 			excluded: all, blocked: quotaBlock(ReasonQuotaExhausted, time.Hour, WindowWeekly)},
+		{name: "a later quota block with a reset is reported before an earlier unsupported model",
+			evidence: append(bothFree(), Evidence{Dimension: DimensionCapability, Status: StatusUnavailable,
+				Reason: ReasonUnsupportedModel, Scope: Scope{Models: []string{"big-model"}}},
+				exhausted(WindowWeekly, time.Hour, "small-model")),
+			excluded: all, blocked: quotaBlock(ReasonQuotaExhausted, time.Hour, WindowWeekly)},
+		{name: "a later known block wins over an earlier refused unknown",
+			evidence: append(bothFree(), quotaEv(WindowWeekly, StatusUnknown, ReasonExtraUsageEnabled, 0, "big-model"),
+				exhausted(WindowWeekly, time.Hour, "small-model")),
+			unknown: config.UnknownBlock, excluded: all, blocked: quotaBlock(ReasonQuotaExhausted, time.Hour, WindowWeekly)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

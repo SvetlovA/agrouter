@@ -1,6 +1,7 @@
 package readiness
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -64,6 +65,10 @@ func TestParseHelper_Malformed(t *testing.T) {
 		{name: "empty scoped model", in: `{` + schema + `,"quota":[{"window":"weekly","status":"unavailable","models":[""]}]}`},
 		{name: "empty unsupported model", in: `{` + schema + `,"capability":{"unsupported_models":[""]}}`},
 		{name: "empty default", in: `{` + schema + `,"defaults":{"model":""}}`},
+		{name: "default with a line break", in: `{` + schema + `,"defaults":{"model":"m-1\nagrouter: selection: {}"}}`},
+		{name: "default with a space", in: `{` + schema + `,"defaults":{"effort":"very high"}}`},
+		{name: "scoped model with a line break", in: `{` + schema + `,"quota":[{"window":"weekly","status":"unavailable","models":["m-1\nx"]}]}`},
+		{name: "unsupported model too long", in: `{` + schema + `,"capability":{"unsupported_models":["` + strings.Repeat("m", 129) + `"]}}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -34,30 +34,29 @@ func debugLines(stderr string) []string {
 
 func TestDebug_Redaction(t *testing.T) {
 	const secret = "the secret prompt text"
-	e := newEnv(t)
-	e.fakeCommands()
+	e := newSyntheticEnv(t)
 	t.Setenv(envDebug, "1")
-	e.jev.pick = "claude-sonnet-5-5@low"
-	r := e.run([]string{"exec", "claude", "--verbose", secret, "--", "--raw-one", "raw-two"}, nil)
+	e.jev.pick = "fast@low"
+	r := e.run([]string{"exec", "alpha", "--verbose", secret, "--", "--raw-one", "raw-two"}, nil)
 	require.Equal(t, 0, r.code, r.stderr)
 
 	lines := debugLines(r.stderr)
 	require.Len(t, lines, 13)
 	assert.Equal(t, "api key: from env", lines[0])
 	assert.Equal(t, []string{
-		"readiness claude: executable available",
-		"readiness claude: auth available",
-		"readiness claude: quota available, window five_hour",
-		"readiness claude: quota available, window weekly",
-		"readiness claude: defaults model unknown, effort unknown",
-	}, lines[1:6])
-	assert.Regexp(t, `^readiness claude: 0 of [1-9][0-9]* option\(s\) excluded$`, lines[6])
-	assert.Regexp(t, `^eligible: [1-9][0-9]* option\(s\) on claude$`, lines[7])
-	assert.Equal(t, "dropped codex: --cli claude", lines[8], "the exec CLI restricts routing like --cli")
-	assert.Equal(t, "stage cli: skipped (claude)", lines[9])
-	assert.True(t, strings.HasPrefix(lines[10], "stage model: choice claude-sonnet-5-5, confidence 0.900, top [claude-sonnet-5-5 1.000"), lines[10])
+		"readiness alpha: executable available",
+		"readiness alpha: auth available",
+		"readiness alpha: quota available, window five_hour",
+		"readiness alpha: quota available, window weekly",
+		"readiness alpha: defaults model unknown, effort unknown",
+		"readiness alpha: 0 of 4 option(s) excluded",
+		"eligible: 4 option(s) on alpha",
+		"dropped beta: --cli alpha",
+		"stage cli: skipped (alpha)",
+	}, lines[1:10], "the exec CLI restricts routing like --cli")
+	assert.True(t, strings.HasPrefix(lines[10], "stage model: choice fast, confidence 0.900, top [fast 1.000"), lines[10])
 	assert.True(t, strings.HasPrefix(lines[11], "stage effort: choice low, confidence 0.900, top [low 1.000"), lines[11])
-	assert.Equal(t, "command: "+helperCommand(t)+" -p --model claude-sonnet-5-5 --effort low <2 raw argument(s)> -- <prompt>", lines[12])
+	assert.Equal(t, "command: "+helperCommand(t)+" -p --model fast-1 --effort low <2 raw argument(s)> -- <prompt>", lines[12])
 	assert.NotContains(t, r.stderr, secret)
 	assert.NotContains(t, r.stderr, "raw-two")
 	assert.NotContains(t, r.stderr, testKey)

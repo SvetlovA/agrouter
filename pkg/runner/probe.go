@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"time"
 )
 
 // DefaultProbeResponseLimit bounds a probe's stdout when ProbeCommand.MaxResponse is unset.
@@ -21,11 +20,10 @@ var ErrProbeResponseTooLarge = errors.New("probe response exceeds its byte limit
 // output streams: its stdin carries only what the caller writes to Probe.Stdin, its stdout is read
 // back with a byte limit, and its stderr is discarded.
 type ProbeCommand struct {
-	Argv        []string      // the command, then its arguments; never passed through a shell
-	Env         []string      // the environment before filtering; nil means os.Environ()
-	Dir         string        // the working directory; empty for the current one
-	Timeout     time.Duration // bounds the probe on top of the context; zero for none
-	MaxResponse int64         // stdout byte limit; zero for DefaultProbeResponseLimit
+	Argv        []string // the command, then its arguments; never passed through a shell
+	Env         []string // the environment before filtering; nil means os.Environ()
+	Dir         string   // the working directory; empty for the current one
+	MaxResponse int64    // stdout byte limit; zero for DefaultProbeResponseLimit
 }
 
 // LookPath resolves name the way Run and StartProbe do, including Windows extensions and batch shims.
@@ -65,12 +63,7 @@ func StartProbe(ctx context.Context, c ProbeCommand) (*Probe, error) {
 	if err != nil {
 		return fail(err)
 	}
-	var cancel context.CancelFunc
-	if c.Timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, c.Timeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
+	ctx, cancel := context.WithCancel(ctx)
 	p := &Probe{ctx: ctx, cancel: cancel}
 	if p.cmd, err = newCmd(ctx, path, c.Argv[1:]); err != nil {
 		cancel()

@@ -42,7 +42,7 @@ type checked struct {
 // startPreflight checks cli under ctx in the background. Native arguments that switch the child's
 // context make the probes moot: only the executable is looked up, and the rest is unknown.
 func (a *app) startPreflight(ctx context.Context, cli config.CLI, raw []string) *preflight {
-	_, changed := args.ContextFlag(cli, raw)
+	changed := args.ContextChanged(cli, raw)
 	p := &preflight{done: make(chan struct{}), changed: changed}
 	probed := cli
 	if changed {

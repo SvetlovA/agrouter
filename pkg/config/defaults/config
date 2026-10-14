@@ -46,6 +46,7 @@ complexity_policy = Judge the codebase as a whole: its size, architecture, depen
 # config_flags + selection_config_keys: a config flag (key=value) whose key chooses the model
 # or effort is rejected the same way.
 # context_flags: native spellings that switch the CLI's provider, profile or settings.
+# context_config_keys: config keys (and their dotted subkeys) that switch them through config_flags.
 
 [cli.claude]
 command         = claude
@@ -92,6 +93,7 @@ selection_flags       = --model, -m
 config_flags          = -c, --config
 selection_config_keys = model, model_reasoning_effort
 context_flags         = --profile, -p, --oss, --local-provider, --ignore-user-config
+context_config_keys   = profile, model_provider, model_providers
 
 [cli.codex.availability]
 checks              = limits

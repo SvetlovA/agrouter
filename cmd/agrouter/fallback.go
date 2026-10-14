@@ -23,12 +23,14 @@ const (
 const (
 	defaultNotReported    = "default_not_reported"
 	defaultContextChanged = readiness.ReasonContextChanged
+	defaultOtherModel     = "default_for_other_model"
 )
 
 // defaultReasonTexts are the warning's words for an unknown default.
 var defaultReasonTexts = map[string]string{
 	defaultNotReported:    "child did not report it",
 	defaultContextChanged: "native arguments change the child's context",
+	defaultOtherModel:     "child reported it for another model",
 }
 
 // fallbackAction is the only fallback: the child runs with its own defaults.
@@ -87,10 +89,15 @@ func (a *app) execSelection(cli config.CLI, req *args.Request, d routed) (select
 		}
 	}
 
-	model := effective(s.Model, req.Model, pre.report.Defaults.Model, pre.changed)
+	model := effective(s.Model, req.Model, pre.report.Defaults.Model, pre.changed, "")
 	var effort *effectiveValueJSON
 	if !d.NoEffort {
-		effort = effective(s.Effort, req.Effort, pre.report.Defaults.Effort, pre.changed)
+		// the probe's default effort belongs to the child's default model, not to one agrouter set
+		def, why := pre.report.Defaults.Effort, ""
+		if def != nil && s.Model != nil && !strings.EqualFold(*s.Model, deref(pre.report.Defaults.Model)) {
+			def, why = nil, defaultOtherModel
+		}
+		effort = effective(s.Effort, req.Effort, def, pre.changed, why)
 	}
 	if s.Model == nil || (s.Effort == nil && !d.NoEffort) {
 		s.Effective = &effectiveJSON{Model: model, Effort: effort}
@@ -115,7 +122,8 @@ func (a *app) execSelection(cli config.CLI, req *args.Request, d routed) (select
 
 // effective is a value's effective form: chosen (by the caller when fixed is set, else by agrouter),
 // or the child's default, verified when the probe reported it and the context is the probed one.
-func effective(chosen *string, fixed string, def *string, changed bool) *effectiveValueJSON {
+// why is the reason for a default that is not reported, defaultNotReported when empty.
+func effective(chosen *string, fixed string, def *string, changed bool, why string) *effectiveValueJSON {
 	switch {
 	case chosen != nil && fixed != "":
 		return &effectiveValueJSON{Value: chosen, Source: sourceCaller}
@@ -125,8 +133,10 @@ func effective(chosen *string, fixed string, def *string, changed bool) *effecti
 		return &effectiveValueJSON{Source: sourceUnknownDefault, Reason: &codeJSON{defaultContextChanged}}
 	case def != nil:
 		return &effectiveValueJSON{Value: def, Source: sourceVerifiedDefault}
+	case why == "":
+		why = defaultNotReported
 	}
-	return &effectiveValueJSON{Source: sourceUnknownDefault, Reason: &codeJSON{defaultNotReported}}
+	return &effectiveValueJSON{Source: sourceUnknownDefault, Reason: &codeJSON{why}}
 }
 
 // fallbackMessage is the fallback's fixed message for fields.

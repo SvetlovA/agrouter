@@ -220,7 +220,26 @@ Exec then routes only over the CLI's options that are left. It never switches to
 | nothing is left: subscription quota exhausted | `<quota_error_prefix><quota_error_message>; <windows> subscription quota exhausted[; resets at <RFC 3339>]` | `127` |
 | nothing is left under `unknown = block` | `agrouter: <cli> availability unverified: <reason>` | `2` |
 
-A blocked exec prints no selection line, nothing on stdout, and makes no Jev request. The reset is the latest reset of the exhausted windows, since a weekly window outlasts a five-hour one, and is left out when any of them is unverified. `quota_error_prefix` (default `agrouter: `) and `quota_error_message` come from config, so the line can match a caller's own limit pattern, for example a severity prefix such as `ERROR: agrouter: `. An unknown availability is never reported as a quota block. Native arguments after `--` that switch the child's context (`context_flags`) make the probes moot: only the executable is checked, and the rest is unknown (`context_changed`).
+A preflight block prints no selection line, nothing on stdout, and makes no Jev request. (A block on a delegated model's default comes after routing; see [Exec fallback](#exec-fallback).) The reset is the latest reset of the exhausted windows, since a weekly window outlasts a five-hour one, and is left out when any of them is unverified. `quota_error_prefix` (default `agrouter: `) and `quota_error_message` come from config, so the line can match a caller's own limit pattern, for example a severity prefix such as `ERROR: agrouter: `. An unknown availability is never reported as a quota block. Native arguments after `--` that switch the child's context (`context_flags`, or a config flag with a `context_config_keys` key) make the probes moot: only the executable is checked, and the rest is unknown (`context_changed`).
+
+The `<reason>` in these lines, and the reasons in the selection line's `readiness`, are fixed codes:
+
+| Reason | Kind | Meaning |
+|---|---|---|
+| `executable_missing`, `auth_failed` | block (`127`) | the CLI is not on `PATH`, or its login failed |
+| `quota_exhausted`, `quota_denied` | block (`127`) | a quota window is used up, or the backend refuses it whatever its usage |
+| `unsupported_model` | excludes the model | the CLI reports it cannot run that model |
+| `availability_not_configured`, `availability_disabled` | unknown | no availability section, or `enabled = false`: only the executable was checked |
+| `context_changed` | unknown | native arguments switch the child's provider, profile or settings |
+| `transport_unsupported`, `version_unsupported` | unknown | the check's transport is not known, or the CLI is older than `min_version` |
+| `probe_missing`, `probe_timeout`, `probe_failed`, `probe_response_too_large`, `probe_malformed`, `probe_throttled` | unknown | the probe could not start, ran out of time, exited nonzero, answered too much, answered off-schema, or was rate-limited |
+| `not_reported`, `window_not_reported`, `usage_permission_not_reported` | unknown | the probe did not report a value, a quota window, or whether usage is allowed |
+| `extra_usage_enabled` | unknown | a full window that paid overage may still cover |
+| `quota_reset_passed` | unknown | a block whose reset time has already passed |
+| `delegated_model_unverified` | unknown | no model is set and some model has its own quota block |
+| `evidence_invalid` | unknown | evidence with a status or window the evaluation does not know |
+
+**Note:** a block stops exec; an unknown is one warning under `unknown = allow` and exit `2` under `unknown = block`. `not_subscription` (API-key or other-provider auth) needs no quota windows and is neither.
 
 The shipped checks take about 0.5s to 2s on a cold start, which is part of the routing budget (`[agrouter] timeout`, 10s by default). A probe cut off by either timeout is unknown, not a block.
 
@@ -246,7 +265,7 @@ Note: the first line is readable without parsing JSON; the second carries the sa
 | `router` | agrouter chose it: Jev, or the one option left |
 | `caller` | `--model` or `--effort` fixed it |
 | `verified_child_default` | the child's own default, as its prompt-free probe reported it for this working directory and settings |
-| `child_default_unknown` | the child's default is not known: `default_not_reported`, or `context_changed` when native `context_flags` switch the child's context |
+| `child_default_unknown` | the child's default is not known: `default_not_reported`; `context_changed` when native arguments switch the child's context; or `default_for_other_model` when the probe reported the default effort of the child's default model, but agrouter or the caller set another model |
 
 Values Jev chose before the failure (the model when only the effort stage failed) and values the caller fixed keep their source and are never listed as fallbacks. Top-level `model`/`effort` stay `null` whenever agrouter passes no selection flag, even when `effective` shows a verified default. A catalog default or a model list's recommendation is never reported as verified. An intentional omission (a model without effort levels, the effort of a passed-through `--model`) is no fallback and prints no warning.
 
@@ -301,6 +320,7 @@ argv = command + exec_args + model_args + effort_args + native args after "--" +
 | `selection_flags` | native spellings that select the model or effort, for example `--model, -m, --effort` |
 | `config_flags`, `selection_config_keys` | a native config flag (`-c`) and the keys that select the model or effort through it; set together |
 | `context_flags` | native spellings that switch the CLI's provider, profile or settings |
+| `context_config_keys` | config keys that switch them through a `config_flags` flag, dotted subkeys included (for example `profile` also covers `-c profile.x=y`); needs `config_flags` |
 
 Template keys are JSON arrays of strings; the flag and key lists are comma-separated. Only `{model}`, `{effort}` and `{prompt}` are placeholders, each only in its own key. An unset model or effort leaves its args out, so the CLI's own default applies.
 
@@ -312,7 +332,7 @@ The former `[cli.<name>.args]` mapping sections are config errors that name the 
 
 ### Availability checks
 
-Each CLI's exec readiness checks live under its own `[cli.<name>]` section, so a new CLI needs only config. A CLI without an availability section gets the executable check only.
+Each CLI's exec readiness checks live under its own `[cli.<name>]` section, so a new CLI needs only config. A CLI without an availability section, or with `enabled = false`, gets the executable check only. Its quota is then unknown: each exec prints one `availability unknown` warning (`availability_not_configured` or `availability_disabled`), or exits `2` under `unknown = block`.
 
 ```text
 [cli.<name>.availability]            policy: which checks, timeout, unknown policy, quota line
@@ -325,7 +345,7 @@ Each CLI's exec readiness checks live under its own `[cli.<name>]` section, so a
 |---|---|
 | `enabled` | `false` skips every check except the executable |
 | `checks` | comma-separated check names, run in order |
-| `timeout` | bound for each probe (default `5s`); `[agrouter] timeout` bounds them too |
+| `timeout` | bound for all of the CLI's checks together (default `5s`); `[agrouter] timeout` bounds them too |
 | `unknown` | `allow` (default) runs with one warning when a check cannot verify; `block` exits `2` instead |
 | `quota_error_prefix` | start of the quota line (default `agrouter: `) |
 | `quota_error_message` | text after the prefix, for example a caller's limit pattern |
@@ -384,7 +404,7 @@ Limitations:
 
 - The built-in transports read experimental, undocumented CLI protocols. `min_version` guards the versions they were checked against; when a CLI upgrade changes the protocol, the check reports unknown (or stops exec under `unknown = block`). agrouter never falls back to an inference probe or to an auth-only check.
 - A `json-helper` has no `min_version` check: the helper decides what it supports.
-- A probe cannot see native options after `--`. Options in `context_flags` switch the child's provider, profile or settings, so with one of them exec checks only the executable.
+- A probe cannot see native options after `--`. Options in `context_flags`, and config flags with a `context_config_keys` key, switch the child's provider, profile or settings, so with one of them exec checks only the executable.
 - Evidence is not cached: every exec probes again.
 
 To see what the stream-json control check reads, send the same prompt-free requests on stdin yourself. Nothing here is a user message, so the CLI answers from its login and settings without asking a model:
@@ -502,8 +522,8 @@ Leave `task_model`, `review_model`, `plan_model`, `codex_model` and `codex_reaso
 |---|---|
 | `0` | decision printed, or `--help`/`--version` |
 | `2` | agrouter error before any child starts: unknown flag (including the removed `--permission-mode`, `--dangerously-*`, `--output-format`, `--sandbox` and `-c`), second positional, second `-p`/`--prompt`/`--print` or `--prompt-file`, a missing, unknown or disabled exec CLI, a `--cli` conflicting with it, `--` in decision mode, a native model or effort selection after `--`, a command-line prompt after a second `--`, no prompt, a bad `--prompt-file` or `--doc` file, the timeout passing while the `--prompt-file` is read, config error, or Jev cannot decide with more than one CLI left (decision mode then also prints the decision JSON with `null` values and reasons) |
-| `2` | exec mode: availability unverified under `unknown = block` (`agrouter: <cli> availability unverified: <reason>`) |
-| `127` | exec mode: the chosen CLI could not be started, or before routing: its executable is missing, its authentication failed, or its subscription quota is exhausted (one quota line in the configured wording) |
+| `2` | exec mode: availability unverified under `unknown = block` (`agrouter: <cli> availability unverified: <reason>`), before routing or, for a delegated model's default, after it |
+| `127` | exec mode: the chosen CLI could not be started; or before routing: its executable is missing, its authentication failed, or its subscription quota is exhausted (one quota line in the configured wording); or after routing: the child's verified default model is quota-blocked |
 | other | exec mode: the child's exit code (`128+signal` on Unix when it was killed) |
 
 ## Releasing

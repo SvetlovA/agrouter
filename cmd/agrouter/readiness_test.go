@@ -132,9 +132,6 @@ func TestApp_ExecPreflightBlocks(t *testing.T) {
 			assert.Empty(t, r.stdout)
 			assert.Equal(t, tc.line+"\n", r.stderr, "one line, no selection line")
 			assert.Empty(t, e.jev.requests(), "no complexity or selection request")
-			if tc.evidence == nil || tc.code == exitUsage || tc.auth != "" {
-				assert.NotContains(t, r.stderr, "quota")
-			}
 		})
 	}
 }
@@ -225,21 +222,34 @@ func TestApp_ExecPreflightFiltersOptions(t *testing.T) {
 }
 
 func TestApp_ExecPreflightContextFlag(t *testing.T) {
-	e := newEnv(t)
-	e.globalConfig(syntheticCLIs(t) + "\n[cli.alpha]\ncontext_flags = --profile\n" + availability())
-	checker := reportChecker(func(cli config.CLI) readiness.Report {
-		assert.Nil(t, cli.Availability, "no probe runs for another context")
-		return readiness.Report{CLI: cli.Name, Evidence: []readiness.Evidence{
-			{Dimension: readiness.DimensionExecutable, Status: readiness.StatusAvailable},
-			unknownQuota(readiness.ReasonNotConfigured),
-		}}
-	})
-	e.checker = checker
-	r := e.run([]string{"exec", "alpha", "--model=fast-1", "--effort=low", "fix it", "--", "--profile", "work"}, nil)
+	tests := []struct {
+		name   string
+		native []string
+	}{
+		{name: "context flag", native: []string{"--profile", "work"}},
+		{name: "context config key", native: []string{"-c", "provider=local"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.globalConfig(syntheticCLIs(t) + "\n[cli.alpha]\ncontext_flags = --profile\nconfig_flags = -c\n" +
+				"selection_config_keys = model\ncontext_config_keys = provider\n" + availability())
+			checker := reportChecker(func(cli config.CLI) readiness.Report {
+				assert.Nil(t, cli.Availability, "no probe runs for another context")
+				return readiness.Report{CLI: cli.Name, Evidence: []readiness.Evidence{
+					{Dimension: readiness.DimensionExecutable, Status: readiness.StatusAvailable},
+					unknownQuota(readiness.ReasonNotConfigured),
+				}}
+			})
+			e.checker = checker
+			argv := append([]string{"exec", "alpha", "--model=fast-1", "--effort=low", "fix it", "--"}, tc.native...)
+			r := e.run(argv, nil)
 
-	require.Equal(t, 0, r.code, r.stderr)
-	assert.True(t, strings.HasPrefix(r.stderr, "agrouter: warning: alpha availability unknown: context_changed\n"), r.stderr)
-	assert.Len(t, checker.CheckCalls(), 1)
+			require.Equal(t, 0, r.code, r.stderr)
+			assert.True(t, strings.HasPrefix(r.stderr, "agrouter: warning: alpha availability unknown: context_changed\n"), r.stderr)
+			assert.Len(t, checker.CheckCalls(), 1)
+		})
+	}
 }
 
 func TestApp_ExecPreflightDeadline(t *testing.T) {

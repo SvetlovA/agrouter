@@ -30,6 +30,7 @@ selection_flags       = --model, -m
 config_flags          = -c, --config
 selection_config_keys = model, effort
 context_flags         = --profile
+context_config_keys   = provider
 
 [cli.alpha.availability]
 checks = usage
@@ -122,6 +123,7 @@ func TestLoad_Embedded(t *testing.T) {
 		ConfigFlags:         []string{"-c", "--config"},
 		SelectionConfigKeys: []string{"model", "effort"},
 		ContextFlags:        []string{"--profile"},
+		ContextConfigKeys:   []string{"provider"},
 		Availability: &Availability{
 			Enabled: true, Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow, QuotaErrorPrefix: DefaultQuotaErrorPrefix,
 			Checks: []Check{{Name: "usage", Transport: TransportJSONHelper}},
