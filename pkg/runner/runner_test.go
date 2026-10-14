@@ -46,6 +46,9 @@ func TestMain(m *testing.M) {
 //   - sleep: writes its pid to $RUNNER_HELPER_OUT/pid, then sleeps;
 //   - spawn-wait, spawn-exit: starts a sleeping grandchild (pid in $RUNNER_HELPER_OUT/grandchild), then
 //     sleeps or exits 0;
+//   - spawn-stdout: writes "done" to stdout, starts a sleeping grandchild that inherits stdout (pid in
+//     $RUNNER_HELPER_OUT/grandchild), then exits 0;
+//   - probe-parent: starts a sleeping probe (pid in $RUNNER_HELPER_OUT/probe/pid), then sleeps;
 //   - cat: copies stdin to stdout; env-out, pwd: write the environment as JSON or the working directory
 //     to stdout; flood: writes $RUNNER_HELPER_EXIT bytes to stdout;
 //   - trap: catches SIGINT/SIGTERM/SIGHUP/SIGQUIT, writes its pid to $RUNNER_HELPER_OUT/pid, and on a
@@ -98,6 +101,27 @@ func helper() int {
 			return 0
 		}
 		time.Sleep(time.Minute)
+		return 0
+	case "spawn-stdout":
+		gc := exec.Command(os.Args[0])
+		gc.Env = append(os.Environ(), helperMode+"=sleep", helperOut+"="+filepath.Join(out, "gc"))
+		gc.Stdout = os.Stdout
+		_ = os.MkdirAll(filepath.Join(out, "gc"), 0o700)
+		_, _ = os.Stdout.WriteString("done")
+		if err := gc.Start(); err != nil {
+			return 99
+		}
+		writePid(filepath.Join(out, "grandchild"), gc.Process.Pid)
+		return 0
+	case "probe-parent":
+		dir := filepath.Join(out, "probe")
+		_ = os.MkdirAll(dir, 0o700)
+		env := append(os.Environ(), helperMode+"=sleep", helperOut+"="+dir)
+		p, err := StartProbe(context.Background(), ProbeCommand{Argv: []string{os.Args[0]}, Env: env})
+		if err != nil {
+			return 99
+		}
+		_, _ = p.Wait()
 		return 0
 	case "trap":
 		sigs := make(chan os.Signal, 1)

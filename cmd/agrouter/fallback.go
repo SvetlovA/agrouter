@@ -94,7 +94,7 @@ func (a *app) execSelection(cli config.CLI, req *args.Request, d routed) (select
 	if !d.NoEffort {
 		// the probe's default effort belongs to the child's default model, not to one agrouter set
 		def, why := pre.report.Defaults.Effort, ""
-		if def != nil && s.Model != nil && !strings.EqualFold(*s.Model, deref(pre.report.Defaults.Model)) {
+		if def != nil && s.Model != nil && !pre.ev.SameModel(*s.Model, deref(pre.report.Defaults.Model)) {
 			def, why = nil, defaultOtherModel
 		}
 		effort = effective(s.Effort, req.Effort, def, pre.changed, why)

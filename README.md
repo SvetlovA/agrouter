@@ -359,7 +359,7 @@ Each CLI's exec readiness checks live under its own `[cli.<name>]` section, so a
 | `args` | the probe's arguments, a JSON array |
 | `min_version` | for the two built-in transports: a CLI older than this, or one that reports no version, is unknown (`version_unsupported`) |
 
-Every probe runs in the real working directory, with the user's real settings and login, its own stdin, a 1 MiB response limit, and without the Jev key in its environment. A probe never sends a prompt or a user message, so it starts no inference. When it exits, times out or overflows, agrouter kills its whole process tree (a process group on Unix, a Job Object on Windows).
+Every probe runs in the real working directory, with the user's real settings and login, its own stdin, a 1 MiB response limit, and without the Jev key in its environment. A probe never sends a prompt or a user message, so it starts no inference. When it exits, times out or overflows, or a signal ends agrouter, agrouter kills its whole process tree (a process group on Unix, a Job Object on Windows).
 
 **A third CLI with `json-helper`.** A helper is any executable that prints one JSON object on stdout and reads nothing from stdin. Every section is optional; a missing one is unknown:
 

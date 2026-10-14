@@ -81,6 +81,13 @@ func TestApp_ExecFallback(t *testing.T) {
 			fallback:   effortOnly,
 			effective:  map[string]any{"model": chosenBy(sourceCaller, "deep-1"), "effort": unknownDefault(defaultNotReported)},
 			childModel: "deep-1"},
+		{name: "the child's default model reported by alias", stage: "effort", argv: []string{"--model=deep-1"},
+			model: "strong", effort: "high",
+			warning: "agrouter: warning: Jev routing failed at the effort stage (jev_api_error); effort falls back to the " +
+				"alpha default, not a Jev selection: effort high (verified child default)",
+			fallback:   effortOnly,
+			effective:  map[string]any{"model": chosenBy(sourceCaller, "deep-1"), "effort": verified("high")},
+			childModel: "deep-1"},
 		{name: "caller's effort is no fallback", stage: "model", argv: []string{"--effort=low"}, model: "m-2",
 			warning: "agrouter: warning: Jev routing failed at the model stage (jev_api_error); model falls back to the " +
 				"alpha default, not a Jev selection: model m-2 (verified child default)",

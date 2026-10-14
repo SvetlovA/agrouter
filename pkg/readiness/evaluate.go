@@ -88,16 +88,30 @@ func (ev *Evaluation) Model(name string) Verdict {
 	if name == "" {
 		return ev.judge(nil, true)
 	}
-	section := ""
+	return ev.judge(ev.names(ev.section(name), name), false)
+}
+
+// SameModel reports whether a and b name the same model: the same spelling ignoring case, or a name
+// or alias of the same catalog model of the CLI.
+func (ev *Evaluation) SameModel(a, b string) bool {
+	if strings.EqualFold(a, b) {
+		return true
+	}
+	section := ev.section(a)
+	return section != "" && section == ev.section(b)
+}
+
+// section is the section of the CLI's catalog model named or aliased name, ignoring case; empty when
+// there is none.
+func (ev *Evaluation) section(name string) string {
 	for _, m := range ev.models {
 		if m.CLI == ev.CLI && (strings.EqualFold(m.Name, name) || slices.ContainsFunc(m.Aliases, func(a string) bool {
 			return strings.EqualFold(a, name)
 		})) {
-			section = m.Section
-			break
+			return m.Section
 		}
 	}
-	return ev.judge(ev.names(section, name), false)
+	return ""
 }
 
 // names are the labels model-scoped evidence may use for a model: its name, section and aliases.

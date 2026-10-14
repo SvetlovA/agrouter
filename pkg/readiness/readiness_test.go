@@ -255,12 +255,35 @@ func TestCheck_ContextCanceled(t *testing.T) {
 	assert.Equal(t, ReasonProbeTimeout, quota[0].Reason)
 }
 
-// a later check's reported default overrides an earlier one; an unreported one leaves it alone
+// a later check's reported default overrides an earlier one, an unreported one leaves it alone, and
+// an effort never pairs with a model another check reported
 func TestReport_SetDefaults(t *testing.T) {
-	var r Report
-	r.setDefaults(Defaults{Model: new("m-1"), Effort: new("low")})
-	r.setDefaults(Defaults{Effort: new("high")})
-	assert.Equal(t, Defaults{Model: new("m-1"), Effort: new("high")}, r.Defaults)
+	tests := []struct {
+		name   string
+		checks []Defaults
+		want   Defaults
+	}{
+		{name: "same model, new effort", checks: []Defaults{{Model: new("m-1"), Effort: new("e-1")},
+			{Model: new("m-1"), Effort: new("e-2")}}, want: Defaults{Model: new("m-1"), Effort: new("e-2")}},
+		{name: "same model, no effort", checks: []Defaults{{Model: new("m-1"), Effort: new("e-1")},
+			{Model: new("m-1")}}, want: Defaults{Model: new("m-1"), Effort: new("e-1")}},
+		{name: "other model replaces the pair", checks: []Defaults{{Model: new("m-1"), Effort: new("e-1")},
+			{Model: new("m-2")}}, want: Defaults{Model: new("m-2")}},
+		{name: "effort alone after a model", checks: []Defaults{{Model: new("m-1"), Effort: new("e-1")},
+			{Effort: new("e-2")}}, want: Defaults{Model: new("m-1"), Effort: new("e-1")}},
+		{name: "effort alone", checks: []Defaults{{Effort: new("e-1")}, {}}, want: Defaults{Effort: new("e-1")}},
+		{name: "model after an effort alone", checks: []Defaults{{Effort: new("e-1")}, {Model: new("m-1")}},
+			want: Defaults{Model: new("m-1")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var r Report
+			for _, d := range tt.checks {
+				r.setDefaults(d)
+			}
+			assert.Equal(t, tt.want, r.Defaults)
+		})
+	}
 }
 
 func TestChecker_DefaultClock(t *testing.T) {

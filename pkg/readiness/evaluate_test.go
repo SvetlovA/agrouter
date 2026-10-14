@@ -267,3 +267,23 @@ func TestEvaluationModel(t *testing.T) {
 		})
 	}
 }
+
+func TestEvaluationSameModel(t *testing.T) {
+	opts, models := evalFixture(t)
+	ev := Evaluate(Report{CLI: "tool-a", Evidence: bothFree()}, opts, models, config.UnknownAllow, evalNow)
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{a: "big-model", b: "BIG-MODEL", want: true},
+		{a: "heavy", b: "big-model", want: true},
+		{a: "big-model", b: "Heavy", want: true},
+		{a: "big-model", b: "small-model"},
+		{a: "other", b: "big-model"},
+		{a: "other", b: "else"},
+		{a: "other", b: "OTHER", want: true},
+	}
+	for _, tc := range cases {
+		assert.Equal(t, tc.want, ev.SameModel(tc.a, tc.b), "%s vs %s", tc.a, tc.b)
+	}
+}

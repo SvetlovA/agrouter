@@ -52,6 +52,22 @@ func exchangeReason(ctx context.Context, err error) string {
 	}
 }
 
+// addExchange records an exchange's result. A failed exchange adds unknown quota for err, unless it
+// failed only after its evidence was complete (reading the defaults), which then stands with whatever
+// defaults were verified before the failure.
+func (r *Report) addExchange(ctx context.Context, check string, evidence []Evidence, defaults Defaults, err error, now time.Time) {
+	switch {
+	case err == nil:
+		r.add(evidence...)
+		r.setDefaults(defaults)
+	case evidence != nil:
+		r.add(evidence...)
+		r.setDefaults(defaults)
+	default:
+		r.add(unknownQuota(check, exchangeReason(ctx, err), now))
+	}
+}
+
 // controlRequest is one line the transport writes to the probe's stdin.
 type controlRequest struct {
 	Type      string         `json:"type"`
@@ -141,12 +157,7 @@ func (c Checker) runControl(ctx context.Context, cli config.CLI, check config.Ch
 		p.Kill()
 	}
 	_, _ = p.Wait() // the replies, not the exit, decide: a read exits 0 even with quota exhausted
-	if err != nil {
-		r.add(unknownQuota(check.Name, exchangeReason(ctx, err), c.now()))
-		return
-	}
-	r.add(evidence...)
-	r.setDefaults(defaults)
+	r.addExchange(ctx, check.Name, evidence, defaults, err, c.now())
 }
 
 func (c Checker) controlExchange(s *controlSession, check config.Check) ([]Evidence, Defaults, error) {
@@ -165,10 +176,7 @@ func (c Checker) controlExchange(s *controlSession, check config.Check) ([]Evide
 		return nil, Defaults{}, &exchangeError{ReasonVersionUnsupported}
 	}
 
-	res, err = s.call(
-		read{subtype: controlUsage, fields: map[string]any{"skip_behaviors": true}},
-		read{subtype: controlSettings},
-	)
+	res, err = s.call(read{subtype: controlUsage, fields: map[string]any{"skip_behaviors": true}})
 	if err != nil {
 		return nil, Defaults{}, err
 	}
@@ -182,6 +190,11 @@ func (c Checker) controlExchange(s *controlSession, check config.Check) ([]Evide
 	evidence, err := usageEvidence(usage.Response, check.Name, c.now())
 	if err != nil {
 		return nil, Defaults{}, &exchangeError{ReasonProbeMalformed}
+	}
+	// the settings are read after the usage, so a connection lost reading them keeps the evidence
+	res, err = s.call(read{subtype: controlSettings})
+	if err != nil {
+		return evidence, Defaults{}, err
 	}
 	return evidence, settingsDefaults(res[controlSettings]), nil
 }

@@ -23,7 +23,16 @@ func newProbeGroup(cmd *exec.Cmd) *probeGroup {
 	return &probeGroup{cmd: cmd, job: windows.InvalidHandle}
 }
 
-// started assigns the probe to a new job; see tree.started for the window before the assignment.
+// start runs start (the probe's exec.Cmd.Start), then assigns the probe to a new job; see
+// tree.started for the window before the assignment.
+func (g *probeGroup) start(start func() error) error {
+	if err := start(); err != nil {
+		return err
+	}
+	g.started()
+	return nil
+}
+
 func (g *probeGroup) started() {
 	job, err := assignToNewJob(g.cmd.Process.Pid)
 	if err != nil {

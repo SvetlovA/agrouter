@@ -215,12 +215,16 @@ func (r *Report) blocked() bool {
 
 func (r *Report) add(e ...Evidence) { r.Evidence = append(r.Evidence, e...) }
 
-// setDefaults keeps the defaults d reports, leaving the others as earlier checks found them.
+// setDefaults keeps the defaults d reports, leaving the others as earlier checks found them. An
+// effort belongs to the model reported beside it: a check reporting another model replaces the pair,
+// and an effort reported without a model never pairs with an earlier check's model.
 func (r *Report) setDefaults(d Defaults) {
-	if d.Model != nil {
-		r.Defaults.Model = d.Model
-	}
-	if d.Effort != nil {
+	switch {
+	case d.Model != nil && (r.Defaults.Model == nil || *r.Defaults.Model != *d.Model):
+		r.Defaults = d
+	case d.Model != nil && d.Effort != nil:
+		r.Defaults.Effort = d.Effort
+	case d.Model == nil && d.Effort != nil && r.Defaults.Model == nil:
 		r.Defaults.Effort = d.Effort
 	}
 }

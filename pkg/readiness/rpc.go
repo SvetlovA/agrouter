@@ -39,6 +39,8 @@ const (
 	rpcShutdownGrace = time.Second
 	// rpcSubscriptionAccount is the account type whose usage is metered by subscription windows.
 	rpcSubscriptionAccount = "chatgpt"
+	// rpcAPIKeyAccount is the API-key account type, which has no subscription windows.
+	rpcAPIKeyAccount = "apiKey"
 	// throttleErrorInfo is the error info that says a read was itself rate limited.
 	throttleErrorInfo = "rateLimitExceeded"
 )
@@ -174,8 +176,9 @@ func (s *rpcSession) call(calls ...rpcCall) ([]rpcReply, error) {
 	return replies, nil
 }
 
-// runRPC runs a jsonrpc-ratelimits-v1 check: initialize, then the account, rate-limit and effective
-// configuration reads, and the model list only when the configured model's default effort is needed.
+// runRPC runs a jsonrpc-ratelimits-v1 check: initialize, the account and rate-limit reads, then the
+// effective configuration read, and the model list only when the configured model's default effort is
+// needed.
 func (c Checker) runRPC(ctx context.Context, cli config.CLI, check config.Check, r *Report) {
 	p, err := runner.StartProbe(ctx, c.probeCommand(cli, check))
 	if err != nil {
@@ -191,12 +194,7 @@ func (c Checker) runRPC(ctx context.Context, cli config.CLI, check config.Check,
 	stop := time.AfterFunc(rpcShutdownGrace, p.Kill)
 	_, _ = p.Wait()
 	stop.Stop()
-	if err != nil {
-		r.add(unknownQuota(check.Name, exchangeReason(ctx, err), c.now()))
-		return
-	}
-	r.add(evidence...)
-	r.setDefaults(defaults)
+	r.addExchange(ctx, check.Name, evidence, defaults, err, c.now())
 }
 
 func (c Checker) rpcExchange(s *rpcSession, check config.Check) ([]Evidence, Defaults, error) {
@@ -224,12 +222,11 @@ func (c Checker) rpcExchange(s *rpcSession, check config.Check) ([]Evidence, Def
 	res, err = s.call(
 		rpcCall{method: rpcAccount},
 		rpcCall{method: rpcRateLimits, params: map[string]any{"excludeResetCreditDetails": true}},
-		rpcCall{method: rpcConfig, params: map[string]any{"cwd": dir}},
 	)
 	if err != nil {
 		return nil, Defaults{}, err
 	}
-	account, limits, cfg := res[0], res[1], res[2]
+	account, limits := res[0], res[1]
 	if account.err != nil {
 		if account.err.throttled() {
 			return nil, Defaults{}, &exchangeError{ReasonProbeThrottled}
@@ -244,11 +241,14 @@ func (c Checker) rpcExchange(s *rpcSession, check config.Check) ([]Evidence, Def
 	if subscription {
 		evidence = append(evidence, limitsEvidence(limits, check.Name, now)...)
 	}
-	defaults, err := configDefaults(s, cfg)
+	// the defaults are read after the quota, so a connection lost reading them keeps the evidence
+	res, err = s.call(rpcCall{method: rpcConfig, params: map[string]any{"cwd": dir}})
 	if err != nil {
-		return nil, Defaults{}, err
+		return evidence, Defaults{}, err
 	}
-	return evidence, defaults, nil
+	// a model list lost on the way keeps the configured model, with its effort unknown
+	defaults, err := configDefaults(s, res[0])
+	return evidence, defaults, err
 }
 
 // userAgentSupported reports whether the initialize result's user agent ("<client>/<version> ...")
@@ -290,8 +290,11 @@ func accountEvidence(data json.RawMessage, check string, now time.Time) ([]Evide
 	case a.Account == nil:
 		return []Evidence{{Dimension: DimensionAuth, Status: StatusUnavailable, Reason: ReasonAuthFailed,
 			Check: check, ObservedAt: now}}, false, nil
-	case a.Account.Type != rpcSubscriptionAccount:
+	case a.Account.Type == rpcAPIKeyAccount:
 		return []Evidence{notApplicable}, false, nil
+	case a.Account.Type != rpcSubscriptionAccount:
+		// a missing or unrecognized type proves neither a subscription nor its absence
+		return nil, false, errors.New("account reply has an unrecognized type")
 	}
 	return []Evidence{{Dimension: DimensionAuth, Status: StatusAvailable, Check: check, ObservedAt: now}}, true, nil
 }

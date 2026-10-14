@@ -129,6 +129,10 @@ func TestControl_Evidence(t *testing.T) {
 		{fixture: "api_key", evidence: []Evidence{q(StatusNotApplicable, ReasonNotSubscription, "", time.Time{})},
 			unverified: true},
 		{fixture: "fetch_failed", evidence: []Evidence{q(StatusUnknown, ReasonNotReported, "", time.Time{})}},
+		// a CLI that exits before the settings read keeps the quota it already reported
+		{fixture: "no_settings_reply", evidence: []Evidence{authOK,
+			q(StatusAvailable, "", WindowFiveHour, reset1), q(StatusUnavailable, ReasonQuotaExhausted, WindowWeekly, reset2)},
+			unverified: true},
 		{fixture: "settings_error", evidence: []Evidence{authOK,
 			q(StatusAvailable, "", WindowFiveHour, reset1), q(StatusAvailable, "", WindowWeekly, reset2)},
 			unverified: true},

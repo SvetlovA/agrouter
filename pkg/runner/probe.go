@@ -50,6 +50,7 @@ type Probe struct {
 	stopAfter func() bool
 	closeIn   sync.Once
 	closeOut  sync.Once
+	reaped    sync.Once
 }
 
 // StartProbe starts c. A command that is missing, not executable or fails to start returns a
@@ -91,14 +92,13 @@ func StartProbe(ctx context.Context, c ProbeCommand) (*Probe, error) {
 		return fail(err)
 	}
 	p.cmd.Stdin, p.cmd.Stdout = stdinR, stdoutW
-	if err := p.cmd.Start(); err != nil {
+	if err := p.group.start(p.cmd.Start); err != nil {
 		cancel()
 		closeAll(stdinR, stdinW, stdoutR, stdoutW)
 		return fail(err)
 	}
 	// the probe holds its own ends now
 	closeAll(stdinR, stdoutW)
-	p.group.started()
 
 	limit := c.MaxResponse
 	if limit <= 0 {
@@ -124,8 +124,7 @@ func (p *Probe) Kill() {
 // the exit code, and the context's error when the probe was stopped by it (a timeout or cancellation).
 func (p *Probe) Wait() (int, error) {
 	p.closeStdin()
-	_ = p.cmd.Wait()
-	p.group.release()
+	p.reap()
 	p.stopAfter()
 	p.closeStdout()
 	err := p.ctx.Err()
@@ -134,6 +133,15 @@ func (p *Probe) Wait() (int, error) {
 		return exitCode(p.cmd.ProcessState), fmt.Errorf("probe %q stopped: %w", p.cmd.Args[0], err)
 	}
 	return exitCode(p.cmd.ProcessState), nil
+}
+
+// reap waits for the probe to exit, then kills what is left of its tree, which closes the stdout
+// ends its descendants inherited.
+func (p *Probe) reap() {
+	p.reaped.Do(func() {
+		_ = p.cmd.Wait()
+		p.group.release()
+	})
 }
 
 func (p *Probe) closeStdin()  { p.closeIn.Do(func() { _ = p.stdinW.Close() }) }
@@ -157,10 +165,22 @@ func RunProbe(ctx context.Context, c ProbeCommand, stdin []byte) (ProbeResult, e
 		_, _ = p.Stdin.Write(stdin) // a probe that stops reading ends the write with EPIPE
 		_ = p.Stdin.Close()
 	}()
-	out, readErr := io.ReadAll(p.Stdout)
-	if readErr != nil {
-		p.Kill()
+	type read struct {
+		out []byte
+		err error
 	}
+	done := make(chan read, 1)
+	go func() {
+		out, err := io.ReadAll(p.Stdout)
+		if err != nil {
+			p.Kill()
+		}
+		done <- read{out, err}
+	}()
+	// a descendant that inherited stdout would hold the read open past the probe's exit
+	p.reap()
+	r := <-done
+	out, readErr := r.out, r.err
 	code, waitErr := p.Wait()
 	switch {
 	case errors.Is(readErr, ErrProbeResponseTooLarge):
