@@ -110,7 +110,7 @@ unknown = allow
 # error_message matches Ralphex's claude limit patterns.
 [cli.claude.availability.usage]
 transport     = sdk-control-usage-v1
-command       =
+# command       =
 args          = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config", "--settings", "{\"disableAllHooks\":true}"]
 min_version   = 2.1.296
 error_prefix  = "agrouter: "
@@ -139,7 +139,7 @@ unknown = allow
 # provider setups report no subscription windows. measured cold start: about 0.5s (0.162.1).
 [cli.codex.availability.limits]
 transport     = jsonrpc-ratelimits-v1
-command       =
+# command       =
 args          = ["app-server"]
 min_version   = 0.162.1
 error_prefix  = "agrouter: "
@@ -156,7 +156,9 @@ error_message = You've hit your usage limit
 #   description  what the model is for, with its price, sent to Jev in the model stage. default: empty
 #   source       documentation link, for maintainers only; never sent. default: empty
 
-# Claude models. Efforts match `claude --help` in Claude Code 2.1.294.
+# Claude models. Efforts match `claude --help` in Claude Code 2.1.294. Aliases are the short --model
+# values whose resolvedModel is this model in the CLI's initialize model list (Claude Code 2.1.300);
+# "default" is left out: it follows the account's recommended model, not a fixed one.
 # Sources: https://platform.claude.com/docs/en/about-claude/models/overview
 # and https://platform.claude.com/docs/en/about-claude/models/choosing-a-model
 
@@ -164,7 +166,7 @@ error_message = You've hit your usage limit
 enabled     = true
 cli         = claude
 name        = claude-fable-5-1
-aliases     =
+aliases     = fable
 efforts     = low, medium, high, xhigh, max
 description = Most capable model open to all customers. For demanding reasoning and long-horizon agentic work: multi-hour agent sessions, multistep deep research, analysis carried through to a finished document, spreadsheet or deck. Use when Opus 5.5 at higher effort still falls short. Slower; input USD 10 / output USD 50 per million tokens.
 source      = https://platform.claude.com/docs/en/models/fable-5-1/overview
@@ -182,7 +184,7 @@ source      = https://platform.claude.com/docs/en/models/opus-5-5/overview
 enabled     = true
 cli         = claude
 name        = claude-sonnet-5-5
-aliases     =
+aliases     = sonnet
 efforts     = low, medium, high, xhigh, max
 description = Best combination of speed and intelligence. Everyday coding, code generation, data analysis, agentic tool use. Fast; input USD 2 / output USD 10 per million tokens.
 source      = https://platform.claude.com/docs/en/models/sonnet-5-5/overview
@@ -191,7 +193,7 @@ source      = https://platform.claude.com/docs/en/models/sonnet-5-5/overview
 enabled     = true
 cli         = claude
 name        = claude-haiku-5-5
-aliases     =
+aliases     = haiku
 efforts     = low, medium, high, xhigh, max
 description = Fastest model, for high-volume, latency-sensitive work: classification, extraction, routing, chat, short tool tasks, subagent tasks. Use medium for most work including agentic coding, low for simple high-volume requests, high for longer agent tasks and strict instruction following. Fastest; input USD 0.10 / output USD 0.50 per million tokens (USD 0.50 / 2.50 for prompts over 100K tokens).
 source      = https://platform.claude.com/docs/en/models/haiku-5-5/overview
@@ -229,14 +231,15 @@ description = Absolute maximum capability with no limit on token spending. The d
 source      = https://platform.claude.com/docs/en/build-with-claude/effort
 
 # Codex models: the latest generation (GPT-6) only. Efforts come from what the Codex CLI advertises
-# (~/.codex/models_cache.json, client 0.158.0), not from the API pages.
+# (~/.codex/models_cache.json, client 0.158.0), not from the API pages. No aliases: the app-server
+# model list (0.162.1) has no short names, and its display names differ from the names only in case.
 # Sources: https://developers.openai.com/api/docs/models/<id> and https://learn.chatgpt.com/docs/models
 
 [model.gpt-6-astra]
 enabled     = true
 cli         = codex
 name        = gpt-6-astra
-aliases     =
+# aliases     =
 efforts     = low, medium, high, xhigh, max, ultra
 description = Frontier intelligence for the most demanding end-to-end reasoning, coding, computer use, research and documents, where quality and judgment dominate. Input USD 10 / output USD 50 per million tokens.
 source      = https://developers.openai.com/api/docs/models/gpt-6-astra
@@ -245,7 +248,7 @@ source      = https://developers.openai.com/api/docs/models/gpt-6-astra
 enabled     = true
 cli         = codex
 name        = gpt-6.1-sol
-aliases     =
+# aliases     =
 efforts     = low, medium, high, xhigh, max, ultra
 description = Workhorse for complex coding and agent workflows; better factual reliability than 5.6 Sol. The capable everyday choice. Input USD 2 / output USD 10 per million tokens.
 source      = https://developers.openai.com/api/docs/models/gpt-6.1-sol
@@ -254,7 +257,7 @@ source      = https://developers.openai.com/api/docs/models/gpt-6.1-sol
 enabled     = true
 cli         = codex
 name        = gpt-6-luna
-aliases     =
+# aliases     =
 efforts     = low, medium, high, xhigh, max
 description = Fast and affordable: focused, high-volume extraction, classification, transformations, structured summaries and focused coding. Input USD 0.10 / output USD 0.50 per million tokens.
 source      = https://developers.openai.com/api/docs/models/gpt-6-luna
