@@ -193,7 +193,7 @@ func TestRunEvalCase(t *testing.T) {
 		r := newRouter(t, cfg, cat, client)
 		c := evalCase{Name: "typo", Prompt: "fix the typo in README.md", Files: map[string]string{"README.md": "Call get() here.\n"},
 			Acceptable: []string{"claude-haiku-5-5@low"}}
-		res := runEvalCase(ctx, r, cfg, cat, c, t.TempDir())
+		res := runEvalCase(ctx, r, cat, c, t.TempDir())
 		require.NoError(t, res.Err)
 		assert.True(t, res.Correct)
 		assert.False(t, res.Split)
@@ -210,7 +210,7 @@ func TestRunEvalCase(t *testing.T) {
 		r := newRouter(t, cfg, cat, client)
 		c := evalCase{Name: "docs", Prompt: "first", PromptFile: "task.txt", FileText: "from the file",
 			DocTexts: []string{"# a large system\n"}, Acceptable: []string{"claude-haiku-5-5@low"}}
-		res := runEvalCase(ctx, r, cfg, cat, c, t.TempDir())
+		res := runEvalCase(ctx, r, cat, c, t.TempDir())
 		require.NoError(t, res.Err)
 		assert.True(t, res.Correct)
 		assert.Equal(t, "10.0", res.Project, "the mock rates the docs at the last level")
@@ -226,7 +226,7 @@ func TestRunEvalCase(t *testing.T) {
 
 	t.Run("wrong", func(t *testing.T) {
 		r := newRouter(t, cfg, cat, evalMock("gpt-6-astra@ultra"))
-		res := runEvalCase(ctx, r, cfg, cat, evalCase{Name: "w", Prompt: "x", Acceptable: []string{"claude-haiku-5-5@low"}},
+		res := runEvalCase(ctx, r, cat, evalCase{Name: "w", Prompt: "x", Acceptable: []string{"claude-haiku-5-5@low"}},
 			t.TempDir())
 		require.NoError(t, res.Err)
 		assert.False(t, res.Correct)
@@ -239,14 +239,14 @@ func TestRunEvalCase(t *testing.T) {
 
 	t.Run("jev failing with the CLI known is an error, not a guess", func(t *testing.T) {
 		r := newRouter(t, cfg, cat, failing(jev.ErrMalformed))
-		res := runEvalCase(ctx, r, cfg, cat, evalCase{Name: "f", Prompt: "x", CLI: "claude", Acceptable: []string{"claude-haiku-5-5@low"}},
+		res := runEvalCase(ctx, r, cat, evalCase{Name: "f", Prompt: "x", CLI: "claude", Acceptable: []string{"claude-haiku-5-5@low"}},
 			t.TempDir())
 		require.ErrorIs(t, res.Err, jev.ErrMalformed)
 	})
 
 	t.Run("cannot decide", func(t *testing.T) {
 		r := newRouter(t, cfg, cat, failing(jev.ErrMalformed))
-		res := runEvalCase(ctx, r, cfg, cat, evalCase{Name: "f", Prompt: "x", Acceptable: []string{"claude-haiku-5-5@low"}},
+		res := runEvalCase(ctx, r, cat, evalCase{Name: "f", Prompt: "x", Acceptable: []string{"claude-haiku-5-5@low"}},
 			t.TempDir())
 		require.ErrorIs(t, res.Err, ErrCannotDecide)
 	})
@@ -257,7 +257,7 @@ func TestRunEvalCase(t *testing.T) {
 		r, err := New(cfg, cat, evalMock("claude-opus-5-5@high"))
 		require.NoError(t, err)
 		for _, c := range cases {
-			res := runEvalCase(ctx, r, cfg, cat, c, t.TempDir())
+			res := runEvalCase(ctx, r, cat, c, t.TempDir())
 			require.NoError(t, res.Err, c.Name)
 			split := strings.HasPrefix(c.Name, "oversized") || strings.HasPrefix(c.Name, "distant")
 			assert.Equal(t, split, res.Split, c.Name)

@@ -1,0 +1,4 @@
+{"on":"initialize","reply":{"result":{"userAgent":"agrouter/1.2.3 (os 1; arch) term/1 (agrouter; 0)","platformFamily":"unix","platformOs":"os"}}}
+{"on":"account/read","reply":{"result":{"account":null,"requiresOpenaiAuth":true}}}
+{"on":"account/rateLimits/read","reply":{"error":{"code":-32603,"message":"failed"}}}
+{"on":"config/read","reply":{"result":{"config":{"model":"m-2","model_reasoning_effort":"e-1","model_provider":null},"origins":{}}}}

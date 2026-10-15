@@ -16,6 +16,9 @@ func (r Result) Redacted() string {
 		case i == r.rawAt && r.rawLen > 0:
 			parts = append(parts, fmt.Sprintf("<%d raw argument(s)>", r.rawLen))
 			i += r.rawLen - 1
+		case i == r.tailAt && r.tailLen > 0:
+			parts = append(parts, fmt.Sprintf("<%d raw argument(s)>", r.tailLen))
+			i += r.tailLen - 1
 		case i == r.promptAt:
 			parts = append(parts, "<prompt>")
 		default:

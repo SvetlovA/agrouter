@@ -25,7 +25,7 @@ func TestApp_PromptFileThroughBatchShim(t *testing.T) {
 	e.globalConfig(strings.ReplaceAll(syntheticCLIs(t), helperCommand(t), "fakecli"))
 	require.NoError(t, os.WriteFile(filepath.Join(e.workDir, "task.md"), []byte("line one\nline two\n"), 0o600))
 
-	r := e.run([]string{"exec", "--cli=alpha", "--model=strong", "--effort=low", "--prompt-file", "task.md"}, nil)
+	r := e.run([]string{"exec", "alpha", "--model=strong", "--effort=low", "--prompt-file", "task.md"}, nil)
 
 	assert.Equal(t, runner.ExitStartFailure, r.code)
 	assert.Empty(t, r.stdout)

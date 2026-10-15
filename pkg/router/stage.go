@@ -18,7 +18,19 @@ const (
 	LevelCLI    = "cli"
 	LevelModel  = "model"
 	LevelEffort = "effort"
+	// LevelComplexity names the complexity stage in a StageError; it is not a routing level.
+	LevelComplexity = "complexity"
 )
+
+// StageError is a failure at one stage: a routing level or the complexity stage.
+type StageError struct {
+	Stage string // LevelCLI, LevelModel, LevelEffort or LevelComplexity
+	Err   error
+}
+
+func (e *StageError) Error() string { return e.Stage + " stage: " + e.Err.Error() }
+
+func (e *StageError) Unwrap() error { return e.Err }
 
 // level is one routing stage: the options are grouped by key, Jev chooses among the groups' labels,
 // and the options are narrowed to the winning group.
@@ -135,7 +147,7 @@ func (r *Router) decide(ctx context.Context, el *Eligibility, captured *prompt.R
 		}
 		winner, stage, err := r.stage(ctx, el, lv, gs, st)
 		if err != nil {
-			return catalog.Option{}, stages, fmt.Errorf("%s stage: %w", lv.name, err)
+			return catalog.Option{}, stages, &StageError{Stage: lv.name, Err: err}
 		}
 		stages = append(stages, stage)
 		opts = gs[winner].opts
@@ -185,7 +197,7 @@ func (r *Router) ask(ctx context.Context, el *Eligibility, lv level, gs []group,
 	}
 	answer, ok := answers[lv.name]
 	if !ok {
-		return 0, nil, fmt.Errorf("%w: no %q answer", jev.ErrMalformed, lv.name)
+		return 0, nil, fmt.Errorf("%w: %q", jev.ErrEmptyAnswer, lv.name)
 	}
 	names := groupLabels(gs)
 	if _, err := scoresOf(answer, names); err != nil {
@@ -198,13 +210,13 @@ func (r *Router) ask(ctx context.Context, el *Eligibility, lv level, gs []group,
 // choice outside names, is malformed.
 func scoresOf(answer jev.Answer, names []string) ([]float64, error) {
 	if !slices.Contains(names, answer.Choice) {
-		return nil, fmt.Errorf("%w: choice %q is not among the criteria sent", jev.ErrMalformed, answer.Choice)
+		return nil, fmt.Errorf("%w: choice %q is not among the criteria sent", jev.ErrInvalidAnswer, answer.Choice)
 	}
 	scores := make([]float64, len(names))
 	for i, name := range names {
 		p, ok := answer.Probabilities[name]
 		if !ok {
-			return nil, fmt.Errorf("%w: no probability for %q", jev.ErrMalformed, name)
+			return nil, fmt.Errorf("%w: no probability for %q", jev.ErrInvalidAnswer, name)
 		}
 		scores[i] = p
 	}

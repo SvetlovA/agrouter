@@ -1,0 +1,2 @@
+{"on":"initialize","reply":{"subtype":"success","response":{"models":[],"pid":1}}}
+{"on":"get_binary_version","reply":{"subtype":"success","response":{"version":"2.1.296"}}}

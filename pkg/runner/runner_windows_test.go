@@ -114,3 +114,31 @@ func TestRun_BatchShimRejectsLineBreak(t *testing.T) {
 	assert.Contains(t, err.Error(), "line break")
 	assert.NoFileExists(t, filepath.Join(dir, "argv.json"), "the shim must not run")
 }
+
+func TestRunProbe_KillsDescendants(t *testing.T) {
+	tests := []struct {
+		mode    string
+		timeout time.Duration
+		wantErr error
+	}{
+		{mode: "spawn-exit", timeout: time.Minute},                                               // the probe exits, its grandchild is left behind
+		{mode: "spawn-wait", timeout: 500 * time.Millisecond, wantErr: context.DeadlineExceeded}, // the probe times out with its grandchild
+	}
+	for _, tt := range tests {
+		t.Run(tt.mode, func(t *testing.T) {
+			c, dir := probeCommand(t, tt.mode)
+			ctx, cancel := context.WithTimeout(context.Background(), tt.timeout)
+			defer cancel()
+			res, err := RunProbe(ctx, c, nil)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, 0, res.ExitCode)
+			}
+			gc := waitPid(t, filepath.Join(dir, "grandchild"))
+			t.Cleanup(func() { killPid(gc) })
+			assert.True(t, exited(gc, 10*time.Second), "the grandchild survived the probe")
+		})
+	}
+}

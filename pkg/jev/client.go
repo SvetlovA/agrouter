@@ -40,9 +40,31 @@ var (
 	ErrUnprocessable = errors.New("request rejected as invalid")
 	// ErrOverloaded is a 429 or 529 that retries could not get past within the deadline.
 	ErrOverloaded = errors.New("rate limited or overloaded")
-	// ErrMalformed is a 200 whose body is not a valid set of answers to the questions sent.
+	// ErrMalformed is a 200 whose body is not a valid set of answers to the questions sent; every
+	// ErrEmptyAnswer and ErrInvalidAnswer matches it.
 	ErrMalformed = errors.New("malformed response")
+	// ErrEmptyAnswer is a question left without an answer: missing, null, or without its value.
+	ErrEmptyAnswer error = &malformedError{"no answer"}
+	// ErrInvalidAnswer is an answer that is there but not valid for the question sent, or a body
+	// that is not JSON.
+	ErrInvalidAnswer error = &malformedError{"invalid answer"}
+	// ErrTransport is a request that got no response: the connection or the body read failed.
+	ErrTransport = errors.New("transport error")
 )
+
+// malformedError is a kind of malformed response: errors.Is matches it and ErrMalformed.
+type malformedError struct{ kind string }
+
+func (e *malformedError) Error() string { return ErrMalformed.Error() + ": " + e.kind }
+
+func (e *malformedError) Is(target error) bool { return target == ErrMalformed }
+
+// transportError keeps a failed request's message and matches ErrTransport.
+type transportError struct{ err error }
+
+func (e *transportError) Error() string        { return e.err.Error() }
+func (e *transportError) Unwrap() error        { return e.err }
+func (e *transportError) Is(target error) bool { return target == ErrTransport }
 
 // StatusError is a non-200 response. Body is truncated and has the key and the state's text redacted.
 type StatusError struct {
@@ -116,7 +138,7 @@ func (c *Client) Ask(ctx context.Context, req Request) (map[string]Answer, error
 			if last != nil && ctx.Err() != nil {
 				return nil, last
 			}
-			return nil, c.redact(fmt.Errorf("jev: %w", postErr))
+			return nil, c.redact(&transportError{fmt.Errorf("jev: %w", postErr)})
 		}
 		if status == http.StatusOK {
 			answers, decodeErr := decode(data, req.Questions)
@@ -367,21 +389,35 @@ func (e *redactedError) Unwrap() error { return e.err }
 func decode(data []byte, questions map[string]Question) (map[string]Answer, error) {
 	var resp response
 	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, fmt.Errorf("jev: %w: %w", ErrMalformed, err)
+		return nil, fmt.Errorf("jev: %w: %w", ErrInvalidAnswer, err)
 	}
 	answers := make(map[string]Answer, len(questions))
 	for id, q := range questions {
 		w, ok := resp.Answers[id]
-		if !ok {
-			return nil, fmt.Errorf("jev: %w: no %q answer", ErrMalformed, id)
+		if !ok || w == nil || empty(q, *w) && (w.Type == "" || w.Type == q.Type) {
+			return nil, fmt.Errorf("jev: %w: %q", ErrEmptyAnswer, id)
 		}
-		a, err := validate(q, w)
+		a, err := validate(q, *w)
 		if err != nil {
-			return nil, fmt.Errorf("jev: %w: %q: %w", ErrMalformed, id, err)
+			return nil, fmt.Errorf("jev: %w: %q: %w", ErrInvalidAnswer, id, err)
 		}
 		answers[id] = a
 	}
 	return answers, nil
+}
+
+// empty reports whether w lacks the value q asks for: the choice, the score or the noul.
+func empty(q Question, w wireAnswer) bool {
+	switch q.Type {
+	case TypeChoice:
+		return w.Choice == ""
+	case TypeScore:
+		return w.Score == nil
+	case TypeNoul:
+		return w.Noul == nil
+	default:
+		return false
+	}
 }
 
 // probabilitySlack is how far the probabilities may sum from 1.

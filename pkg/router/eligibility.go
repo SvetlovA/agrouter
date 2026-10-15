@@ -8,7 +8,6 @@ import (
 
 	"github.com/SvetlovA/agrouter/pkg/args"
 	"github.com/SvetlovA/agrouter/pkg/catalog"
-	"github.com/SvetlovA/agrouter/pkg/config"
 )
 
 // Drop is a CLI eligibility removed, and why, for debug output.
@@ -19,8 +18,9 @@ type Drop struct {
 
 // Eligibility is what the filters leave for Jev to choose from.
 type Eligibility struct {
-	Options []catalog.Option // never empty, in catalog order
-	// Pinned is true when a valid --cli fixed the CLI.
+	// Options are in catalog order. Eligible never empties them; Exclude can.
+	Options []catalog.Option
+	// Pinned is true when a valid --cli or the exec CLI fixed the CLI.
 	Pinned bool
 	// ModelPassthrough: the caller's --model was not among the remaining options, so every option
 	// carries it unresolved (or resolved to its catalog name) with one option per CLI.
@@ -29,9 +29,9 @@ type Eligibility struct {
 	// effort and the caller's value is emitted as given.
 	EffortPassthrough bool
 	Dropped           []Drop
-	// Skipped lists the routing arguments left out (an unusable --cli), for stderr and the decision JSON.
-	Skipped []args.Skip
-	effort  string
+	// Warnings are the stderr lines for routing arguments left out (an unusable --cli).
+	Warnings []string
+	effort   string
 }
 
 // EffortFor returns the effort to emit for o: its own, or the caller's passed-through value.
@@ -50,15 +50,14 @@ func (e *Eligibility) CLIs() []string {
 	return catalog.CLIs(e.Options)
 }
 
-// Eligible applies the filters in order: --cli, --model, --effort, then the mapped-argument
-// preference. No step ever empties the list: an unusable --cli is skipped with a warning, and a
-// --model or --effort nothing satisfies is passed through.
-func Eligible(cfg *config.Config, cat *catalog.Catalog, req *args.Request) *Eligibility {
+// Eligible applies the filters in order: --cli, --model, then --effort. No step ever empties the
+// list: an unusable --cli is skipped with a warning, and a --model or --effort nothing satisfies is
+// passed through.
+func Eligible(cat *catalog.Catalog, req *args.Request) *Eligibility {
 	e := &Eligibility{Options: slices.Clone(cat.Options), effort: req.Effort}
 	e.filterCLI(req.CLI)
 	e.filterModel(cat, req.Model)
 	e.filterEffort(req.Effort)
-	e.prefer(cfg, req)
 	return e
 }
 
@@ -68,10 +67,8 @@ func (e *Eligibility) filterCLI(name string) {
 	}
 	kept := catalog.ByCLI(e.Options, name)
 	if len(kept) == 0 {
-		e.Skipped = append(e.Skipped, args.Skip{
-			Spelling: "--cli " + name,
-			Warning:  fmt.Sprintf("agrouter: warning: skipped --cli %s: not an enabled CLI; routing across every CLI", name),
-		})
+		e.Warnings = append(e.Warnings,
+			fmt.Sprintf("agrouter: warning: skipped --cli %s: not an enabled CLI; routing across every CLI", name))
 		return
 	}
 	e.drop(kept, "--cli "+name)
@@ -123,35 +120,14 @@ func (e *Eligibility) filterEffort(effort string) {
 	e.Options, e.EffortPassthrough = opts, true
 }
 
-// prefer keeps the CLIs that would skip the fewest of the caller's mapped arguments (a missing key
-// and a [] mapping both count), and every CLI tied at that count.
-func (e *Eligibility) prefer(cfg *config.Config, req *args.Request) {
-	clis := catalog.CLIs(e.Options)
-	if len(clis) < 2 {
+// Exclude removes the options with the given ids, such as those the exec CLI cannot run now. It
+// never adds or broadens an option, and may leave none: Route then returns ErrNoEligible.
+func (e *Eligibility) Exclude(ids []string) {
+	if len(ids) == 0 {
 		return
 	}
-	skips := make(map[string]int, len(clis))
-	for _, name := range clis {
-		cli, _ := cfg.CLIByName(name)
-		// Pinned so raw passthrough, the same for every CLI, is not counted
-		skips[name] = len(args.Build(cli, req, args.Choice{Effort: req.Effort, Pinned: true}).Skipped)
-	}
-	fewest := skips[clis[0]]
-	for _, name := range clis {
-		fewest = min(fewest, skips[name])
-	}
-	var kept []catalog.Option
-	for _, o := range e.Options {
-		if skips[o.CLI] == fewest {
-			kept = append(kept, o)
-		}
-	}
-	for _, name := range clis {
-		if n := skips[name]; n > fewest {
-			e.Dropped = append(e.Dropped, Drop{CLI: name,
-				Reason: fmt.Sprintf("would skip %d mapped argument(s), another CLI skips %d", n, fewest)})
-		}
-	}
+	kept := slices.DeleteFunc(slices.Clone(e.Options), func(o catalog.Option) bool { return slices.Contains(ids, o.ID) })
+	e.drop(kept, "unavailable")
 	e.Options = kept
 }
 

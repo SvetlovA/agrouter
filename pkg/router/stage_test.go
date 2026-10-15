@@ -106,8 +106,8 @@ func stageSummary(stages []Stage) []Stage {
 }
 
 func TestGroups(t *testing.T) {
-	cfg, cat := requestFixture(t)
-	optsOf := func(req *args.Request) []catalog.Option { return Eligible(cfg, cat, req).Options }
+	_, cat := requestFixture(t)
+	optsOf := func(req *args.Request) []catalog.Option { return Eligible(cat, req).Options }
 	tests := []struct {
 		name   string
 		opts   []catalog.Option
@@ -124,13 +124,13 @@ func TestGroups(t *testing.T) {
 		{name: "a model without efforts is one effort group", opts: catalog.ByModel(cat.Options, "fast"),
 			level: routeLevels[2], labels: []string{""}, ids: [][]string{{"fast"}}},
 		{name: "model passthrough: one model group named by the model",
-			opts:  optsOf(&args.Request{Model: "unknown-model", ModelSource: args.SourceFlag}),
+			opts:  optsOf(&args.Request{Model: "unknown-model"}),
 			level: routeLevels[1], labels: []string{"unknown-model"}, ids: [][]string{{"alpha", "beta"}}},
 		{name: "model passthrough: one CLI group each",
-			opts:  optsOf(&args.Request{Model: "unknown-model", ModelSource: args.SourceFlag}),
+			opts:  optsOf(&args.Request{Model: "unknown-model"}),
 			level: routeLevels[0], labels: []string{"alpha", "beta"}, ids: [][]string{{"alpha"}, {"beta"}}},
 		{name: "effort passthrough: one effort group per model",
-			opts:  optsOf(&args.Request{CLI: "alpha", Effort: "turbo", EffortSource: args.SourceFlag}),
+			opts:  optsOf(&args.Request{CLI: "alpha", Effort: "turbo"}),
 			level: routeLevels[2], labels: []string{"", ""}, ids: [][]string{{"strong"}, {"fast"}}},
 	}
 	for _, tc := range tests {
@@ -172,31 +172,30 @@ func TestRouteStagesFixedByPassedValues(t *testing.T) {
 			asked:  []string{LevelModel, LevelEffort},
 			stages: []Stage{stage("cli", "alpha", true), stage("model", "strong", false), stage("effort", "low", false)},
 			want:   "strong@low"},
-		{name: "catalog --model: only effort asked", req: &args.Request{Model: "strong-model", ModelSource: args.SourceFlag},
+		{name: "catalog --model: only effort asked", req: &args.Request{Model: "strong-model"},
 			pick: "strong@high", asked: []string{LevelEffort},
 			stages: []Stage{stage("cli", "alpha", true), stage("model", "strong", true), stage("effort", "high", false)},
 			want:   "strong@high"},
-		{name: "passthrough --model: only cli asked", req: &args.Request{Model: "unknown-model", ModelSource: args.SourceFlag},
+		{name: "passthrough --model: only cli asked", req: &args.Request{Model: "unknown-model"},
 			pick: "beta", asked: []string{LevelCLI},
 			stages: []Stage{stage("cli", "beta", false), stage("model", "unknown-model", true), stage("effort", "", true)},
 			want:   "beta"},
 		{name: "passthrough --model and --effort: the effort passes through",
-			req:  &args.Request{Model: "unknown-model", ModelSource: args.SourceFlag, Effort: "turbo", EffortSource: args.SourceFlag},
+			req:  &args.Request{Model: "unknown-model", Effort: "turbo"},
 			pick: "alpha", asked: []string{LevelCLI},
 			stages: []Stage{stage("cli", "alpha", false), stage("model", "unknown-model", true), stage("effort", "turbo", true)},
 			want:   "alpha"},
-		{name: "--effort: effort never asked", req: &args.Request{Effort: "high", EffortSource: args.SourceFlag},
+		{name: "--effort: effort never asked", req: &args.Request{Effort: "high"},
 			pick: "worker@high", asked: []string{LevelCLI},
 			stages: []Stage{stage("cli", "beta", false), stage("model", "worker", true), stage("effort", "high", true)},
 			want:   "worker@high"},
 		{name: "effort passthrough: model asked, the passed effort recorded",
-			req:  &args.Request{CLI: "alpha", Effort: "turbo", EffortSource: args.SourceFlag},
+			req:  &args.Request{CLI: "alpha", Effort: "turbo"},
 			pick: "strong", asked: []string{LevelModel},
 			stages: []Stage{stage("cli", "alpha", true), stage("model", "strong", false), stage("effort", "turbo", true)},
 			want:   "strong"},
 		{name: "all three passed: Jev not asked",
-			req: &args.Request{CLI: "alpha", Model: "strong-model", ModelSource: args.SourceFlag, Effort: "high",
-				EffortSource: args.SourceFlag},
+			req:    &args.Request{CLI: "alpha", Model: "strong-model", Effort: "high"},
 			stages: []Stage{stage("cli", "alpha", true), stage("model", "strong", true), stage("effort", "high", true)},
 			want:   "strong@high"},
 		{name: "an unusable --cli fixes nothing", req: &args.Request{CLI: "nope"}, pick: "worker@low",
@@ -210,8 +209,8 @@ func TestRouteStagesFixedByPassedValues(t *testing.T) {
 			if tc.pick == "" {
 				client = &mocks.JevClientMock{} // Ask panics if called
 			}
-			el := Eligible(cfg, cat, tc.req)
-			assert.Equal(t, tc.warned, len(el.Skipped) > 0)
+			el := Eligible(cat, tc.req)
+			assert.Equal(t, tc.warned, len(el.Warnings) > 0)
 			d, err := newRouter(t, cfg, cat, client).Route(context.Background(), el, tc.req, captured("fix it"))
 			require.NoError(t, err)
 			require.NoError(t, d.Undecided)
@@ -226,9 +225,9 @@ func TestRouteStagesFixedByPassedValues(t *testing.T) {
 func TestRoutePassedValuesInStageCriteria(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	t.Run("passthrough --model: every cli criterion carries the model", func(t *testing.T) {
-		req := &args.Request{Model: "unknown-model", ModelSource: args.SourceFlag}
+		req := &args.Request{Model: "unknown-model"}
 		client := choosing("beta")
-		_, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cfg, cat, req), req, captured("x"))
+		_, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cat, req), req, captured("x"))
 		require.NoError(t, err)
 		in := client.AskCalls()[0].Req.Questions[LevelCLI].Instructions.(stageInstructions)
 		require.Equal(t, []string{"alpha", "beta"}, in.CLIs.Names())
@@ -239,9 +238,9 @@ func TestRoutePassedValuesInStageCriteria(t *testing.T) {
 		}
 	})
 	t.Run("--effort passthrough: every model criterion carries the effort", func(t *testing.T) {
-		req := &args.Request{CLI: "alpha", Effort: "turbo", EffortSource: args.SourceFlag}
+		req := &args.Request{CLI: "alpha", Effort: "turbo"}
 		client := choosing("strong")
-		_, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cfg, cat, req), req, captured("x"))
+		_, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cat, req), req, captured("x"))
 		require.NoError(t, err)
 		in := client.AskCalls()[0].Req.Questions[LevelModel].Instructions.(stageInstructions)
 		require.Equal(t, []string{"strong", "fast"}, in.Models.Names())
@@ -257,7 +256,7 @@ func TestRouteStageSequence(t *testing.T) {
 	client := choosing("strong@high")
 	r := newRouter(t, cfg, cat, client)
 	req := &args.Request{}
-	el := Eligible(cfg, cat, req)
+	el := Eligible(cat, req)
 	before := slices.Clone(el.Options)
 
 	d, err := r.Route(context.Background(), el, req, captured("fix it"))
@@ -331,7 +330,7 @@ func TestRouteStageFailure(t *testing.T) {
 	t.Run("several CLIs: the cli stage succeeds, the model stage fails", func(t *testing.T) {
 		req := &args.Request{}
 		client := failingAt(LevelModel, "strong@high", boom)
-		d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cfg, cat, req), req, captured("x"))
+		d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cat, req), req, captured("x"))
 		require.ErrorIs(t, err, ErrCannotDecide)
 		require.ErrorIs(t, err, boom)
 		assert.Contains(t, err.Error(), "model stage")
@@ -343,15 +342,15 @@ func TestRouteStageFailure(t *testing.T) {
 	t.Run("several CLIs: the model stage succeeds, the effort stage fails", func(t *testing.T) {
 		req := &args.Request{}
 		client := failingAt(LevelEffort, "strong@high", boom)
-		d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cfg, cat, req), req, captured("x"))
+		d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cat, req), req, captured("x"))
 		require.ErrorIs(t, err, ErrCannotDecide)
 		assert.Equal(t, []Stage{{Level: "cli", Choice: "alpha"}, {Level: "model", Choice: "strong"}}, stageSummary(d.Stages))
 		assert.Empty(t, d.CLI)
 	})
 	t.Run("one CLI eligible: runs with the caller's fixed values only", func(t *testing.T) {
-		req := &args.Request{Model: "strong-model", ModelSource: args.SourceFlag}
+		req := &args.Request{Model: "strong-model"}
 		client := failingAt(LevelEffort, "strong@high", boom)
-		d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cfg, cat, req), req, captured("x"))
+		d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cat, req), req, captured("x"))
 		require.NoError(t, err)
 		require.ErrorIs(t, d.Undecided, boom)
 		assert.Equal(t, "alpha", d.CLI)
@@ -388,7 +387,7 @@ func TestRouteStagesSplitState(t *testing.T) {
 		require.NotNil(t, split)
 		require.Greater(t, len(split.Chunks), 2)
 		req := &args.Request{}
-		d, err := r.Route(context.Background(), Eligible(cfg, cat, req), req, c)
+		d, err := r.Route(context.Background(), Eligible(cat, req), req, c)
 		return d, len(split.Chunks), err
 	}
 
@@ -495,7 +494,7 @@ func TestRouteStageWhole422Resplits(t *testing.T) {
 			r := newRouter(t, cfg, cat, client)
 			require.True(t, c.Fits(r.budget))
 			req := &args.Request{}
-			d, err := r.Route(context.Background(), Eligible(cfg, cat, req), req, c)
+			d, err := r.Route(context.Background(), Eligible(cat, req), req, c)
 			require.NoError(t, err)
 			require.NoError(t, d.Undecided)
 			assert.Equal(t, pickHigh, d.OptionID)
@@ -539,7 +538,7 @@ func TestRouteStageWhole422ResplitFails(t *testing.T) {
 	require.True(t, c.Fits(r.budget))
 	r.budget.Chunk = 2 // half of it leaves no room for chunk text beside the anchor
 	req := &args.Request{}
-	d, err := r.Route(context.Background(), Eligible(cfg, cat, req), req, c)
+	d, err := r.Route(context.Background(), Eligible(cat, req), req, c)
 	require.ErrorIs(t, err, ErrCannotDecide)
 	require.ErrorIs(t, err, jev.ErrUnprocessable)
 	require.ErrorIs(t, err, prompt.ErrQuestionsOverBudget)
@@ -575,7 +574,7 @@ func TestRouteStageChunk422(t *testing.T) {
 
 	t.Run("only the rejected chunk re-splits; the pool covers every chunk", func(t *testing.T) {
 		client := rejectingAt(func(ch prompt.Chunk) bool { return ch.Index == 1 && ch.Of == n })
-		d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cfg, cat, req), req, c)
+		d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cat, req), req, c)
 		require.NoError(t, err)
 		require.NoError(t, d.Undecided)
 		assert.Equal(t, pickHigh, d.OptionID)
@@ -589,7 +588,7 @@ func TestRouteStageChunk422(t *testing.T) {
 	})
 	t.Run("a second 422 fails the routing with earlier stages kept", func(t *testing.T) {
 		client := rejectingAt(func(ch prompt.Chunk) bool { return strings.HasPrefix(ch.Text, "START") })
-		d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cfg, cat, req), req, c)
+		d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cat, req), req, c)
 		require.ErrorIs(t, err, ErrCannotDecide)
 		require.ErrorIs(t, err, errUnsplittable)
 		assert.Contains(t, err.Error(), "model stage")
@@ -615,7 +614,7 @@ func testRouteStageDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	req := &args.Request{}
-	d, err := newRouter(t, cfg, cat, client).Route(ctx, Eligible(cfg, cat, req), req, captured("fix it"))
+	d, err := newRouter(t, cfg, cat, client).Route(ctx, Eligible(cat, req), req, captured("fix it"))
 	require.ErrorIs(t, err, ErrCannotDecide)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Contains(t, err.Error(), "model stage")
@@ -671,7 +670,7 @@ func TestRouteStageMalformedAnswers(t *testing.T) {
 						return answers, nil
 					}}
 					req := &args.Request{}
-					d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cfg, cat, req), req,
+					d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cat, req), req,
 						state.captured)
 					require.ErrorIs(t, err, ErrCannotDecide)
 					require.ErrorIs(t, err, jev.ErrMalformed)

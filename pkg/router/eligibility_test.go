@@ -3,7 +3,6 @@ package router
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,19 +23,6 @@ func embedded(t *testing.T) (*config.Config, *catalog.Catalog) {
 	return cfg, cat
 }
 
-// flag builds a mapped argument the way cmd/agrouter records it.
-func flag(name, value string) args.Arg {
-	if value == "" {
-		return args.Arg{Spelling: "--" + name, Key: name}
-	}
-	return args.Arg{Spelling: "--" + name + " " + value, Key: name + "." + value}
-}
-
-func cfgArg(kv string) args.Arg {
-	key, _, _ := strings.Cut(kv, "=")
-	return args.Arg{Spelling: "-c " + kv, Key: config.ConfigKeyPrefix + key, Value: kv}
-}
-
 func ids(opts []catalog.Option) []string {
 	out := make([]string, 0, len(opts))
 	for _, o := range opts {
@@ -55,113 +41,42 @@ func idsOf(cat *catalog.Catalog, keep func(catalog.Option) bool) []string {
 	return out
 }
 
-// ralphexClaude is ralphex's Claude-mode argv (claude_command = agrouter exec --cli=claude); its --verbose is agrouter's.
-func ralphexClaude() *args.Request {
-	return &args.Request{Mode: args.ModeExec, CLI: "claude", Model: "opus", ModelSource: args.SourceFlag,
-		Effort: "high", EffortSource: args.SourceFlag, Args: []args.Arg{
-			{Spelling: "--dangerously-skip-permissions", Key: "permission-mode.bypassPermissions"},
-			flag("output-format", "stream-json"),
-		}}
-}
-
-// ralphexCodex is ralphex's --codex argv (codex_command = agrouter), no --cli.
-func ralphexCodex() *args.Request {
-	return &args.Request{Mode: args.ModeExec, Args: []args.Arg{
-		cfgArg("features.multi_agent=true"),
-		cfgArg(`agents.reviewer.description="Reviews code"`),
-		{Spelling: "--dangerously-bypass-approvals-and-sandbox", Key: "permission-mode.bypassPermissions"},
-		flag("sandbox", "danger-full-access"),
-		cfgArg("stream_idle_timeout_ms=3600000"),
-		cfgArg(`project_doc_fallback_filenames=["CLAUDE.md"]`),
-	}}
-}
-
-func TestEligibleMappedArgumentPreference(t *testing.T) {
-	cfg, cat := embedded(t)
-	claude := idsOf(cat, func(o catalog.Option) bool { return o.CLI == "claude" })
-	codex := idsOf(cat, func(o catalog.Option) bool { return o.CLI == "codex" })
-
-	tests := []struct {
-		name    string
-		req     *args.Request
-		want    []string
-		dropped []string
-		pinned  bool
-	}{
-		{name: "no arguments", req: &args.Request{}, want: ids(cat.Options)},
-		{name: "output-format json", req: &args.Request{Args: []args.Arg{flag("output-format", "json")}},
-			want: claude, dropped: []string{"codex"}},
-		{name: "output-format text, [] counts as skipped", req: &args.Request{Args: []args.Arg{flag("output-format", "text")}},
-			want: claude, dropped: []string{"codex"}},
-		{name: "permission-mode manual", req: &args.Request{Args: []args.Arg{flag("permission-mode", "manual")}},
-			want: claude, dropped: []string{"codex"}},
-		{name: "permission-mode dontAsk", req: &args.Request{Args: []args.Arg{flag("permission-mode", "dontAsk")}},
-			want: claude, dropped: []string{"codex"}},
-		{name: "permission-mode manual pinned to codex",
-			req:  &args.Request{CLI: "codex", Args: []args.Arg{flag("permission-mode", "manual")}},
-			want: codex, dropped: []string{"claude"}, pinned: true},
-		{name: "sandbox", req: &args.Request{Args: []args.Arg{flag("sandbox", "read-only")}},
-			want: codex, dropped: []string{"claude"}},
-		{name: "-c key", req: &args.Request{Args: []args.Arg{cfgArg("features.multi_agent=true")}},
-			want: codex, dropped: []string{"claude"}},
-		{name: "output-format json pinned to codex",
-			req:  &args.Request{CLI: "codex", Args: []args.Arg{flag("output-format", "json")}},
-			want: codex, dropped: []string{"claude"}, pinned: true},
-		{name: "tie: stream-json", req: &args.Request{Args: []args.Arg{flag("output-format", "stream-json")}},
-			want: ids(cat.Options)},
-		{name: "tie: plan and bypass",
-			req: &args.Request{Args: []args.Arg{flag("permission-mode", "plan"),
-				{Spelling: "--dangerously-skip-permissions", Key: "permission-mode.bypassPermissions"}}},
-			want: ids(cat.Options)},
-		{name: "tie at one skip each: json and sandbox",
-			req:  &args.Request{Args: []args.Arg{flag("output-format", "json"), flag("sandbox", "read-only")}},
-			want: ids(cat.Options)},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			e := Eligible(cfg, cat, tc.req)
-			assert.Equal(t, tc.want, ids(e.Options))
-			assert.Equal(t, tc.pinned, e.Pinned)
-			var dropped []string
-			for _, d := range e.Dropped {
-				dropped = append(dropped, d.CLI)
-				assert.NotEmpty(t, d.Reason)
-			}
-			assert.Equal(t, tc.dropped, dropped)
-			assert.Empty(t, e.Skipped)
-		})
+func TestEligibleIgnoresNativeArguments(t *testing.T) {
+	_, cat := embedded(t)
+	for _, raw := range [][]string{nil, {"--output-format", "json"}, {"--sandbox", "read-only"}, {"--", "--unknown"}} {
+		e := Eligible(cat, &args.Request{Mode: args.ModeExec, Raw: raw})
+		assert.Equal(t, ids(cat.Options), ids(e.Options), "%v: native tokens never filter or prefer CLIs", raw)
+		assert.Empty(t, e.Dropped)
+		assert.Empty(t, e.Warnings)
 	}
 }
 
 func TestEligibleDropReasons(t *testing.T) {
-	cfg, cat := embedded(t)
+	_, cat := embedded(t)
 
-	e := Eligible(cfg, cat, &args.Request{Args: []args.Arg{flag("output-format", "json")}})
-	assert.Equal(t, []Drop{{CLI: "codex", Reason: "would skip 1 mapped argument(s), another CLI skips 0"}}, e.Dropped)
-
-	e = Eligible(cfg, cat, &args.Request{CLI: "codex"})
+	e := Eligible(cat, &args.Request{CLI: "codex"})
 	assert.Equal(t, []Drop{{CLI: "claude", Reason: "--cli codex"}}, e.Dropped)
 
-	e = Eligible(cfg, cat, &args.Request{Model: "opus"})
+	e = Eligible(cat, &args.Request{Model: "opus"})
 	assert.Equal(t, []Drop{{CLI: "codex", Reason: "--model opus"}}, e.Dropped)
 
-	e = Eligible(cfg, cat, &args.Request{Effort: "ultra"})
+	e = Eligible(cat, &args.Request{Effort: "ultra"})
 	assert.Equal(t, []Drop{{CLI: "claude", Reason: "--effort ultra"}}, e.Dropped)
 }
 
 func TestEligibleCLI(t *testing.T) {
-	cfg, cat := embedded(t)
+	_, cat := embedded(t)
 
-	e := Eligible(cfg, cat, &args.Request{CLI: "claude"})
+	e := Eligible(cat, &args.Request{CLI: "claude"})
 	assert.True(t, e.Pinned)
 	assert.Equal(t, []string{"claude"}, e.CLIs())
 
 	for _, name := range []string{"gemini", "Claude"} {
-		e = Eligible(cfg, cat, &args.Request{CLI: name})
+		e = Eligible(cat, &args.Request{CLI: name})
 		assert.False(t, e.Pinned, name)
 		assert.Equal(t, ids(cat.Options), ids(e.Options), name)
-		assert.Equal(t, []args.Skip{{Spelling: "--cli " + name, Warning: "agrouter: warning: skipped --cli " + name +
-			": not an enabled CLI; routing across every CLI"}}, e.Skipped)
+		assert.Equal(t, []string{"agrouter: warning: skipped --cli " + name +
+			": not an enabled CLI; routing across every CLI"}, e.Warnings)
 	}
 }
 
@@ -174,20 +89,19 @@ func TestEligibleDisabledCLI(t *testing.T) {
 	cat, err := catalog.Build(cfg)
 	require.NoError(t, err)
 
-	e := Eligible(cfg, cat, &args.Request{CLI: "codex", Args: []args.Arg{flag("sandbox", "read-only")}})
+	e := Eligible(cat, &args.Request{CLI: "codex"})
 	assert.False(t, e.Pinned)
-	assert.Equal(t, []string{"claude"}, e.CLIs(), "the only CLI left, even though it skips --sandbox")
-	assert.Equal(t, []args.Skip{{Spelling: "--cli codex",
-		Warning: "agrouter: warning: skipped --cli codex: not an enabled CLI; routing across every CLI"}}, e.Skipped)
+	assert.Equal(t, []string{"claude"}, e.CLIs(), "the only CLI left")
+	assert.Equal(t, []string{"agrouter: warning: skipped --cli codex: not an enabled CLI; routing across every CLI"}, e.Warnings)
 }
 
 func TestEligibleModel(t *testing.T) {
-	cfg, cat := embedded(t)
+	_, cat := embedded(t)
 	opus := idsOf(cat, func(o catalog.Option) bool { return o.Section == "claude-opus-5-5" })
 
 	for _, value := range []string{"claude-opus-5-5", "opus"} {
 		t.Run("catalog "+value, func(t *testing.T) {
-			e := Eligible(cfg, cat, &args.Request{Model: value, ModelSource: args.SourceFlag})
+			e := Eligible(cat, &args.Request{Model: value})
 			assert.Equal(t, opus, ids(e.Options))
 			assert.False(t, e.ModelPassthrough)
 			for _, o := range e.Options {
@@ -197,7 +111,7 @@ func TestEligibleModel(t *testing.T) {
 	}
 
 	t.Run("outside the catalog, no --cli: one option per CLI", func(t *testing.T) {
-		e := Eligible(cfg, cat, &args.Request{Model: "gpt-9"})
+		e := Eligible(cat, &args.Request{Model: "gpt-9"})
 		assert.True(t, e.ModelPassthrough)
 		assert.Equal(t, []catalog.Option{
 			{ID: "claude", CLI: "claude", Name: "gpt-9"},
@@ -206,19 +120,12 @@ func TestEligibleModel(t *testing.T) {
 	})
 
 	t.Run("outside the catalog with --cli", func(t *testing.T) {
-		e := Eligible(cfg, cat, &args.Request{CLI: "codex", Model: "gpt-9"})
+		e := Eligible(cat, &args.Request{CLI: "codex", Model: "gpt-9"})
 		assert.Equal(t, []catalog.Option{{ID: "codex", CLI: "codex", Name: "gpt-9"}}, e.Options)
 	})
 
-	t.Run("outside the catalog, the preference leaves one CLI (ralphex -c model=)", func(t *testing.T) {
-		req := ralphexCodex()
-		req.Model, req.ModelSource = "gpt-5.6-sol", args.SourceConfig
-		e := Eligible(cfg, cat, req)
-		assert.Equal(t, []catalog.Option{{ID: "codex", CLI: "codex", Name: "gpt-5.6-sol"}}, e.Options)
-	})
-
 	t.Run("a catalog model of a CLI --cli dropped is passed through by name", func(t *testing.T) {
-		e := Eligible(cfg, cat, &args.Request{CLI: "claude", Model: "gpt-6.1-sol"})
+		e := Eligible(cat, &args.Request{CLI: "claude", Model: "gpt-6.1-sol"})
 		assert.True(t, e.ModelPassthrough)
 		assert.Equal(t, []catalog.Option{{ID: "claude", CLI: "claude", Name: "gpt-6.1-sol"}}, e.Options)
 	})
@@ -228,19 +135,19 @@ func TestEligibleEffort(t *testing.T) {
 	cfg, cat := embedded(t)
 
 	t.Run("alone", func(t *testing.T) {
-		e := Eligible(cfg, cat, &args.Request{Effort: "high"})
+		e := Eligible(cat, &args.Request{Effort: "high"})
 		assert.Equal(t, idsOf(cat, func(o catalog.Option) bool { return o.Effort == "high" }), ids(e.Options))
 		assert.False(t, e.EffortPassthrough)
 		assert.Empty(t, e.Dropped)
 	})
 
 	t.Run("only one CLI has it", func(t *testing.T) {
-		e := Eligible(cfg, cat, &args.Request{Effort: "ultra"})
+		e := Eligible(cat, &args.Request{Effort: "ultra"})
 		assert.Equal(t, idsOf(cat, func(o catalog.Option) bool { return o.Effort == "ultra" }), ids(e.Options))
 	})
 
 	t.Run("nothing left has it: models kept without the effort", func(t *testing.T) {
-		e := Eligible(cfg, cat, &args.Request{CLI: "claude", Effort: "ultra"})
+		e := Eligible(cat, &args.Request{CLI: "claude", Effort: "ultra"})
 		assert.True(t, e.EffortPassthrough)
 		var models []string
 		for _, m := range cfg.Models {
@@ -256,8 +163,8 @@ func TestEligibleEffort(t *testing.T) {
 	})
 
 	t.Run("a model without efforts passes it through", func(t *testing.T) {
-		fixCfg, fixCat := requestFixture(t)
-		e := Eligible(fixCfg, fixCat, &args.Request{Model: "fast-model", Effort: "high"})
+		_, fixCat := requestFixture(t)
+		e := Eligible(fixCat, &args.Request{Model: "fast-model", Effort: "high"})
 		assert.True(t, e.EffortPassthrough)
 		require.Len(t, e.Options, 1)
 		assert.Equal(t, "fast", e.Options[0].ID)
@@ -265,13 +172,13 @@ func TestEligibleEffort(t *testing.T) {
 	})
 
 	t.Run("model and effort leave one option", func(t *testing.T) {
-		e := Eligible(cfg, cat, &args.Request{Model: "opus", Effort: "high"})
+		e := Eligible(cat, &args.Request{Model: "opus", Effort: "high"})
 		assert.Equal(t, []string{"claude-opus-5-5@high"}, ids(e.Options))
 		assert.Equal(t, "high", e.EffortFor(e.Options[0]))
 	})
 
 	t.Run("model outside the catalog passes it through", func(t *testing.T) {
-		e := Eligible(cfg, cat, &args.Request{CLI: "codex", Model: "gpt-9", Effort: "high"})
+		e := Eligible(cat, &args.Request{CLI: "codex", Model: "gpt-9", Effort: "high"})
 		assert.True(t, e.ModelPassthrough)
 		assert.True(t, e.EffortPassthrough)
 		require.Len(t, e.Options, 1)
@@ -279,42 +186,66 @@ func TestEligibleEffort(t *testing.T) {
 	})
 
 	t.Run("no effort given, model without efforts emits none", func(t *testing.T) {
-		fixCfg, fixCat := requestFixture(t)
-		e := Eligible(fixCfg, fixCat, &args.Request{Model: "fast-model"})
+		_, fixCat := requestFixture(t)
+		e := Eligible(fixCat, &args.Request{Model: "fast-model"})
 		require.Len(t, e.Options, 1)
 		assert.Empty(t, e.EffortFor(e.Options[0]))
 	})
 }
 
-func TestEligibleRalphexArgvHasNoSkips(t *testing.T) {
-	cfg, cat := embedded(t)
+func TestEligibleNeverEmpty(t *testing.T) {
+	_, cat := embedded(t)
+	for _, cli := range []string{"", "claude", "codex", "gemini"} {
+		for _, model := range []string{"", "opus", "gpt-6-luna", "gpt-9"} {
+			for _, effort := range []string{"", "high", "ultra", "bogus"} {
+				e := Eligible(cat, &args.Request{CLI: cli, Model: model, Effort: effort})
+				assert.NotEmpty(t, e.Options, "cli=%q model=%q effort=%q", cli, model, effort)
+			}
+		}
+	}
+}
 
-	for name, req := range map[string]*args.Request{"claude": ralphexClaude(), "codex": ralphexCodex()} {
-		t.Run(name, func(t *testing.T) {
-			e := Eligible(cfg, cat, req)
-			assert.Equal(t, []string{name}, e.CLIs())
-			cli, ok := cfg.CLIByName(name)
-			require.True(t, ok)
-			o := e.Options[0]
-			res := args.Build(cli, req, args.Choice{Model: o.Name, Effort: e.EffortFor(o), Pinned: e.Pinned})
-			assert.Empty(t, res.Skipped)
+func TestEligibilityExclude(t *testing.T) {
+	_, cat := requestFixture(t)
+	cases := []struct {
+		name    string
+		req     *args.Request
+		exclude []string
+		want    []string
+		dropped []Drop
+	}{
+		{name: "nothing to exclude", exclude: nil,
+			want: []string{"strong@low", "strong@high", "fast", "worker@low", "worker@high"}},
+		{name: "one model of a cli", exclude: []string{"strong@low", "strong@high"},
+			want: []string{"fast", "worker@low", "worker@high"}},
+		{name: "every option of a cli is a drop", exclude: []string{"worker@low", "worker@high"},
+			want: []string{"strong@low", "strong@high", "fast"}, dropped: []Drop{{CLI: "beta", Reason: "unavailable"}}},
+		{name: "unknown ids are ignored", exclude: []string{"missing"},
+			want: []string{"strong@low", "strong@high", "fast", "worker@low", "worker@high"}},
+		{name: "a fixed cli is never broadened", req: &args.Request{CLI: "alpha"}, exclude: []string{"strong@low", "strong@high"},
+			want: []string{"fast"}, dropped: []Drop{{CLI: "beta", Reason: "--cli alpha"}}},
+		{name: "a passed-through model", req: &args.Request{CLI: "beta", Model: "other-model"}, exclude: []string{"beta"},
+			want: []string{}, dropped: []Drop{{CLI: "alpha", Reason: "--cli beta"}, {CLI: "beta", Reason: "unavailable"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := tc.req
+			if req == nil {
+				req = &args.Request{}
+			}
+			e := Eligible(cat, req)
+			e.Exclude(tc.exclude)
+			assert.Equal(t, tc.want, append([]string{}, ids(e.Options)...))
+			assert.Equal(t, tc.dropped, e.Dropped)
 		})
 	}
 }
 
-func TestEligibleNeverEmpty(t *testing.T) {
-	cfg, cat := embedded(t)
-	argSets := [][]args.Arg{nil, {flag("output-format", "json")}, {flag("sandbox", "read-only")},
-		{flag("output-format", "json"), flag("sandbox", "read-only")}, {flag("unknown", "")}}
-	for _, cli := range []string{"", "claude", "codex", "gemini"} {
-		for _, model := range []string{"", "opus", "gpt-6-luna", "gpt-9"} {
-			for _, effort := range []string{"", "high", "ultra", "bogus"} {
-				for _, a := range argSets {
-					req := &args.Request{CLI: cli, Model: model, Effort: effort, Args: a}
-					e := Eligible(cfg, cat, req)
-					assert.NotEmpty(t, e.Options, "cli=%q model=%q effort=%q args=%v", cli, model, effort, a)
-				}
-			}
-		}
-	}
+func TestEligibilityExcludeKeepsOriginal(t *testing.T) {
+	_, cat := requestFixture(t)
+	e := Eligible(cat, &args.Request{})
+	before := e.Options
+	e.Exclude([]string{"fast"})
+	assert.Len(t, before, 5, "the slice handed out earlier is not rewritten")
+	assert.Len(t, e.Options, 4)
 }

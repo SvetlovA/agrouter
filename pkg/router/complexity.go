@@ -86,27 +86,27 @@ func (r *Router) askDocs(ctx context.Context, state any, questions map[string]je
 	}
 	level, ok := answers[questionComplexity]
 	if !ok {
-		return DocScore{}, fmt.Errorf("%w: no %q answer", jev.ErrMalformed, questionComplexity)
+		return DocScore{}, fmt.Errorf("%w: %q", jev.ErrEmptyAnswer, questionComplexity)
 	}
 	evidence, ok := answers[questionEvidence]
 	if !ok {
-		return DocScore{}, fmt.Errorf("%w: no %q answer", jev.ErrMalformed, questionEvidence)
+		return DocScore{}, fmt.Errorf("%w: %q", jev.ErrEmptyAnswer, questionEvidence)
 	}
 	// the client validates Score answers; also check completeness for alternate JevClient implementations
 	var total float64
 	for i := range complexityLevels {
 		p, ok := level.Probabilities[strconv.Itoa(i)]
 		if !ok {
-			return DocScore{}, fmt.Errorf("%w: no probability for complexity %d", jev.ErrMalformed, i)
+			return DocScore{}, fmt.Errorf("%w: no probability for complexity %d", jev.ErrInvalidAnswer, i)
 		}
 		total += p
 	}
 	if total <= 0 {
-		return DocScore{}, fmt.Errorf("%w: complexity probabilities sum to %g", jev.ErrMalformed, total)
+		return DocScore{}, fmt.Errorf("%w: complexity probabilities sum to %g", jev.ErrInvalidAnswer, total)
 	}
 	maxLevel := float64(len(complexityLevels) - 1)
 	if math.IsNaN(level.Score) || math.IsInf(level.Score, 0) || level.Score < 0 || level.Score > maxLevel {
-		return DocScore{}, fmt.Errorf("%w: complexity score outside the level range", jev.ErrMalformed)
+		return DocScore{}, fmt.Errorf("%w: complexity score outside the level range", jev.ErrInvalidAnswer)
 	}
 	return DocScore{Score: level.Score * 10 / maxLevel, Confidence: level.Confidence, Evidence: evidence.Noul}, nil
 }

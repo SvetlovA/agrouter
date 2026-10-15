@@ -9,250 +9,75 @@ import (
 	"github.com/SvetlovA/agrouter/pkg/config"
 )
 
-// fixtureCLI supplies mappings for behavior tests independently of embedded defaults.
+// fixtureCLI supplies invocation descriptors for behavior tests independently of embedded defaults.
 func fixtureCLI(t *testing.T, name string) config.CLI {
 	t.Helper()
-	cli := config.CLI{Name: name, Command: name, Args: map[string][]string{
-		"model": {"--model", "{model}"},
-	}}
 	switch name {
 	case "alpha":
-		cli.Args["print"] = []string{"-p"}
-		cli.Args["prompt"] = []string{"--", "{prompt}"}
-		cli.Args["effort"] = []string{"--effort", "{effort}"}
-		cli.Args["verbose"] = []string{"--verbose"}
-		cli.Args["permission-mode.bypassPermissions"] = []string{"--dangerously-skip-permissions"}
-		for _, mode := range []string{"plan", "acceptEdits", "auto", "manual", "dontAsk"} {
-			cli.Args["permission-mode."+mode] = []string{"--permission-mode", mode}
-		}
-		for _, format := range []string{"text", "json", "stream-json"} {
-			cli.Args["output-format."+format] = []string{"--output-format", format}
+		return config.CLI{Name: name, Command: name,
+			ExecArgs:   []string{"-p"},
+			ModelArgs:  []string{"--model", "{model}"},
+			EffortArgs: []string{"--effort", "{effort}"},
+			PromptArgs: []string{"--", "{prompt}"},
 		}
 	case "beta":
-		cli.Args["print"] = []string{"exec"}
-		cli.Args["prompt"] = []string{"--", "{prompt}"}
-		cli.Args["effort"] = []string{"-c", `model_reasoning_effort="{effort}"`}
-		cli.Args["verbose"] = []string{}
-		cli.Args["output-format.text"] = []string{}
-		cli.Args["output-format.stream-json"] = []string{"--json"}
-		cli.Args["permission-mode.bypassPermissions"] = []string{"--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"}
-		cli.Args["permission-mode.plan"] = []string{"--sandbox", "read-only", "-c", `approval_policy="never"`, "--skip-git-repo-check"}
-		cli.Args["permission-mode.acceptEdits"] = []string{"--sandbox", "workspace-write"}
-		cli.Args["permission-mode.auto"] = []string{"--approve-for-me"}
-		for _, sandbox := range []string{"read-only", "workspace-write", "danger-full-access"} {
-			cli.Args["sandbox."+sandbox] = []string{"--sandbox", sandbox}
-		}
-		for _, key := range []string{"stream_idle_timeout_ms", "project_doc", "project_doc_fallback_filenames",
-			"features.multi_agent", "agents.reviewer.description", "model", "model_reasoning_effort"} {
-			cli.Args[config.ConfigKeyPrefix+key] = []string{"-c", "{value}"}
-		}
-	default:
-		t.Fatalf("unknown CLI fixture %q", name)
-	}
-	return cli
-}
-
-// flag builds a mapped argument the way cmd/agrouter records it.
-func flag(name, value string) Arg {
-	if value == "" {
-		return Arg{Spelling: "--" + name, Key: name}
-	}
-	return Arg{Spelling: "--" + name + " " + value, Key: name + "." + value}
-}
-
-func bypass(alias string) Arg {
-	return Arg{Spelling: "--" + alias, Key: "permission-mode.bypassPermissions"}
-}
-
-func cfgArg(kv string) Arg {
-	key := kv
-	for i := range kv {
-		if kv[i] == '=' {
-			key = kv[:i]
-			break
+		return config.CLI{Name: name, Command: name,
+			ExecArgs:   []string{"exec"},
+			ModelArgs:  []string{"--model", "{model}"},
+			EffortArgs: []string{"-c", `model_reasoning_effort="{effort}"`},
+			PromptArgs: []string{"--", "{prompt}"},
 		}
 	}
-	return Arg{Spelling: "-c " + kv, Key: config.ConfigKeyPrefix + key, Value: kv}
+	t.Fatalf("unknown CLI fixture %q", name)
+	return config.CLI{}
 }
 
-func spellings(skipped []Skip) []string {
-	out := make([]string, 0, len(skipped))
-	for _, s := range skipped {
-		out = append(out, s.Spelling)
-	}
-	return out
-}
-
-func TestBuildOutputFormat(t *testing.T) {
-	alpha, beta := fixtureCLI(t, "alpha"), fixtureCLI(t, "beta")
-	tests := []struct {
-		format   string
-		alpha    []string
-		beta     []string
-		betaSkip []string
-	}{
-		{"text", []string{"alpha", "-p", "--output-format", "text"}, []string{"beta", "exec"}, []string{"--output-format text"}},
-		{"json", []string{"alpha", "-p", "--output-format", "json"}, []string{"beta", "exec"}, []string{"--output-format json"}},
-		{"stream-json", []string{"alpha", "-p", "--output-format", "stream-json"}, []string{"beta", "exec", "--json"}, []string{}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.format, func(t *testing.T) {
-			req := &Request{Args: []Arg{flag("output-format", tc.format)}}
-			res := Build(alpha, req, Choice{})
-			assert.Equal(t, tc.alpha, res.Argv)
-			assert.Empty(t, res.Skipped)
-
-			res = Build(beta, req, Choice{})
-			assert.Equal(t, tc.beta, res.Argv)
-			assert.Equal(t, tc.betaSkip, spellings(res.Skipped))
-		})
-	}
-}
-
-func TestBuildPermissionMode(t *testing.T) {
-	alpha, beta := fixtureCLI(t, "alpha"), fixtureCLI(t, "beta")
-	tests := []struct {
-		mode  string
-		alpha []string
-		beta  []string // nil: skipped on beta
-	}{
-		{"bypassPermissions", []string{"--dangerously-skip-permissions"},
-			[]string{"--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"}},
-		{"plan", []string{"--permission-mode", "plan"},
-			[]string{"--sandbox", "read-only", "-c", `approval_policy="never"`, "--skip-git-repo-check"}},
-		{"acceptEdits", []string{"--permission-mode", "acceptEdits"}, []string{"--sandbox", "workspace-write"}},
-		{"auto", []string{"--permission-mode", "auto"}, []string{"--approve-for-me"}},
-		{"manual", []string{"--permission-mode", "manual"}, nil},
-		{"dontAsk", []string{"--permission-mode", "dontAsk"}, nil},
-	}
-	for _, tc := range tests {
-		t.Run(tc.mode, func(t *testing.T) {
-			req := &Request{Args: []Arg{flag("permission-mode", tc.mode)}}
-			res := Build(alpha, req, Choice{})
-			assert.Equal(t, append([]string{"alpha", "-p"}, tc.alpha...), res.Argv)
-			assert.Empty(t, res.Skipped)
-
-			res = Build(beta, req, Choice{})
-			assert.Equal(t, append([]string{"beta", "exec"}, tc.beta...), res.Argv)
-			if tc.beta == nil {
-				require.Len(t, res.Skipped, 1)
-				assert.Equal(t, "agrouter: warning: skipped --permission-mode "+tc.mode+": beta has no mapping for it",
-					res.Skipped[0].Warning)
-			} else {
-				assert.Empty(t, res.Skipped)
-			}
-		})
-	}
-}
-
-func TestBuildExamples(t *testing.T) {
-	alpha, beta := fixtureCLI(t, "alpha"), fixtureCLI(t, "beta")
-	req := &Request{Args: []Arg{
-		bypass("dangerously-skip-permissions"), flag("output-format", "stream-json"), flag("verbose", ""),
-	}}
-
-	res := Build(alpha, req, Choice{Model: "large-model", Effort: "high"})
-	assert.Equal(t, []string{"alpha", "-p", "--dangerously-skip-permissions", "--output-format", "stream-json",
-		"--verbose", "--model", "large-model", "--effort", "high"}, res.Argv)
-	assert.Empty(t, res.Skipped)
-
-	res = Build(beta, req, Choice{Model: "worker-model", Effort: "high"})
-	assert.Equal(t, []string{"beta", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check",
-		"--json", "--model", "worker-model", "-c", `model_reasoning_effort="high"`}, res.Argv)
-	require.Len(t, res.Skipped, 1)
-	assert.Equal(t, "agrouter: warning: skipped --verbose: maps to nothing for beta", res.Skipped[0].Warning)
-	assert.Equal(t, "--verbose", res.Skipped[0].Spelling)
-}
-
-func TestBuildCodexNoPermissionModeNoSkipGitRepoCheck(t *testing.T) {
-	res := Build(fixtureCLI(t, "beta"), &Request{Prompt: Optional{Value: "x", Set: true}}, Choice{Model: "small-model"})
-	assert.Equal(t, []string{"beta", "exec", "--model", "small-model", "--", "x"}, res.Argv)
-	assert.NotContains(t, res.Argv, "--skip-git-repo-check")
-}
-
-func TestBuildBypassAliasesEmittedOnce(t *testing.T) {
-	beta := fixtureCLI(t, "beta")
-	for _, req := range []*Request{
-		{Args: []Arg{bypass("dangerously-skip-permissions")}},
-		{Args: []Arg{flag("permission-mode", "bypassPermissions")}},
-		{Args: []Arg{bypass("dangerously-skip-permissions"), bypass("dangerously-bypass-approvals-and-sandbox"),
-			flag("permission-mode", "bypassPermissions")}},
-	} {
-		res := Build(beta, req, Choice{})
-		assert.Equal(t, []string{"beta", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"},
-			res.Argv)
-	}
-}
-
-func TestBuildContradictionsInOrder(t *testing.T) {
-	res := Build(fixtureCLI(t, "beta"), &Request{Args: []Arg{
-		flag("sandbox", "read-only"), flag("permission-mode", "acceptEdits"), flag("sandbox", "read-only"),
-	}}, Choice{})
-	assert.Equal(t, []string{"beta", "exec", "--sandbox", "read-only", "--sandbox", "workspace-write"}, res.Argv)
-
-	res = Build(fixtureCLI(t, "alpha"), &Request{Args: []Arg{
-		bypass("dangerously-skip-permissions"), flag("permission-mode", "plan"),
-	}}, Choice{})
-	assert.Equal(t, []string{"alpha", "-p", "--dangerously-skip-permissions", "--permission-mode", "plan"}, res.Argv)
-}
-
-func TestBuildConfigArgs(t *testing.T) {
-	desc := `agents.reviewer.description="Reviews code; flags \"bugs\" = issues"`
-	req := &Request{Args: []Arg{
-		cfgArg("stream_idle_timeout_ms=3600000"),
-		cfgArg("features.multi_agent=true"),
-		cfgArg("approval_policy=never"),
-		cfgArg(desc),
-		cfgArg(`project_doc_fallback_filenames=["CLAUDE.md"]`),
-		cfgArg("stream_idle_timeout_ms=1000"),
-		cfgArg("features.multi_agent=true"),
-	}}
-	res := Build(fixtureCLI(t, "beta"), req, Choice{})
-	assert.Equal(t, []string{"beta", "exec",
-		"-c", "stream_idle_timeout_ms=3600000",
-		"-c", "features.multi_agent=true",
-		"-c", desc,
-		"-c", `project_doc_fallback_filenames=["CLAUDE.md"]`,
-		"-c", "stream_idle_timeout_ms=1000",
-	}, res.Argv)
-	require.Len(t, res.Skipped, 1)
-	assert.Equal(t, "-c approval_policy=never", res.Skipped[0].Spelling)
-	assert.Equal(t, "agrouter: warning: skipped -c approval_policy=never: beta has no mapping for it",
-		res.Skipped[0].Warning)
-
-	res = Build(fixtureCLI(t, "alpha"), req, Choice{})
-	assert.Equal(t, []string{"alpha", "-p"}, res.Argv)
-	assert.Len(t, res.Skipped, 6, "each distinct key=value warned once")
-}
-
-func TestBuildPrompt(t *testing.T) {
+func TestBuild(t *testing.T) {
 	alpha, beta := fixtureCLI(t, "alpha"), fixtureCLI(t, "beta")
 	prompt := "fix \"it\" in 'a b'\nthen\t$HOME & %PATH%"
-	req := &Request{Prompt: Optional{Value: prompt, Set: true}, Args: []Arg{flag("verbose", "")}}
-
-	res := Build(alpha, req, Choice{Model: "everyday-model", Effort: "low"})
-	assert.Equal(t, []string{"alpha", "-p", "--verbose", "--model", "everyday-model", "--effort", "low", "--", prompt}, res.Argv)
-
-	res = Build(alpha, &Request{}, Choice{})
-	assert.Equal(t, []string{"alpha", "-p"}, res.Argv, "no prompt: the prompt template is dropped, \"--\" included")
-	res = Build(alpha, &Request{Prompt: Optional{Set: true}}, Choice{})
-	assert.Equal(t, []string{"alpha", "-p"}, res.Argv, "an empty prompt is never an empty token")
-	res = Build(alpha, &Request{PromptFlag: Optional{Set: true}, Prompt: Optional{Set: true}, PromptFile: Optional{Value: "f", Set: true}},
-		Choice{})
-	assert.Equal(t, []string{"alpha", "-p"}, res.Argv, "empty sources and the file path never reach argv")
-
-	// raw passthrough before the prompt, so it stays options
-	res = Build(beta, &Request{Prompt: Optional{Value: prompt, Set: true}, Args: []Arg{flag("output-format", "stream-json")},
-		Raw: []string{"--search"}}, Choice{Model: "worker-model", Effort: "high", Pinned: true})
-	assert.Equal(t, []string{"beta", "exec", "--json", "--model", "worker-model", "-c", `model_reasoning_effort="high"`,
-		"--search", "--", prompt}, res.Argv)
+	tests := []struct {
+		name   string
+		cli    config.CLI
+		req    Request
+		choice Choice
+		want   []string
+	}{
+		{name: "model and effort set", cli: alpha, req: Request{Prompt: Optional{Value: prompt, Set: true}},
+			choice: Choice{Model: "everyday-model", Effort: "low"},
+			want:   []string{"alpha", "-p", "--model", "everyday-model", "--effort", "low", "--", prompt}},
+		{name: "model unset", cli: alpha, choice: Choice{Effort: "high"},
+			want: []string{"alpha", "-p", "--effort", "high"}},
+		{name: "effort unset", cli: alpha, choice: Choice{Model: "m"},
+			want: []string{"alpha", "-p", "--model", "m"}},
+		{name: "both unset: the child's defaults", cli: alpha, want: []string{"alpha", "-p"}},
+		{name: "placeholder inside a token", cli: beta, choice: Choice{Effort: "high"},
+			want: []string{"beta", "exec", "-c", `model_reasoning_effort="high"`}},
+		{name: "native tokens before the prompt, unchanged", cli: beta,
+			req:    Request{Prompt: Optional{Value: prompt, Set: true}, Raw: []string{"--search", "", "a b", "--search", "--", "x"}},
+			choice: Choice{Model: "worker-model", Effort: "high"},
+			want:   []string{"beta", "exec", "--search", "", "a b", "--search", "--model", "worker-model", "-c", `model_reasoning_effort="high"`, "--", "x", "--", prompt}},
+		{name: "no prompt: prompt_args dropped, \"--\" included", cli: alpha, req: Request{Raw: []string{"--json"}},
+			want: []string{"alpha", "-p", "--json"}},
+		{name: "an empty prompt is never an empty token", cli: alpha, req: Request{Prompt: Optional{Set: true}},
+			want: []string{"alpha", "-p"}},
+		{name: "empty sources and the file path never reach argv", cli: alpha,
+			req:  Request{PromptFlag: Optional{Set: true}, Prompt: Optional{Set: true}, PromptFile: Optional{Value: "f", Set: true}},
+			want: []string{"alpha", "-p"}},
+		{name: "empty exec_args", cli: config.CLI{Command: "gamma", ExecArgs: []string{}, PromptArgs: []string{"{prompt}"}},
+			req: Request{Prompt: Optional{Value: "go", Set: true}}, want: []string{"gamma", "go"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, Build(tc.cli, &tc.req, tc.choice).Argv)
+		})
+	}
 }
 
 // TestBuildPromptStaysLiteral pins that prompt text shaped like a flag reaches the child as the last
-// argument, right after the template's "--", from every prompt source and with raw passthrough.
+// argument, right after prompt_args' "--", from every prompt source and with native tokens.
 func TestBuildPromptStaysLiteral(t *testing.T) {
 	alpha := fixtureCLI(t, "alpha")
-	for _, text := range []string{"--help", "--dangerously-skip-permissions", "-", "--", "-p\nsecond line"} {
+	for _, text := range []string{"--help", "--model", "-", "--", "-p\nsecond line"} {
 		for name, req := range map[string]Request{
 			"-p":            {PromptFlag: Optional{Value: text, Set: true}},
 			"positional":    {Prompt: Optional{Value: text, Set: true}},
@@ -260,8 +85,8 @@ func TestBuildPromptStaysLiteral(t *testing.T) {
 		} {
 			t.Run(name+" "+text, func(t *testing.T) {
 				req.Raw = []string{"--add-dir", "x"}
-				res := Build(alpha, &req, Choice{Model: "m", Effort: "high", Pinned: true})
-				assert.Equal(t, []string{"alpha", "-p", "--model", "m", "--effort", "high", "--add-dir", "x", "--", text},
+				res := Build(alpha, &req, Choice{Model: "m", Effort: "high"})
+				assert.Equal(t, []string{"alpha", "-p", "--add-dir", "x", "--model", "m", "--effort", "high", "--", text},
 					res.Argv)
 			})
 		}
@@ -291,53 +116,16 @@ func TestBuildPromptSources(t *testing.T) {
 	}
 }
 
-func TestBuildModelAndEffort(t *testing.T) {
-	alpha := fixtureCLI(t, "alpha")
-
-	res := Build(alpha, &Request{}, Choice{Model: "alpha-haiku-4-5"})
-	assert.Equal(t, []string{"alpha", "-p", "--model", "alpha-haiku-4-5"}, res.Argv, "no effort argument")
-
-	res = Build(alpha, &Request{}, Choice{Effort: "high"})
-	assert.Equal(t, []string{"alpha", "-p", "--effort", "high"}, res.Argv, "caller's effort kept, model left to the CLI")
-
-	noEffort := config.CLI{Name: "mini", Command: "mini", Args: map[string][]string{
-		"print": {"run"}, "prompt": {"--", "{prompt}"}, "model": {"-m", "{model}"},
-	}}
-	req := &Request{Effort: "high", EffortSource: SourceConfig, EffortSpell: "-c model_reasoning_effort=high"}
-	res = Build(noEffort, req, Choice{Model: "m1", Effort: "high"})
-	assert.Equal(t, []string{"mini", "run", "-m", "m1"}, res.Argv)
-	require.Len(t, res.Skipped, 1)
-	assert.Equal(t, "agrouter: warning: skipped -c model_reasoning_effort=high: mini has no mapping for it",
-		res.Skipped[0].Warning)
-	res = Build(noEffort, &Request{}, Choice{Effort: "high"})
-	assert.Equal(t, "--effort high", res.Skipped[0].Spelling)
-}
-
-func TestBuildRawPassthrough(t *testing.T) {
-	alpha := fixtureCLI(t, "alpha")
-	req := &Request{Raw: []string{"--add-dir", "/tmp/x y"}, Prompt: Optional{Value: "p", Set: true}}
-
-	res := Build(alpha, req, Choice{Pinned: true})
-	assert.Equal(t, []string{"alpha", "-p", "--add-dir", "/tmp/x y", "--", "p"}, res.Argv)
-	assert.Empty(t, res.Skipped)
-
-	res = Build(alpha, req, Choice{})
-	assert.Equal(t, []string{"alpha", "-p", "--", "p"}, res.Argv)
-	require.Len(t, res.Skipped, 1)
-	assert.Equal(t, "-- --add-dir /tmp/x y", res.Skipped[0].Spelling)
-	assert.Equal(t, "agrouter: warning: skipped 2 raw argument(s) after --: passed through only with --cli",
-		res.Skipped[0].Warning)
-}
-
 func TestBuildOwnFlagsNeverInArgv(t *testing.T) {
 	req := &Request{CLI: "alpha", APIKey: Optional{Value: "sk-secret", Set: true}, Model: "opus",
-		ModelSource: SourceFlag, Args: []Arg{flag("verbose", "")}}
-	res := Build(fixtureCLI(t, "alpha"), req, Choice{Model: "large-model", Pinned: true})
-	assert.Equal(t, []string{"alpha", "-p", "--verbose", "--model", "large-model"}, res.Argv)
+		Docs: []string{"AGENTS.md"}}
+	res := Build(fixtureCLI(t, "alpha"), req, Choice{Model: "large-model"})
+	assert.Equal(t, []string{"alpha", "-p", "--model", "large-model"}, res.Argv)
 	for _, tok := range res.Argv {
 		assert.NotContains(t, tok, "sk-secret")
 		assert.NotContains(t, tok, "--cli")
 		assert.NotContains(t, tok, "--jev-api-key")
+		assert.NotContains(t, tok, "AGENTS.md")
 	}
 }
 
@@ -351,15 +139,10 @@ complexity_policy = Judge the whole codebase.
 [cli.zeta]
 command     = zeta-agent
 description = A made-up agent.
-
-[cli.zeta.args]
-print                     = ["--headless"]
-prompt                    = ["--task", "--", "{prompt}"]
-model                     = ["--llm={model}"]
-effort                    = ["--think", "{effort}"]
-output-format.stream-json = ["--emit", "ndjson"]
-permission-mode.plan      = ["--read-only"]
-verbose                   = []
+exec_args   = ["--headless"]
+model_args  = ["--llm={model}"]
+effort_args = ["--think", "{effort}"]
+prompt_args = ["--task", "--", "{prompt}"]
 
 [model.zeta-one]
 cli     = zeta
@@ -371,27 +154,18 @@ efforts = low, high
 	zeta, ok := cfg.CLIByName("zeta")
 	require.True(t, ok)
 
-	req := &Request{Prompt: Optional{Value: "do it", Set: true}, Args: []Arg{
-		flag("output-format", "stream-json"), flag("verbose", ""), flag("permission-mode", "plan"),
-		flag("output-format", "json"),
-	}}
+	req := &Request{Prompt: Optional{Value: "do it", Set: true}, Raw: []string{"--emit", "ndjson"}}
 	res := Build(zeta, req, Choice{Model: "z1", Effort: "high"})
-	assert.Equal(t, []string{"zeta-agent", "--headless", "--emit", "ndjson", "--read-only",
-		"--llm=z1", "--think", "high", "--task", "--", "do it"}, res.Argv)
-	assert.Equal(t, []string{
-		"agrouter: warning: skipped --verbose: maps to nothing for zeta",
-		"agrouter: warning: skipped --output-format json: zeta has no mapping for it",
-	}, []string{res.Skipped[0].Warning, res.Skipped[1].Warning})
-	assert.Equal(t, []string{"--verbose", "--output-format json"}, spellings(res.Skipped))
+	assert.Equal(t, []string{"zeta-agent", "--headless", "--emit", "ndjson", "--llm=z1", "--think", "high",
+		"--task", "--", "do it"}, res.Argv)
 }
 
 func TestRedacted(t *testing.T) {
 	alpha := fixtureCLI(t, "alpha")
-	res := Build(alpha, &Request{Prompt: Optional{Value: "secret task text", Set: true},
-		Args: []Arg{flag("output-format", "json")}, Raw: []string{"--add-dir", "/private"}},
-		Choice{Model: "large-model", Effort: "high", Pinned: true})
+	res := Build(alpha, &Request{Prompt: Optional{Value: "secret task text", Set: true}, Raw: []string{"--add-dir", "/private"}},
+		Choice{Model: "large-model", Effort: "high"})
 	got := res.Redacted()
-	assert.Equal(t, "alpha -p --output-format json --model large-model --effort high <2 raw argument(s)> -- <prompt>", got)
+	assert.Equal(t, "alpha -p <2 raw argument(s)> --model large-model --effort high -- <prompt>", got)
 	assert.NotContains(t, got, "secret")
 	assert.NotContains(t, got, "/private")
 
@@ -400,4 +174,27 @@ func TestRedacted(t *testing.T) {
 
 	assert.Empty(t, Result{}.Redacted())
 	assert.Equal(t, `"" "a b" "x\x01"`, Result{Argv: []string{"", "a b", "x\x01"}, promptAt: -1, rawAt: 3}.Redacted())
+}
+
+func TestBuildSelectionPrecedence(t *testing.T) {
+	cli := fixtureCLI(t, "beta")
+	raw := []string{"-m", "native-model", "--effort=native", "-c", `model_reasoning_effort="native"`, "--profile", "work"}
+	req := Request{Raw: raw}
+	res := Build(cli, &req, Choice{Model: "chosen-model", Effort: "chosen-effort"})
+	assert.Equal(t, []string{"beta", "exec", "-c", `model_reasoning_effort="native"`, "--profile", "work",
+		"--model", "chosen-model", "-c", `model_reasoning_effort="chosen-effort"`}, res.Argv)
+	assert.Equal(t, raw, req.Raw)
+	assert.Equal(t, []string{"beta", "exec", "--json"}, Build(cli,
+		&Request{Raw: []string{"--model", "native", "--effort", "native", "--json"}}, Choice{}).Argv,
+		"fallback uses the child's defaults instead of a native selection")
+}
+
+func TestRedactedNativeSeparator(t *testing.T) {
+	res := Build(fixtureCLI(t, "alpha"), &Request{Raw: []string{"--private", "secret", "-mnative", "--", "--model", "secret-position"}},
+		Choice{Model: "chosen", Effort: "chosen-effort"})
+	assert.Equal(t, []string{"alpha", "-p", "--private", "secret", "--model", "chosen", "--effort", "chosen-effort",
+		"--", "--model", "secret-position"}, res.Argv)
+	assert.Equal(t, "alpha -p <2 raw argument(s)> --model chosen --effort chosen-effort <3 raw argument(s)>", res.Redacted())
+	assert.NotContains(t, res.Redacted(), "secret")
+	assert.NotContains(t, res.Redacted(), "native")
 }

@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	goflag "flag"
 	"fmt"
 	"os"
@@ -74,8 +75,8 @@ func TestRouteSingleOptionSkipsJev(t *testing.T) {
 	client := &mocks.JevClientMock{} // Ask panics if called
 	r := newRouter(t, cfg, cat, client)
 
-	req := &args.Request{Model: "claude-opus-5-5", ModelSource: args.SourceFlag, Effort: "high", EffortSource: args.SourceFlag}
-	el := Eligible(cfg, cat, req)
+	req := &args.Request{Model: "claude-opus-5-5", Effort: "high"}
+	el := Eligible(cat, req)
 	require.Len(t, el.Options, 1)
 
 	d, err := r.Route(context.Background(), el, req, captured("fix the flaky test"))
@@ -90,8 +91,8 @@ func TestRouteSingleOptionPassthrough(t *testing.T) {
 	cfg, cat := embedded(t)
 	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
 
-	req := &args.Request{CLI: "codex", Model: "gpt-9", ModelSource: args.SourceFlag, Effort: "turbo", EffortSource: args.SourceFlag}
-	el := Eligible(cfg, cat, req)
+	req := &args.Request{CLI: "codex", Model: "gpt-9", Effort: "turbo"}
+	el := Eligible(cat, req)
 	d, err := r.Route(context.Background(), el, req, captured("x"))
 	require.NoError(t, err)
 	assert.Equal(t, Decision{CLI: "codex", Model: "gpt-9", Effort: "turbo", OptionID: "codex", Pinned: true,
@@ -107,7 +108,7 @@ func TestRouteJevChoice(t *testing.T) {
 	r := newRouter(t, cfg, cat, client)
 
 	req := &args.Request{}
-	el := Eligible(cfg, cat, req)
+	el := Eligible(cat, req)
 	d, err := r.Route(context.Background(), el, req, captured("fix it"))
 	require.NoError(t, err)
 	assert.Equal(t, "codex", d.CLI)
@@ -139,11 +140,11 @@ func TestRouteGoldenRequest(t *testing.T) {
 	}{
 		{name: "stage_cli", req: &args.Request{}, choice: "fast", stage: LevelCLI},
 		{name: "stage_model", req: &args.Request{CLI: "alpha"}, choice: "strong@high", stage: LevelModel},
-		{name: "stage_effort", req: &args.Request{Model: "strong-model", ModelSource: args.SourceFlag},
+		{name: "stage_effort", req: &args.Request{Model: "strong-model"},
 			choice: "strong@high", stage: LevelEffort},
-		{name: "effort_passthrough", req: &args.Request{CLI: "alpha", Effort: "turbo", EffortSource: args.SourceFlag},
+		{name: "effort_passthrough", req: &args.Request{CLI: "alpha", Effort: "turbo"},
 			choice: "fast", stage: LevelModel},
-		{name: "model_passthrough", req: &args.Request{Model: "unknown-model", ModelSource: args.SourceFlag},
+		{name: "model_passthrough", req: &args.Request{Model: "unknown-model"},
 			choice: "beta", stage: LevelCLI},
 	}
 	for _, tc := range tests {
@@ -151,7 +152,7 @@ func TestRouteGoldenRequest(t *testing.T) {
 			client := choosing(tc.choice)
 			r, err := New(cfg, cat, client)
 			require.NoError(t, err)
-			el := Eligible(cfg, cat, tc.req)
+			el := Eligible(cat, tc.req)
 			captured := &prompt.Result{Prompt: "fix the flaky test in pkg/foo/foo_test.go", Files: []string{"package foo\n"},
 				Attachments: []prompt.Attachment{{Source: "mentioned", Type: "image/png", Bytes: 48213}}}
 			_, err = r.Route(context.Background(), el, tc.req, captured)
@@ -226,16 +227,14 @@ func TestRouteCannotDecide(t *testing.T) {
 		{name: "cli known by --cli", req: &args.Request{CLI: "claude"},
 			want: Decision{CLI: "claude", Pinned: true}, argv: []string{"claude", "-p"}},
 		{name: "cli known by --model",
-			req:  &args.Request{Model: "opus", ModelSource: args.SourceFlag},
+			req:  &args.Request{Model: "opus"},
 			want: Decision{CLI: "claude", Model: "claude-opus-5-5"},
 			argv: []string{"claude", "-p", "--model", "claude-opus-5-5"}},
-		{name: "cli known as the only one left (ralphex codex argv)", req: ralphexCodex(),
-			want: Decision{CLI: "codex"},
-			argv: []string{"codex", "exec", "-c", "features.multi_agent=true", "-c", `agents.reviewer.description="Reviews code"`,
-				"--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "--sandbox", "danger-full-access",
-				"-c", "stream_idle_timeout_ms=3600000", "-c", `project_doc_fallback_filenames=["CLAUDE.md"]`}},
+		{name: "cli known as the only one with the effort", req: &args.Request{Effort: "ultra"},
+			want: Decision{CLI: "codex", Effort: "ultra"},
+			argv: []string{"codex", "exec", "-c", `model_reasoning_effort="ultra"`}},
 		{name: "--cli=claude --effort high keeps the effort",
-			req:  &args.Request{CLI: "claude", Effort: "high", EffortSource: args.SourceFlag},
+			req:  &args.Request{CLI: "claude", Effort: "high"},
 			want: Decision{CLI: "claude", Effort: "high", Pinned: true},
 			argv: []string{"claude", "-p", "--effort", "high"}},
 	}
@@ -244,12 +243,15 @@ func TestRouteCannotDecide(t *testing.T) {
 			t.Run(cause.name+"/"+tc.name, func(t *testing.T) {
 				client := failing(cause.err)
 				r := newRouter(t, cfg, cat, client)
-				el := Eligible(cfg, cat, tc.req)
+				el := Eligible(cat, tc.req)
 				require.Greater(t, len(el.Options), 1)
 
 				d, err := r.Route(context.Background(), el, tc.req, captured("fix it"))
 				require.NoError(t, err)
 				require.ErrorIs(t, d.Undecided, cause.err)
+				se, ok := errors.AsType[*StageError](d.Undecided)
+				require.True(t, ok, "the failing stage is carried")
+				assert.Equal(t, routeLevels[len(d.Stages)].name, se.Stage, "the stage after the skipped ones")
 				d.Undecided = nil
 				for _, st := range d.Stages {
 					assert.True(t, st.Skipped, "only the stages fixed before the failing one: %s", st.Level)
@@ -263,9 +265,12 @@ func TestRouteCannotDecide(t *testing.T) {
 		t.Run(cause.name+"/cli unknown", func(t *testing.T) {
 			r := newRouter(t, cfg, cat, failing(cause.err))
 			req := &args.Request{}
-			_, err := r.Route(context.Background(), Eligible(cfg, cat, req), req, captured("fix it"))
+			_, err := r.Route(context.Background(), Eligible(cat, req), req, captured("fix it"))
 			require.ErrorIs(t, err, ErrCannotDecide)
 			require.ErrorIs(t, err, cause.err)
+			se, ok := errors.AsType[*StageError](err)
+			require.True(t, ok, "the failing stage is carried through the cannot-decide error")
+			assert.Equal(t, LevelCLI, se.Stage)
 			assert.Contains(t, err.Error(), "claude, codex")
 		})
 	}
@@ -287,9 +292,11 @@ func TestRouteCannotDecideWithoutRequest(t *testing.T) {
 			client := &mocks.JevClientMock{}
 			r := newRouter(t, cfg, cat, client)
 			req := &args.Request{CLI: "codex"}
-			d, err := r.Route(context.Background(), Eligible(cfg, cat, req), req, tc.captured)
+			d, err := r.Route(context.Background(), Eligible(cat, req), req, tc.captured)
 			require.NoError(t, err)
 			require.ErrorIs(t, d.Undecided, tc.want)
+			_, staged := errors.AsType[*StageError](d.Undecided)
+			assert.False(t, staged, "no stage was asked")
 			assert.Equal(t, "codex", d.CLI)
 			assert.Empty(t, d.Model)
 			assert.Empty(t, client.AskCalls())
@@ -302,13 +309,14 @@ func TestRouteMalformedAnswers(t *testing.T) {
 	tests := []struct {
 		name    string
 		answers map[string]jev.Answer
+		want    error
 	}{
-		{name: "missing stage answer", answers: map[string]jev.Answer{}},
+		{name: "missing stage answer", answers: map[string]jev.Answer{}, want: jev.ErrEmptyAnswer},
 		{name: "choice outside the criteria", answers: map[string]jev.Answer{LevelModel: {Choice: "gpt-6.1-sol",
 			Probabilities: map[string]float64{"claude-opus-5-5": 0.5, "claude-sonnet-5-5": 0.5, "claude-haiku-5-5": 0,
-				"claude-fable-5-1": 0}}}},
+				"claude-fable-5-1": 0}}}, want: jev.ErrInvalidAnswer},
 		{name: "missing probability", answers: map[string]jev.Answer{LevelModel: {Choice: "claude-opus-5-5",
-			Probabilities: map[string]float64{"claude-opus-5-5": 1}}}},
+			Probabilities: map[string]float64{"claude-opus-5-5": 1}}}, want: jev.ErrInvalidAnswer},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -317,9 +325,13 @@ func TestRouteMalformedAnswers(t *testing.T) {
 			}}
 			r := newRouter(t, cfg, cat, client)
 			req := &args.Request{CLI: "claude"}
-			d, err := r.Route(context.Background(), Eligible(cfg, cat, req), req, captured("x"))
+			d, err := r.Route(context.Background(), Eligible(cat, req), req, captured("x"))
 			require.NoError(t, err)
 			require.ErrorIs(t, d.Undecided, jev.ErrMalformed)
+			require.ErrorIs(t, d.Undecided, tc.want)
+			se, ok := errors.AsType[*StageError](d.Undecided)
+			require.True(t, ok)
+			assert.Equal(t, LevelModel, se.Stage)
 			assert.Equal(t, Decision{CLI: "claude", Pinned: true, Undecided: d.Undecided,
 				Stages: []Stage{{Level: LevelCLI, Choice: "claude", Skipped: true}}}, d)
 		})
@@ -342,4 +354,82 @@ func overAnchor() *prompt.Result {
 			Type: fmt.Sprintf("application/x-kind-%d", i), Bytes: 1})
 	}
 	return c
+}
+
+func TestRouteNoEligible(t *testing.T) {
+	cfg, cat := requestFixture(t)
+	client := &mocks.JevClientMock{} // Ask panics if called
+	r := newRouter(t, cfg, cat, client)
+	req := &args.Request{CLI: "alpha"}
+	el := Eligible(cat, req)
+	el.Exclude(ids(el.Options))
+
+	d, err := r.Route(context.Background(), el, req, &prompt.Result{Prompt: "x", Docs: []string{"doc"}})
+	require.ErrorIs(t, err, ErrNoEligible)
+	require.NotErrorIs(t, err, ErrCannotDecide)
+	assert.Equal(t, Decision{}, d)
+	assert.Empty(t, client.AskCalls(), "no complexity or selection question")
+
+	cause := errors.New("cause")
+	d, err = r.cannotDecide(el, req, cause)
+	require.ErrorIs(t, err, ErrNoEligible)
+	require.ErrorIs(t, err, cause)
+	assert.Equal(t, Decision{}, d)
+}
+
+func TestRouteAfterExcludeSkipsJevForOneOption(t *testing.T) {
+	cfg, cat := requestFixture(t)
+	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
+	req := &args.Request{CLI: "alpha"}
+	el := Eligible(cat, req)
+	el.Exclude([]string{"strong@low", "strong@high"})
+
+	d, err := r.Route(context.Background(), el, req, captured("x"))
+	require.NoError(t, err)
+	assert.Equal(t, "fast", d.OptionID)
+	assert.True(t, d.Pinned)
+}
+
+func TestRouteKeepsAskedModelOnLaterFailure(t *testing.T) {
+	cfg, cat := requestFixture(t)
+	failEffort := func(fail error) *mocks.JevClientMock {
+		return &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+			if _, ok := req.Questions[LevelEffort]; ok {
+				return nil, fail
+			}
+			return certain(req, "strong@high"), nil
+		}}
+	}
+	tests := []struct {
+		name      string
+		req       *args.Request
+		wantModel string
+	}{
+		{name: "asked model kept", req: &args.Request{CLI: "alpha"}, wantModel: "strong-model"},
+		{name: "caller's model kept", req: &args.Request{Model: "strong-model"}, wantModel: "strong-model"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRouter(t, cfg, cat, failEffort(context.DeadlineExceeded))
+			d, err := r.Route(context.Background(), Eligible(cat, tc.req), tc.req, captured("fix it"))
+			require.NoError(t, err)
+			se, ok := errors.AsType[*StageError](d.Undecided)
+			require.True(t, ok)
+			assert.Equal(t, LevelEffort, se.Stage)
+			assert.Equal(t, tc.wantModel, d.Model)
+			assert.Empty(t, d.Effort)
+			assert.Empty(t, d.OptionID, "still undecided")
+		})
+	}
+
+	t.Run("a failing model stage keeps nothing", func(t *testing.T) {
+		r := newRouter(t, cfg, cat, failing(context.DeadlineExceeded))
+		req := &args.Request{CLI: "alpha"}
+		d, err := r.Route(context.Background(), Eligible(cat, req), req, captured("fix it"))
+		require.NoError(t, err)
+		assert.Empty(t, d.Model)
+	})
+	t.Run("a choice outside the options keeps nothing", func(t *testing.T) {
+		assert.Empty(t, askedModel(Eligible(cat, &args.Request{}), []Stage{{Level: LevelModel, Choice: "no-such", Answer: &jev.Answer{}}}))
+	})
 }

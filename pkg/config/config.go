@@ -33,14 +33,59 @@ type Agrouter struct {
 	ComplexityPolicy string
 }
 
-// CLI is a [cli.<name>] section together with its [cli.<name>.args] mappings.
+// CLI is a [cli.<name>] section: the command and the fixed invocation descriptors agrouter builds the
+// child's argv from. A missing template key is nil; an empty JSON array is an empty, non-nil slice.
 type CLI struct {
 	Name        string // section name without the "cli." prefix
 	Command     string
 	Description string
-	// Args maps a mapping key (print, model, output-format.json, config.<key>, ...) to its template.
-	// A missing key means the argument is not supported; an empty slice means supported, adds nothing.
-	Args map[string][]string
+	ExecArgs    []string // the noninteractive invocation, always emitted first
+	ModelArgs   []string // emitted with {model} substituted when a model is selected
+	EffortArgs  []string // emitted with {effort} substituted when an effort is selected
+	PromptArgs  []string // emitted last, only for a command-line prompt; {prompt} is its last token
+	// Availability is the [cli.<name>.availability] section; nil when the CLI has none.
+	Availability *Availability
+}
+
+// Unknown availability policies: run combinations whose availability cannot be verified, or block them.
+const (
+	UnknownAllow = "allow"
+	UnknownBlock = "block"
+)
+
+// Probe transports a check may name. Each is named after its wire protocol, never after a CLI.
+const (
+	TransportJSONHelper       = "json-helper"           // stdout is agrouter's normalized evidence JSON
+	TransportSDKControlUsage  = "sdk-control-usage-v1"  // stream-json control request for subscription usage
+	TransportJSONRPCRateLimit = "jsonrpc-ratelimits-v1" // stdio JSON-RPC rate-limit reads
+)
+
+// DefaultAvailabilityTimeout bounds one CLI's availability checks when timeout is unset.
+const DefaultAvailabilityTimeout = 5 * time.Second
+
+// DefaultErrorPrefix starts a check's quota block line when its error_prefix is unset.
+const DefaultErrorPrefix = "agrouter: "
+
+// Availability is a [cli.<name>.availability] section with its checks: how exec verifies, before any
+// Jev request, that the CLI can run.
+type Availability struct {
+	Enabled bool          // false skips every check, leaving availability unknown
+	Checks  []Check       // in the order the checks key lists them
+	Timeout time.Duration // bounds all of the CLI's checks together
+	Unknown string        // UnknownAllow or UnknownBlock
+}
+
+// Check is a [cli.<name>.availability.<check>] section: one prompt-free probe.
+type Check struct {
+	Name       string // the section name after "availability."
+	Transport  string // one of the Transport* names
+	Command    string // the probe executable; empty runs the CLI's own command
+	Args       []string
+	MinVersion string // the oldest CLI version whose response shape the transport knows; empty for any
+	// ErrorPrefix and ErrorMessage start the one line printed when this check's quota evidence blocks
+	// exec, so a caller can match it as the child's own limit message. Configured whitespace is preserved.
+	ErrorPrefix  string
+	ErrorMessage string
 }
 
 // Model is a [model.<section>] section.

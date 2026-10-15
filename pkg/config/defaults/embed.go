@@ -1,4 +1,4 @@
-// Package defaults embeds agrouter's default config: the v1 catalog and each CLI's argument mappings.
+// Package defaults embeds agrouter's default config: the v1 catalog, invocation descriptors and availability checks.
 package defaults
 
 import _ "embed"

@@ -6,8 +6,10 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/SvetlovA/agrouter/pkg/args"
+	"github.com/SvetlovA/agrouter/pkg/readiness"
 	"github.com/SvetlovA/agrouter/pkg/router"
 )
 
@@ -72,6 +74,44 @@ func (l *debugLog) eligibility(el *router.Eligibility) {
 	if el.EffortPassthrough {
 		l.printf("effort: passed through")
 	}
+}
+
+// readiness prints what the exec CLI's checks observed, one line per piece of evidence with its
+// controlled reason code, the defaults they reported, and how many options that leaves. It never
+// prints a probe's raw response.
+func (l *debugLog) readiness(r readiness.Report, ev *readiness.Evaluation) {
+	if l == nil {
+		return
+	}
+	for _, e := range r.Evidence {
+		var b strings.Builder
+		fmt.Fprintf(&b, "readiness %s: %s %s", r.CLI, e.Dimension, e.Status)
+		if e.Reason != "" {
+			fmt.Fprintf(&b, " (%s)", e.Reason)
+		}
+		if e.Window != "" {
+			b.WriteString(", window " + e.Window)
+		}
+		if !e.Scope.Account() {
+			b.WriteString(", models " + strings.Join(e.Scope.Models, ", "))
+		}
+		if !e.ResetAt.IsZero() {
+			b.WriteString(", resets " + e.ResetAt.UTC().Format(time.RFC3339))
+		}
+		if e.Check != "" {
+			b.WriteString(", check " + e.Check)
+		}
+		l.printf("%s", b.String())
+	}
+	l.printf("readiness %s: defaults model %s, effort %s", r.CLI, orUnknown(r.Defaults.Model), orUnknown(r.Defaults.Effort))
+	l.printf("readiness %s: %d of %d option(s) excluded", r.CLI, len(ev.Excluded), len(ev.Options))
+}
+
+func orUnknown(v *string) string {
+	if v == nil {
+		return "unknown"
+	}
+	return *v
 }
 
 // decision prints how the option was chosen: the doc scores and project complexity when the docs

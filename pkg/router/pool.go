@@ -96,11 +96,11 @@ func (r *Router) askChunk(ctx context.Context, id string, names []string, anchor
 	}
 	route, ok := answers[id]
 	if !ok {
-		return routeAnswer{}, fmt.Errorf("%w: no %q answer", jev.ErrMalformed, id)
+		return routeAnswer{}, fmt.Errorf("%w: %q", jev.ErrEmptyAnswer, id)
 	}
 	relevance, ok := answers[questionRelevance]
 	if !ok {
-		return routeAnswer{}, fmt.Errorf("%w: no %q answer", jev.ErrMalformed, questionRelevance)
+		return routeAnswer{}, fmt.Errorf("%w: %q", jev.ErrEmptyAnswer, questionRelevance)
 	}
 	scores, err := scoresOf(route, names)
 	if err != nil {

@@ -24,6 +24,10 @@ type JevClient interface {
 // nothing to run: exit 2.
 var ErrCannotDecide = errors.New("jev cannot decide")
 
+// ErrNoEligible means no option is left to route over, for example after Eligibility.Exclude removed
+// every one. Route returns it without asking Jev.
+var ErrNoEligible = errors.New("no eligible options")
+
 // Router chooses among the eligible options with Jev.
 type Router struct {
 	cfg    *config.Config
@@ -46,9 +50,12 @@ type Decision struct {
 	CLI    string
 	Model  string // empty: no model argument, the CLI's default applies (null in decision JSON)
 	Effort string // empty: no effort argument (null in decision JSON)
+	// NoEffort is true when the chosen catalog model has no effort levels and none was passed, so
+	// there is no effort to emit.
+	NoEffort bool
 	// OptionID is the chosen option; empty when Jev could not decide.
 	OptionID string
-	// Pinned is true when a valid --cli fixed the CLI, so raw passthrough is appended.
+	// Pinned is true when a valid --cli or the exec CLI fixed the CLI.
 	Pinned bool
 	// Undecided is why Jev could not decide when the CLI was known anyway; nil otherwise.
 	Undecided error
@@ -63,7 +70,7 @@ type Decision struct {
 
 // Choice is the argv choice for args.Build.
 func (d Decision) Choice() args.Choice {
-	return args.Choice{Model: d.Model, Effort: d.Effort, Pinned: d.Pinned}
+	return args.Choice{Model: d.Model, Effort: d.Effort}
 }
 
 // Route decides among el's options for the captured prompt, level by level (see decide). With one
@@ -72,8 +79,12 @@ func (d Decision) Choice() args.Choice {
 // project complexity. When Jev cannot decide, in either stage, the CLI is used with only the
 // caller's fixed --model and --effort if it is known (one CLI left); otherwise Route returns an
 // error matching ErrCannotDecide beside a Decision holding only the stages and complexity completed.
+// With no option left it returns ErrNoEligible without asking Jev.
 func (r *Router) Route(ctx context.Context, el *Eligibility, req *args.Request, captured *prompt.Result) (Decision, error) {
-	if len(el.Options) == 1 {
+	switch len(el.Options) {
+	case 0:
+		return Decision{}, ErrNoEligible
+	case 1:
 		d := r.chosen(el, el.Options[0])
 		d.Stages = skippedStages(el, el.Options[0])
 		return d, nil
@@ -85,7 +96,7 @@ func (r *Router) Route(ctx context.Context, el *Eligibility, req *args.Request, 
 	if captured.HasDocs() {
 		var err error
 		if cx, err = r.complexity(ctx, captured); err != nil {
-			return r.cannotDecide(el, req, fmt.Errorf("complexity stage: %w", err))
+			return r.cannotDecide(el, req, &StageError{Stage: LevelComplexity, Err: err})
 		}
 		withProject := *captured
 		withProject.Project = &prompt.Project{Complexity: cx.Complexity}
@@ -93,8 +104,12 @@ func (r *Router) Route(ctx context.Context, el *Eligibility, req *args.Request, 
 	}
 	o, stages, err := r.decide(ctx, el, captured)
 	if err != nil {
-		// partial decisions are discarded: the policy runs against the original eligibility
+		// the policy runs against the original eligibility; of the partial decision only a model Jev
+		// chose survives, so an effort-stage failure keeps it
 		d, policyErr := r.cannotDecide(el, req, err)
+		if policyErr == nil && d.Model == "" {
+			d.Model = askedModel(el, stages)
+		}
 		d.Stages, d.Complexity = stages, cx
 		return d, policyErr
 	}
@@ -105,13 +120,20 @@ func (r *Router) Route(ctx context.Context, el *Eligibility, req *args.Request, 
 
 // chosen is the decision to run o. Pinned comes from the caller's --cli only, never from a CLI Jev chose.
 func (r *Router) chosen(el *Eligibility, o catalog.Option) Decision {
-	return Decision{CLI: o.CLI, Model: o.Name, Effort: el.EffortFor(o), OptionID: o.ID, Pinned: el.Pinned}
+	effort := el.EffortFor(o)
+	// a passed-through model has no section: its CLI decides the effort, as for an unset model
+	noEffort := effort == "" && o.Section != ""
+	return Decision{CLI: o.CLI, Model: o.Name, Effort: effort, NoEffort: noEffort, OptionID: o.ID, Pinned: el.Pinned}
 }
 
 // cannotDecide applies the policy: with one CLI left (--cli, implied by --model, or the only one
-// eligible) it runs with only what the caller fixed; with more, there is nothing to run.
+// eligible) it runs with only what the caller fixed; with more, there is nothing to run. Route adds
+// the model Jev chose before a later stage failed.
 func (r *Router) cannotDecide(el *Eligibility, req *args.Request, cause error) (Decision, error) {
 	clis := el.CLIs()
+	if len(clis) == 0 {
+		return Decision{}, fmt.Errorf("%w: %w", ErrNoEligible, cause)
+	}
 	if len(clis) > 1 {
 		return Decision{}, fmt.Errorf("%w between %s: %w; pass --cli to run one without Jev",
 			ErrCannotDecide, strings.Join(clis, ", "), cause)
@@ -122,4 +144,20 @@ func (r *Router) cannotDecide(el *Eligibility, req *args.Request, cause error) (
 		d.Model = el.Options[0].Name
 	}
 	return d, nil
+}
+
+// askedModel is the name of the model Jev chose at an asked model stage among stages, empty when the
+// model stage was skipped or never completed.
+func askedModel(el *Eligibility, stages []Stage) string {
+	for _, st := range stages {
+		if st.Level != LevelModel || st.Skipped {
+			continue
+		}
+		for _, o := range el.Options {
+			if modelLabel(o) == st.Choice {
+				return o.Name
+			}
+		}
+	}
+	return ""
 }

@@ -80,7 +80,7 @@ func assertGolden(t *testing.T, name string, req jev.Request) {
 func TestRouteProjectGoldenRequest(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	req := &args.Request{CLI: "alpha"}
-	el := Eligible(cfg, cat, req)
+	el := Eligible(cat, req)
 	client := staged(scored, routeFast)
 	c := projectCapture()
 
@@ -103,7 +103,7 @@ func TestRouteProjectGoldenRequest(t *testing.T) {
 func TestRouteProjectChunkGoldenRequest(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	req := &args.Request{CLI: "alpha"}
-	el := Eligible(cfg, cat, req)
+	el := Eligible(cat, req)
 	client := staged(scored, func(req jev.Request) (map[string]jev.Answer, error) {
 		return stageAnswers(req, "fast", 0.9, 0.5), nil
 	})
@@ -142,7 +142,7 @@ func mustJSONLen(t *testing.T, v any) int {
 func TestRouteProjectSkippedWithoutDocText(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	req := &args.Request{}
-	el := Eligible(cfg, cat, req)
+	el := Eligible(cat, req)
 	for _, docs := range [][]string{nil, {""}, {"", ""}} {
 		client := staged(func() (map[string]jev.Answer, error) {
 			return nil, errors.New("doc request sent")
@@ -161,8 +161,8 @@ func TestRouteProjectSkippedWithoutDocText(t *testing.T) {
 func TestRouteProjectOneOptionSkipsJev(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	client := &mocks.JevClientMock{} // Ask panics if called
-	req := &args.Request{Model: "strong-model", ModelSource: args.SourceFlag, Effort: "high", EffortSource: args.SourceFlag}
-	el := Eligible(cfg, cat, req)
+	req := &args.Request{Model: "strong-model", Effort: "high"}
+	el := Eligible(cat, req)
 	require.Len(t, el.Options, 1)
 
 	d, err := newRouter(t, cfg, cat, client).Route(context.Background(), el, req, projectCapture())
@@ -182,7 +182,7 @@ func TestRouteProjectStageFailure(t *testing.T) {
 	for name, fail := range failures {
 		t.Run(name+", one CLI left: runs it with the caller's values", func(t *testing.T) {
 			req := &args.Request{CLI: "alpha"}
-			el := Eligible(cfg, cat, req)
+			el := Eligible(cat, req)
 			require.Greater(t, len(el.Options), 1)
 			client := staged(fail, routeFast)
 
@@ -194,12 +194,15 @@ func TestRouteProjectStageFailure(t *testing.T) {
 			assert.Empty(t, d.OptionID)
 			require.Error(t, d.Undecided)
 			assert.Contains(t, d.Undecided.Error(), "complexity stage")
+			se, ok := errors.AsType[*StageError](d.Undecided)
+			require.True(t, ok)
+			assert.Equal(t, LevelComplexity, se.Stage)
 			assert.Nil(t, d.Complexity)
 			assert.Empty(t, routeRequests(client), "no routing without the complexity")
 		})
 		t.Run(name+", several CLIs: cannot decide", func(t *testing.T) {
 			req := &args.Request{}
-			el := Eligible(cfg, cat, req)
+			el := Eligible(cat, req)
 			client := staged(fail, routeFast)
 
 			_, err := newRouter(t, cfg, cat, client).Route(context.Background(), el, req, projectCapture())
@@ -213,7 +216,7 @@ func TestRouteProjectStageFailure(t *testing.T) {
 func TestRouteProjectKeptWhenRoutingFails(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	req := &args.Request{CLI: "alpha"}
-	el := Eligible(cfg, cat, req)
+	el := Eligible(cat, req)
 	client := staged(scored, func(jev.Request) (map[string]jev.Answer, error) {
 		return nil, &jev.StatusError{Status: 500}
 	})
@@ -229,7 +232,7 @@ func TestRouteProjectKeptWhenRoutingFails(t *testing.T) {
 func TestRouteProjectUndecidableCaptureSkipsBothStages(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	req := &args.Request{CLI: "alpha"}
-	el := Eligible(cfg, cat, req)
+	el := Eligible(cat, req)
 	client := &mocks.JevClientMock{} // Ask panics if called
 	c := &prompt.Result{Docs: []string{"docs"}, Undecidable: context.DeadlineExceeded}
 
@@ -243,7 +246,7 @@ func TestRouteProjectUndecidableCaptureSkipsBothStages(t *testing.T) {
 func TestRouteProjectStagesInOrder(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	req := &args.Request{CLI: "alpha"}
-	el := Eligible(cfg, cat, req)
+	el := Eligible(cat, req)
 	var mu sync.Mutex
 	var order []string
 	client := staged(func() (map[string]jev.Answer, error) {

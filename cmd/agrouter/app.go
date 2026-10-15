@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strings"
+	"time"
 
 	"github.com/SvetlovA/agrouter/pkg/args"
 	"github.com/SvetlovA/agrouter/pkg/catalog"
@@ -17,6 +17,7 @@ import (
 	"github.com/SvetlovA/agrouter/pkg/config/defaults"
 	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
+	"github.com/SvetlovA/agrouter/pkg/readiness"
 	"github.com/SvetlovA/agrouter/pkg/router"
 	"github.com/SvetlovA/agrouter/pkg/runner"
 )
@@ -36,7 +37,9 @@ type app struct {
 	embedded       []byte
 	newJev         func(key string) router.JevClient
 	runner         CommandRunner
-	debug          *debugLog // nil unless AGROUTER_DEBUG=1
+	checker        ReadinessChecker // exec only
+	now            func() time.Time // nil means time.Now
+	debug          *debugLog        // nil unless AGROUTER_DEBUG=1
 }
 
 // newApp returns an app wired to the real process environment.
@@ -51,7 +54,15 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer) *app {
 		embedded: defaults.Config,
 		newJev:   func(key string) router.JevClient { return jev.New(key) },
 		runner:   runner.Runner{},
+		checker:  readiness.Checker{Dir: wd},
 	}
+}
+
+func (a *app) clock() time.Time {
+	if a.now != nil {
+		return a.now()
+	}
+	return time.Now()
 }
 
 // stdinReader returns the prompt's stdin: nil for a terminal, which agrouter does not read.
@@ -62,14 +73,21 @@ func stdinReader(r io.Reader) io.Reader {
 	return r
 }
 
-// selectionJSON records the selection, project complexity and available Jev confidence.
+// selectionJSON records the selection, why routing failed or a value is null, project complexity
+// and available Jev confidence.
 type selectionJSON struct {
-	CLI               string          `json:"cli"`
-	Model             *string         `json:"model"`
-	Effort            *string         `json:"effort"`
-	ProjectComplexity string          `json:"project_complexity,omitempty"`
-	Confidence        *confidenceJSON `json:"confidence,omitempty"`
-	Options           []optionJSON    `json:"options,omitempty"`
+	CLI               *string          `json:"cli"`
+	Model             *string          `json:"model"`
+	Effort            *string          `json:"effort"`
+	Reason            *reasonJSON      `json:"reason,omitempty"`
+	NullReasons       *nullReasonsJSON `json:"null_reasons,omitempty"`
+	ProjectComplexity string           `json:"project_complexity,omitempty"`
+	Confidence        *confidenceJSON  `json:"confidence,omitempty"`
+	Options           []optionJSON     `json:"options,omitempty"`
+	// exec only
+	Fallback  *fallbackJSON  `json:"fallback,omitempty"`
+	Effective *effectiveJSON `json:"effective,omitempty"`
+	Readiness *readinessJSON `json:"readiness,omitempty"`
 }
 
 // optionJSON is one eligible option, in catalog order.
@@ -80,11 +98,10 @@ type optionJSON struct {
 	Effort string `json:"effort"`
 }
 
-// decisionJSON adds the argv and skipped arguments for decision mode.
+// decisionJSON adds the argv for decision mode.
 type decisionJSON struct {
 	selectionJSON
 	Argv          []string `json:"argv"`
-	Skipped       []string `json:"skipped"`
 	StdinRequired bool     `json:"stdin_required"`
 	Command       string   `json:"command"`
 }
@@ -92,7 +109,7 @@ type decisionJSON struct {
 // run executes the pipeline: parse, config, catalog, then under the routing deadline capture, route
 // and build the argv; then print the decision or run the child. It returns the exit code.
 func (a *app) run(argv []string) int {
-	cmd, err := parseArgs(argv, a.getenv)
+	cmd, err := parseArgs(argv)
 	if err != nil {
 		return a.fail(err)
 	}
@@ -106,32 +123,55 @@ func (a *app) run(argv []string) int {
 	}
 	req := cmd.req
 	a.debug = newDebugLog(a.getenv(envDebug), a.stderr)
+	if a.getenv(legacyCLIEnv) != "" {
+		fmt.Fprintf(a.stderr, "agrouter: warning: %s is ignored: use exec CLI to run a CLI, or --cli=NAME to restrict a decision\n",
+			legacyCLIEnv)
+	}
 
 	cfg, cat, rt, err := a.setup(req)
 	if err != nil {
 		return a.fail(err)
 	}
+	if req.Mode == args.ModeExec {
+		// a CLI without catalog options would fall back to routing across every CLI
+		if len(catalog.ByCLI(cat.Options, req.CLI)) == 0 {
+			return a.fail(fmt.Errorf("exec %s: not a configured, enabled CLI", req.CLI))
+		}
+	}
 
 	d, err := a.route(cfg, cat, rt, req)
 	if err != nil {
-		// the stages completed before Jev failed, if any; stdout stays empty
+		// the stages completed before Jev failed, if any
 		a.debug.decision(d.Decision)
 		a.debug.failed(err)
+		if blocked, ok := errors.AsType[*preflightError](err); ok {
+			fmt.Fprintln(a.stderr, blocked.line)
+			return blocked.code
+		}
+		if req.Mode == args.ModeDecision && errors.Is(err, router.ErrCannotDecide) {
+			// stdout still gets the decision, all null with the reasons, beside the error line
+			if code := a.writeDecision(selectionOutput(d, cmd.verbose, err), cmd.verbose); code != exitOK {
+				return code
+			}
+		}
 		return a.fail(err)
 	}
 	a.debug.decision(d.Decision)
 
 	cli, _ := cfg.CLIByName(d.CLI)
 	res := args.Build(cli, req, d.Choice())
-	for _, s := range res.Skipped {
-		fmt.Fprintln(a.stderr, s.Warning)
-	}
 	a.debug.command(res)
 
 	if req.Mode == args.ModeDecision {
 		return a.printDecision(d, res, cmd.verbose)
 	}
-	a.logSelection(selectionOutput(d, cmd.verbose))
+	// --verbose is agrouter's decision detail; the exec selection line stays concise
+	s, blocked := a.execSelection(cli, req, d)
+	if blocked != nil {
+		fmt.Fprintln(a.stderr, blocked.line)
+		return blocked.code
+	}
+	a.logSelection(s)
 	return a.exec(res, d.captured)
 }
 
@@ -180,18 +220,22 @@ func (a *app) setup(req *args.Request) (*config.Config, *catalog.Catalog, *route
 	return cfg, cat, rt, nil
 }
 
-// routed is the decision together with the captured prompt, whose stdin the child replays, and the
-// routing arguments eligibility skipped.
+// routed is the decision together with the captured prompt, whose stdin the child replays.
 type routed struct {
 	router.Decision
 	captured *prompt.Result
-	skipped  []args.Skip
 	options  []optionJSON
+	checked  *checked // exec's preflight; nil in decision mode
+	// effortDropped is true when the caller's --effort was dropped: the chosen CLI has no effort_args
+	// to pass it.
+	effortDropped bool
 }
 
 // route reads --prompt-file and every --doc, captures the prompt and decides, all within the routing
-// deadline. Eligibility warnings go to stderr once the prompt is known to be there. When Jev cannot
-// decide, the error comes with the partial decision: the stages and complexity completed.
+// deadline. Exec checks its CLI's readiness meanwhile and routes only over what it can run now; when
+// nothing is left it returns a *preflightError without asking Jev. Eligibility warnings go to stderr
+// once the prompt is known to be there. When Jev cannot decide, the error comes with the partial
+// decision: the stages and complexity completed.
 func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router, req *args.Request) (routed, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Agrouter.Timeout)
 	defer cancel()
@@ -202,6 +246,19 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 			return routed{}, fmt.Errorf("--prompt-file: %w", err)
 		}
 		req.FileText = text
+	}
+	var (
+		execCLI config.CLI
+		pf      *preflight
+	)
+	if req.Mode == args.ModeExec {
+		execCLI, _ = cfg.CLIByName(req.CLI)
+		if err := args.CheckSeparator(execCLI, req); err != nil {
+			return routed{}, err
+		}
+		pf = a.startPreflight(ctx, execCLI)
+		// an early return stops the probes before leaving
+		defer func() { cancel(); pf.wait() }()
 	}
 	// docs are read even when one option will be left, so a bad --doc fails every call alike; the
 	// deadline passing mid-read is not a bad doc, so Jev cannot decide
@@ -229,9 +286,15 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 		captured.Undecidable = undecidable
 	}
 
-	el := router.Eligible(cfg, cat, req)
-	for _, s := range el.Skipped {
-		fmt.Fprintln(a.stderr, s.Warning)
+	el := router.Eligible(cat, req)
+	var pre *checked
+	if pf != nil {
+		if pre, err = a.applyPreflight(execCLI, cfg.Models, pf, el); err != nil {
+			return routed{}, err
+		}
+	}
+	for _, w := range el.Warnings {
+		fmt.Fprintln(a.stderr, w)
 	}
 	a.debug.eligibility(el)
 	// one option runs without Jev, so the files the prompt mentions are not read for it
@@ -249,23 +312,38 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 	for i, o := range el.Options {
 		options[i] = optionJSON{ID: o.ID, CLI: o.CLI, Model: o.Name, Effort: el.EffortFor(o)}
 	}
-	return routed{Decision: d, captured: captured, skipped: el.Skipped, options: options}, nil
+	dropped := a.dropUnpassableEffort(cfg, &d)
+	return routed{Decision: d, captured: captured, options: options, checked: pre, effortDropped: dropped}, nil
 }
 
-// printDecision writes concise or indented verbose JSON to stdout; skipped lists what eligibility
-// skipped, then what the argv left out.
+// dropUnpassableEffort clears d's effort when its CLI has no effort_args to pass it, with one warning,
+// so the selection never reports an effort the child does not receive. Only a caller's --effort can
+// get here: a CLI whose models have efforts must have effort_args.
+func (a *app) dropUnpassableEffort(cfg *config.Config, d *router.Decision) bool {
+	cli, ok := cfg.CLIByName(d.CLI)
+	if d.Effort == "" || !ok || len(cli.EffortArgs) > 0 {
+		return false
+	}
+	fmt.Fprintf(a.stderr, "agrouter: warning: dropped --effort %s: %s has no effort_args to pass it\n", d.Effort, cli.Name)
+	d.Effort, d.NoEffort = "", true
+	return true
+}
+
+// printDecision writes concise or indented verbose JSON to stdout.
 func (a *app) printDecision(d routed, res args.Result, verbose bool) int {
-	summary := selectionOutput(d, verbose)
+	summary := selectionOutput(d, verbose, nil)
 	var out any = summary
 	if verbose {
-		details := decisionJSON{selectionJSON: summary, Argv: res.Argv, Skipped: []string{}}
+		details := decisionJSON{selectionJSON: summary, Argv: res.Argv}
 		details.Command = commandText(res.Argv)
 		details.StdinRequired = d.captured.Stdin != nil && (len(d.captured.Stdin.Buffered) > 0 || d.captured.Stdin.Rest != nil)
-		for _, s := range slices.Concat(d.skipped, res.Skipped) {
-			details.Skipped = append(details.Skipped, s.Spelling)
-		}
 		out = details
 	}
+	return a.writeDecision(out, verbose)
+}
+
+// writeDecision encodes out to stdout, indented when verbose.
+func (a *app) writeDecision(out any, verbose bool) int {
 	enc := json.NewEncoder(a.stdout)
 	enc.SetEscapeHTML(false)
 	if verbose {
@@ -277,17 +355,25 @@ func (a *app) printDecision(d routed, res args.Result, verbose bool) int {
 	return exitOK
 }
 
-func selectionOutput(d routed, verbose bool) selectionJSON {
-	out := selection(d.Decision, verbose)
+// selectionOutput is the selection of d; failure is the routing error when no CLI was chosen.
+func selectionOutput(d routed, verbose bool, failure error) selectionJSON {
+	out := selection(d.Decision, verbose, failure)
+	if d.effortDropped && out.NullReasons != nil {
+		out.NullReasons.Effort = &nullReasonJSON{nullEffortDropped, "The CLI has no effort_args to pass the requested effort"}
+	}
 	if verbose {
 		out.Options = d.options
 	}
 	return out
 }
 
-// selection shares the selected values between decision output and exec logging.
-func selection(d router.Decision, verbose bool) selectionJSON {
-	out := selectionJSON{CLI: d.CLI, Confidence: recordedConfidence(d, verbose)}
+// selection shares the selected values between decision output and exec logging. The reason comes
+// from failure, or from d.Undecided when the CLI was known anyway.
+func selection(d router.Decision, verbose bool, failure error) selectionJSON {
+	out := selectionJSON{Confidence: recordedConfidence(d, verbose)}
+	if d.CLI != "" {
+		out.CLI = &d.CLI
+	}
 	if d.Complexity != nil {
 		out.ProjectComplexity = formatComplexity(d.Complexity.Complexity)
 	}
@@ -297,6 +383,11 @@ func selection(d router.Decision, verbose bool) selectionJSON {
 	if d.Effort != "" {
 		out.Effort = &d.Effort
 	}
+	if failure == nil {
+		failure = d.Undecided
+	}
+	out.Reason = failureReason(failure)
+	out.NullReasons = nullReasons(out, failure != nil, d.NoEffort)
 	return out
 }
 

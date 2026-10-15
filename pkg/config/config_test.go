@@ -20,24 +20,24 @@ routing_policy    = Prefer the cheapest option; compare ` + "`models`" + ` "well
 complexity_policy = Judge the whole codebase.
 
 [cli.alpha]
-command     = alpha
-description = Alpha agent.
+command               = alpha
+description           = Alpha agent.
+exec_args             = ["-p"]
+model_args            = ["--model", "{model}"]
+effort_args           = ["-c", "effort=\"{effort}\""]
+prompt_args           = ["--", "{prompt}"]
 
-[cli.alpha.args]
-print                  = ["-p"]
-prompt                 = ["--", "{prompt}"]
-model                  = ["--model", "{model}"]
-effort                 = ["-c", "effort=\"{effort}\""]
-output-format.text     = []
-permission-mode.plan   = ["--mode", "plan"]
+[cli.alpha.availability]
+checks = usage
+
+[cli.alpha.availability.usage]
+transport = json-helper
 
 [cli.beta]
-command = beta
-
-[cli.beta.args]
-print = ["run"]
-prompt = ["--", "{prompt}"]
-model = ["-m", "{model}"]
+command     = beta
+exec_args   = []
+model_args  = ["-m", "{model}"]
+prompt_args = ["{prompt}"]
 
 [model.alpha-big]
 cli         = alpha
@@ -108,17 +108,18 @@ func TestLoad_Embedded(t *testing.T) {
 	assert.Equal(t, "alpha", alpha.Name)
 	assert.Equal(t, "alpha", alpha.Command)
 	assert.Equal(t, "Alpha agent.", alpha.Description)
-	assert.Equal(t, map[string][]string{
-		"print":                {"-p"},
-		"prompt":               {"--", "{prompt}"},
-		"model":                {"--model", "{model}"},
-		"effort":               {"-c", `effort="{effort}"`},
-		"output-format.text":   {},
-		"permission-mode.plan": {"--mode", "plan"},
-	}, alpha.Args)
-	assert.NotNil(t, alpha.Args["output-format.text"], "[] must stay distinguishable from a missing key")
-	_, has := alpha.Args["verbose"]
-	assert.False(t, has)
+	assert.Equal(t, CLI{
+		Name: "alpha", Command: "alpha", Description: "Alpha agent.",
+		ExecArgs:   []string{"-p"},
+		ModelArgs:  []string{"--model", "{model}"},
+		EffortArgs: []string{"-c", `effort="{effort}"`},
+		PromptArgs: []string{"--", "{prompt}"},
+		Availability: &Availability{
+			Enabled: true, Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow,
+			Checks: []Check{{Name: "usage", Transport: TransportJSONHelper, ErrorPrefix: DefaultErrorPrefix}},
+		},
+	}, alpha)
+	assert.Nil(t, cfg.CLIs[1].Availability, "a CLI without the section has no availability config")
 
 	assert.Equal(t, []string{"alpha-big", "alpha-small", "beta-one"}, modelSections(cfg))
 	assert.Equal(t, Model{
@@ -135,6 +136,9 @@ func TestLoad_Embedded(t *testing.T) {
 	beta, ok := cfg.CLIByName("beta")
 	require.True(t, ok)
 	assert.Equal(t, "beta", beta.Command)
+	assert.NotNil(t, beta.ExecArgs, "[] must stay distinguishable from a missing key")
+	assert.Empty(t, beta.ExecArgs)
+	assert.Nil(t, beta.EffortArgs)
 	_, ok = cfg.CLIByName("gamma")
 	assert.False(t, ok)
 }
@@ -146,9 +150,8 @@ api_key = global-key
 timeout = 20s
 routing_policy = Prefer the strongest option.
 
-[cli.alpha.args]
-print = ["--print"]
-verbose = ["-v"]
+[cli.alpha]
+exec_args     = ["--print"]
 
 [model.alpha-big]
 description = Global description.
@@ -158,8 +161,8 @@ description = Global description.
 timeout = 30s
 complexity_policy = Judge only the architecture.
 
-[cli.alpha.args]
-model = ["--use-model", "{model}"]
+[cli.alpha]
+model_args = ["--use-model", "{model}"]
 
 [model.alpha-big]
 description = Local description.
@@ -179,10 +182,9 @@ name = local-new
 	assert.Equal(t, "Judge only the architecture.", cfg.Agrouter.ComplexityPolicy, "local overrides a policy")
 
 	alpha, _ := cfg.CLIByName("alpha")
-	assert.Equal(t, []string{"--print"}, alpha.Args["print"], "global overrides one args key")
-	assert.Equal(t, []string{"--use-model", "{model}"}, alpha.Args["model"], "local overrides one args key")
-	assert.Equal(t, []string{"-c", `effort="{effort}"`}, alpha.Args["effort"], "other args keys stay embedded")
-	assert.Equal(t, []string{"-v"}, alpha.Args["verbose"], "a layer can add an args key")
+	assert.Equal(t, []string{"--print"}, alpha.ExecArgs, "global overrides one descriptor key")
+	assert.Equal(t, []string{"--use-model", "{model}"}, alpha.ModelArgs, "local overrides one descriptor key")
+	assert.Equal(t, []string{"-c", `effort="{effort}"`}, alpha.EffortArgs, "other descriptor keys stay embedded")
 	assert.Equal(t, "alpha", alpha.Command)
 
 	assert.Equal(t, []string{"alpha-big", "alpha-small", "beta-one", "local-new"}, modelSections(cfg))
@@ -204,6 +206,11 @@ func TestLoad_Disabled(t *testing.T) {
 			wantCLIs: []string{"alpha", "beta"}, wantModels: []string{"alpha-big", "alpha-small", "beta-one"}},
 		{name: "cli takes its models and efforts", local: "[cli.alpha]\nenabled = false\n",
 			wantCLIs: []string{"beta"}, wantModels: []string{"beta-one"}},
+		{name: "disabled cli skips its subsections", local: "[cli.alpha]\nenabled = false\n[cli.alpha.availability]\nchecks = x\n",
+			wantCLIs: []string{"beta"}, wantModels: []string{"beta-one"}},
+		{name: "availability subsections of an enabled cli", local: "[cli.beta.availability]\nunknown = allow\n" +
+			"[cli.beta.availability.status]\ntransport = json-helper\n",
+			wantCLIs: []string{"alpha", "beta"}, wantModels: []string{"alpha-big", "alpha-small", "beta-one"}, wantEfforts: 1},
 		{name: "re-enabled explicitly", local: "[model.alpha-small]\nenabled = true\n",
 			wantCLIs: []string{"alpha", "beta"}, wantModels: []string{"alpha-big", "alpha-small", "beta-one"}, wantEfforts: 1},
 	}
@@ -239,14 +246,14 @@ func TestLoad_Errors(t *testing.T) {
 		local string
 		want  string
 	}{
-		{name: "malformed JSON template", local: "[cli.alpha.args]\nprint = [\"-p\", \n",
-			want: `[cli.alpha.args] print = "[\"-p\"," (local `},
-		{name: "template not an array", local: "[cli.alpha.args]\nprint = -p {prompt}\n",
+		{name: "malformed JSON template", local: "[cli.alpha]\nexec_args = [\"-p\", \n",
+			want: `[cli.alpha] exec_args = "[\"-p\"," (local `},
+		{name: "template not an array", local: "[cli.alpha]\nprompt_args = -p {prompt}\n",
 			want: "template must be a JSON array of strings"},
-		{name: "template null", local: "[cli.alpha.args]\nprint = null\n",
+		{name: "template null", local: "[cli.alpha]\nmodel_args = null\n",
 			want: "template must be a JSON array of strings"},
-		{name: "template of numbers", local: "[cli.alpha.args]\nprint = [1]\n",
-			want: "[cli.alpha.args] print"},
+		{name: "template of numbers", local: "[cli.alpha]\neffort_args = [1]\n",
+			want: "[cli.alpha] effort_args"},
 		{name: "bad duration", local: "[agrouter]\ntimeout = 10\n", want: `[agrouter] timeout = "10" (local `},
 		{name: "removed max_chunks", local: "[agrouter]\nmax_chunks = 64\n", want: "[agrouter] max_chunks (local "},
 		{name: "removed chunk_parallel", local: "[agrouter]\nchunk_parallel = 4\n", want: "[agrouter] chunk_parallel (local "},
@@ -258,7 +265,17 @@ func TestLoad_Errors(t *testing.T) {
 		{name: "unknown model key", local: "[model.alpha-big]\neffort = low\n", want: "[model.alpha-big] effort"},
 		{name: "unknown effort key", local: "[effort.alpha.low]\nname = x\n", want: "[effort.alpha.low] name"},
 		{name: "unknown section", local: "[typo.x]\ncli = alpha\n", want: "[typo.x]: unknown section"},
-		{name: "args without cli", local: "[cli.gamma.args]\nprint = []\n", want: "[cli.gamma.args]: no [cli.gamma] section"},
+		{name: "removed args section", local: "[cli.alpha.args]\nprint = []\n",
+			want: "[cli.alpha.args]: argument mappings were removed; set exec_args, model_args, effort_args and prompt_args in [cli.alpha]"},
+		{name: "removed args section without cli", local: "[cli.gamma.args]\nprint = []\n", want: "[cli.gamma.args]: argument mappings were removed"},
+		{name: "removed args section of a disabled cli", local: "[cli.alpha]\nenabled = false\n[cli.alpha.args]\nprint = []\n",
+			want: "[cli.alpha.args]: argument mappings were removed"},
+		{name: "availability without cli", local: "[cli.gamma.availability]\nchecks = x\n",
+			want: "[cli.gamma.availability]: no [cli.gamma] section"},
+		{name: "availability check without cli", local: "[cli.gamma.availability.usage]\ntransport = x\n",
+			want: "[cli.gamma.availability.usage]: no [cli.gamma] section"},
+		{name: "dotted cli name", local: "[cli.tool.v2]\ncommand = tool\n",
+			want: `[cli.tool.v2]: unknown section (CLI names cannot contain ".")`},
 		{name: "effort section name", local: "[effort.alpha]\ndescription = x\n", want: "[effort.<cli>.<level>]"},
 		{name: "key outside section", local: "api_key = x\n", want: `key "api_key" outside any section`},
 	}
@@ -299,6 +316,16 @@ func TestLoad_RemovedQuestionKeys(t *testing.T) {
 				assert.NotContains(t, err.Error(), "sk-secret", "the old value is left out")
 			})
 		}
+	}
+}
+
+func TestLoad_RemovedNativeMetadata(t *testing.T) {
+	for _, key := range []string{"selection_flags", "config_flags", "selection_config_keys", "context_flags", "context_config_keys"} {
+		t.Run(key, func(t *testing.T) {
+			_, err := load(t, "", "[cli.alpha]\n"+key+" = obsolete\n")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "[cli.alpha] "+key)
+		})
 	}
 }
 
@@ -427,6 +454,105 @@ func TestResolveAPIKey(t *testing.T) {
 			key, source := ResolveAPIKey(tc.flag, tc.flagSet, tc.env, cfg.Agrouter)
 			assert.Equal(t, tc.wantKey, key)
 			assert.Equal(t, tc.wantSource, source)
+		})
+	}
+}
+
+func TestLoad_Availability(t *testing.T) {
+	tests := []struct {
+		name   string
+		global string
+		local  string
+		cli    string
+		want   *Availability
+	}{
+		{name: "defaults", cli: "alpha", want: &Availability{
+			Enabled: true, Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow,
+			Checks: []Check{{Name: "usage", Transport: TransportJSONHelper, ErrorPrefix: DefaultErrorPrefix}},
+		}},
+		{name: "every key, whitespace in quoted values preserved", cli: "alpha",
+			local: "[cli.alpha.availability]\nenabled = true\ntimeout = 2s\nunknown = block\n" +
+				"[cli.alpha.availability.usage]\ntransport = sdk-control-usage-v1\ncommand = alpha-status\n" +
+				"args = [\"--json\", \"\"]\nmin_version = 2.1.0\n" +
+				"error_prefix = \"ERROR: agrouter: \"\nerror_message = \"  Limit reached\"\n",
+			want: &Availability{
+				Enabled: true, Timeout: 2 * time.Second, Unknown: UnknownBlock,
+				Checks: []Check{{Name: "usage", Transport: TransportSDKControlUsage, Command: "alpha-status",
+					Args: []string{"--json", ""}, MinVersion: "2.1.0",
+					ErrorPrefix: "ERROR: agrouter: ", ErrorMessage: "  Limit reached"}},
+			}},
+		{name: "a layer replaces the checks list, unlisted sections are ignored", cli: "alpha",
+			global: "[cli.alpha.availability.limits]\ntransport = jsonrpc-ratelimits-v1\n",
+			local:  "[cli.alpha.availability]\nchecks = limits, usage\n",
+			want: &Availability{
+				Enabled: true, Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow,
+				Checks: []Check{{Name: "limits", Transport: TransportJSONRPCRateLimit, ErrorPrefix: DefaultErrorPrefix}, {Name: "usage", Transport: TransportJSONHelper, ErrorPrefix: DefaultErrorPrefix}},
+			}},
+		{name: "disabled keeps its checks", cli: "alpha", local: "[cli.alpha.availability]\nenabled = false\n",
+			want: &Availability{
+				Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow,
+				Checks: []Check{{Name: "usage", Transport: TransportJSONHelper, ErrorPrefix: DefaultErrorPrefix}},
+			}},
+		{name: "section without checks", cli: "beta", local: "[cli.beta.availability]\n",
+			want: &Availability{Enabled: true, Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow}},
+		{name: "a third CLI entirely in the local layer", cli: "gamma",
+			local: "[cli.gamma]\ncommand = gamma\nexec_args = []\nmodel_args = [\"-m\", \"{model}\"]\nprompt_args = [\"{prompt}\"]\n" +
+				"[cli.gamma.availability]\nchecks = status\n[cli.gamma.availability.status]\ntransport = json-helper\n" +
+				"command = gamma-status\nargs = [\"--json\"]\n",
+			want: &Availability{
+				Enabled: true, Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow,
+				Checks: []Check{{Name: "status", Transport: TransportJSONHelper, Command: "gamma-status", Args: []string{"--json"}, ErrorPrefix: DefaultErrorPrefix}},
+			}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := load(t, tc.global, tc.local)
+			require.NoError(t, err)
+			cli, ok := cfg.CLIByName(tc.cli)
+			require.True(t, ok)
+			assert.Equal(t, tc.want, cli.Availability)
+		})
+	}
+}
+
+func TestLoad_AvailabilityErrors(t *testing.T) {
+	tests := []struct {
+		name  string
+		local string
+		want  string
+	}{
+		{name: "unknown availability key", local: "[cli.alpha.availability]\nwait = 1m\n", want: "[cli.alpha.availability] wait"},
+		{name: "unknown check key", local: "[cli.alpha.availability.usage]\nfield_path = a.b\n",
+			want: "[cli.alpha.availability.usage] field_path"},
+		{name: "bad timeout", local: "[cli.alpha.availability]\ntimeout = 5\n", want: `[cli.alpha.availability] timeout = "5"`},
+		{name: "zero timeout", local: "[cli.alpha.availability]\ntimeout = 0s\n", want: "[cli.alpha.availability] timeout: must be positive"},
+		{name: "bad enabled", local: "[cli.alpha.availability]\nenabled = sometimes\n", want: "[cli.alpha.availability] enabled"},
+		{name: "bad unknown policy", local: "[cli.alpha.availability]\nunknown = warn\n",
+			want: "[cli.alpha.availability] unknown: must be allow or block"},
+		{name: "control character in prefix", local: "[cli.alpha.availability.usage]\nerror_prefix = \"a\tb\"\n",
+			want: "[cli.alpha.availability.usage] error_prefix: must not contain a newline or control character"},
+		{name: "escape in message", local: "[cli.alpha.availability.usage]\nerror_message = \"x\x1b[31m\"\n",
+			want: "[cli.alpha.availability.usage] error_message: must not contain"},
+		{name: "moved quota prefix", local: "[cli.alpha.availability]\nquota_error_prefix = \"x: \"\n",
+			want: "): moved to [cli.alpha.availability.<check>] as error_prefix"},
+		{name: "moved quota message", local: "[cli.alpha.availability]\nquota_error_message = Limit\n",
+			want: "): moved to [cli.alpha.availability.<check>] as error_message"},
+		{name: "listed check without section", local: "[cli.alpha.availability]\nchecks = usage, limits\n",
+			want: "[cli.alpha.availability] checks: no [cli.alpha.availability.limits] section"},
+		{name: "missing transport", local: "[cli.alpha.availability.usage]\ntransport =\n",
+			want: "[cli.alpha.availability.usage] transport: required"},
+		{name: "unknown transport", local: "[cli.alpha.availability.usage]\ntransport = auth-status\n",
+			want: `[cli.alpha.availability.usage] transport: unknown transport "auth-status"`},
+		{name: "bad args", local: "[cli.alpha.availability.usage]\nargs = --json\n",
+			want: "[cli.alpha.availability.usage] args"},
+		{name: "bad min_version", local: "[cli.alpha.availability.usage]\nmin_version = v2.1\n",
+			want: `[cli.alpha.availability.usage] min_version: "v2.1" is not a dotted numeric version`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := load(t, "", tc.local)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
 		})
 	}
 }

@@ -30,7 +30,7 @@ func TestEvalRouting(t *testing.T) {
 
 	results := make([]evalResult, 0, len(cases))
 	for _, c := range cases {
-		results = append(results, runEvalCase(context.Background(), r, cfg, cat, c, t.TempDir()))
+		results = append(results, runEvalCase(context.Background(), r, cat, c, t.TempDir()))
 	}
 	for _, line := range resultLines(results) {
 		t.Log(line)
