@@ -287,3 +287,31 @@ func TestEvaluationSameModel(t *testing.T) {
 		assert.Equal(t, tc.want, ev.SameModel(tc.a, tc.b), "%s vs %s", tc.a, tc.b)
 	}
 }
+
+func TestEvaluateBlockingCheck(t *testing.T) {
+	opts, models := evalFixture(t)
+	from := func(check string, e Evidence) Evidence {
+		e.Check = check
+		return e
+	}
+	tests := []struct {
+		name     string
+		evidence []Evidence
+		want     string
+	}{
+		{name: "the first blocking window's check",
+			evidence: []Evidence{from("usage", free(WindowFiveHour)), from("limits", exhausted(WindowWeekly, time.Hour)),
+				from("usage", exhausted(WindowWeekly, 2*time.Hour))},
+			want: "limits"},
+		{name: "a known non-quota block names its check",
+			evidence: []Evidence{{Dimension: DimensionAuth, Status: StatusUnavailable, Reason: ReasonAuthFailed, Check: "usage"}},
+			want:     "usage"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ev := Evaluate(Report{CLI: "tool-a", Evidence: tc.evidence}, opts, models, config.UnknownAllow, evalNow)
+			require.NotNil(t, ev.Blocked)
+			assert.Equal(t, tc.want, ev.Blocked.Check)
+		})
+	}
+}

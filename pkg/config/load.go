@@ -301,7 +301,7 @@ func (m *merged) decodeAvailability(cliName string) (*Availability, error) {
 	if !ok {
 		return nil, nil //nolint:nilnil // no section is no availability config, not an error
 	}
-	a := &Availability{Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow, QuotaErrorPrefix: DefaultQuotaErrorPrefix}
+	a := &Availability{Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow}
 	var checks []string
 	for _, k := range s.keys {
 		v := s.values[k].value
@@ -314,10 +314,8 @@ func (m *merged) decodeAvailability(cliName string) (*Availability, error) {
 			a.Timeout, err = time.ParseDuration(v)
 		case "unknown":
 			a.Unknown = v
-		case "quota_error_prefix":
-			a.QuotaErrorPrefix = v
-		case "quota_error_message":
-			a.QuotaErrorMessage = v
+		case "quota_error_prefix", "quota_error_message":
+			return nil, s.removedKey(k, fmt.Sprintf("moved to [%s.<check>] as %s", prefix, strings.TrimPrefix(k, "quota_")))
 		default:
 			return nil, s.unknownKey(k)
 		}
@@ -344,7 +342,7 @@ func (m *merged) decodeAvailability(cliName string) (*Availability, error) {
 }
 
 func (s *section) decodeCheck(name string) (Check, error) {
-	c := Check{Name: name}
+	c := Check{Name: name, ErrorPrefix: DefaultErrorPrefix}
 	for _, k := range s.keys {
 		v := s.values[k].value
 		var err error
@@ -357,6 +355,10 @@ func (s *section) decodeCheck(name string) (Check, error) {
 			c.Args, err = parseTemplate(v)
 		case "min_version":
 			c.MinVersion = v
+		case "error_prefix":
+			c.ErrorPrefix = v
+		case "error_message":
+			c.ErrorMessage = v
 		default:
 			return Check{}, s.unknownKey(k)
 		}

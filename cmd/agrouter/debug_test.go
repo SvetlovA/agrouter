@@ -279,7 +279,7 @@ func TestDebug_Readiness(t *testing.T) {
 		"readiness alpha: executable available",
 		"readiness alpha: auth available",
 		"readiness alpha: quota available, window five_hour, check usage",
-		"readiness alpha: quota unavailable (quota_exhausted), window weekly, models strong, resets 2026-10-13T13:00:00Z",
+		"readiness alpha: quota unavailable (quota_exhausted), window weekly, models strong, resets 2026-10-13T13:00:00Z, check usage",
 		"readiness alpha: quota unknown (probe_throttled)",
 		"readiness alpha: defaults model fast-1, effort unknown",
 		"readiness alpha: 0 of 1 option(s) excluded",

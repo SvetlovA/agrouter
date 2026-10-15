@@ -48,9 +48,10 @@ func withQuota(cli config.CLI, evidence ...readiness.Evidence) readiness.Report 
 	return r
 }
 
+// exhausted is a quota block found by the usage check.
 func exhausted(window string, reset time.Duration, models ...string) readiness.Evidence {
 	e := readiness.Evidence{Dimension: readiness.DimensionQuota, Status: readiness.StatusUnavailable,
-		Reason: readiness.ReasonQuotaExhausted, Window: window, Scope: readiness.Scope{Models: models}}
+		Reason: readiness.ReasonQuotaExhausted, Check: "usage", Window: window, Scope: readiness.Scope{Models: models}}
 	if reset != 0 {
 		e.ResetAt = testNow.Add(reset)
 	}
@@ -68,6 +69,12 @@ func unknownQuota(reason string) readiness.Evidence {
 // availability is an [cli.alpha.availability] section with the given extra lines.
 func availability(lines ...string) string {
 	return "\n[cli.alpha.availability]\n" + strings.Join(lines, "\n") + "\n"
+}
+
+// usageCheck is the usage check listed with its json-helper section and the given extra lines.
+func usageCheck(lines ...string) string {
+	return availability("checks = usage") + "\n[cli.alpha.availability.usage]\ntransport = json-helper\n" +
+		strings.Join(lines, "\n") + "\n"
 }
 
 // noChild is a runner that fails the test if a child starts.
@@ -89,10 +96,10 @@ func TestApp_ExecPreflightBlocks(t *testing.T) {
 		code     int
 		line     string
 	}{
-		{name: "quota, default prefix, latest reset", config: availability("quota_error_message = Limit reached"),
+		{name: "quota, default prefix, latest reset", config: usageCheck("error_message = Limit reached"),
 			evidence: both, code: runner.ExitStartFailure,
 			line: "agrouter: Limit reached; five-hour and weekly subscription quota exhausted; resets at 2026-10-16T12:00:00Z"},
-		{name: "quota, severity prefix", config: availability(`quota_error_prefix = "ERROR: agrouter: "`, "quota_error_message = Limit reached"),
+		{name: "quota, severity prefix", config: usageCheck(`error_prefix = "ERROR: agrouter: "`, "error_message = Limit reached"),
 			evidence: []readiness.Evidence{free(readiness.WindowFiveHour), exhausted(readiness.WindowWeekly, 2*time.Hour)},
 			code:     runner.ExitStartFailure,
 			line:     "ERROR: agrouter: Limit reached; weekly subscription quota exhausted; resets at 2026-10-13T14:00:00Z"},
@@ -306,7 +313,7 @@ func TestApp_DecisionNeverChecksReadiness(t *testing.T) {
 
 func TestApp_ExecBlockedAcrossInvocations(t *testing.T) {
 	e := newEnv(t)
-	e.globalConfig(syntheticCLIs(t) + availability("quota_error_message = Limit reached"))
+	e.globalConfig(syntheticCLIs(t) + usageCheck("error_message = Limit reached"))
 	blocked := true
 	checker := reportChecker(func(cli config.CLI) readiness.Report {
 		if blocked {
@@ -335,8 +342,8 @@ func TestApp_ExecBlockedAcrossInvocations(t *testing.T) {
 }
 
 func TestApp_DecisionIndependentOfAvailability(t *testing.T) {
-	blocking := availability("checks = usage", "unknown = block", "quota_error_message = Limit reached") +
-		"\n[cli.alpha.availability.usage]\ntransport = json-helper\nargs = [\"" + helperProbeArg + "\"]\n"
+	blocking := availability("unknown = block") +
+		usageCheck("error_message = Limit reached", "args = [\""+helperProbeArg+"\"]")
 	t.Setenv(helperProbe, `{"schema":"agrouter.readiness/v1","auth":{"status":"unavailable","reason":"auth_failed"}}`)
 
 	run := func(t *testing.T, extra string, argv ...string) (result, []string) {
@@ -379,8 +386,7 @@ func TestApp_ExecPreflightWithJSONHelper(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t)
-			e.globalConfig(syntheticCLIs(t) + availability("checks = usage", "quota_error_message = Limit reached") +
-				"\n[cli.alpha.availability.usage]\ntransport = json-helper\nargs = [\"" + helperProbeArg + "\"]\n")
+			e.globalConfig(syntheticCLIs(t) + usageCheck("error_message = Limit reached", "args = [\""+helperProbeArg+"\"]"))
 			e.checker = readiness.Checker{Dir: e.workDir}
 			t.Setenv(helperProbe, tc.output)
 			r := e.run([]string{"exec", "alpha", "--model=fast-1", "--effort=low", "fix it"}, nil)
@@ -399,23 +405,33 @@ func TestApp_ExecPreflightWithJSONHelper(t *testing.T) {
 
 func TestQuotaLine(t *testing.T) {
 	reset := testNow.In(time.FixedZone("x", 3*3600))
+	withChecks := func(checks ...config.Check) config.CLI {
+		return config.CLI{Name: "alpha", Availability: &config.Availability{Checks: checks}}
+	}
 	tests := []struct {
 		name string
-		a    *config.Availability
+		cli  config.CLI
 		v    readiness.Verdict
 		want string
 	}{
-		{name: "no availability section", v: readiness.Verdict{Windows: []string{readiness.WindowWeekly}},
+		{name: "no availability section", cli: config.CLI{Name: "alpha"}, v: readiness.Verdict{Windows: []string{readiness.WindowWeekly}},
 			want: "agrouter: weekly subscription quota exhausted"},
-		{name: "account denial without a window", a: &config.Availability{QuotaErrorPrefix: "", QuotaErrorMessage: "Limit"},
-			v: readiness.Verdict{}, want: "Limit; subscription quota exhausted"},
-		{name: "whitespace preserved, reset in UTC", a: &config.Availability{QuotaErrorPrefix: "WARN  ", QuotaErrorMessage: " x "},
-			v:    readiness.Verdict{Windows: []string{readiness.WindowFiveHour}, ResetAt: reset},
+		{name: "account denial without a window", cli: withChecks(config.Check{Name: "usage", ErrorMessage: "Limit"}),
+			v: readiness.Verdict{Check: "usage"}, want: "Limit; subscription quota exhausted"},
+		{name: "whitespace preserved, reset in UTC", cli: withChecks(config.Check{Name: "usage", ErrorPrefix: "WARN  ", ErrorMessage: " x "}),
+			v:    readiness.Verdict{Check: "usage", Windows: []string{readiness.WindowFiveHour}, ResetAt: reset},
 			want: "WARN   x ; five-hour subscription quota exhausted; resets at 2026-10-13T12:00:00Z"},
+		{name: "the blocking check's wording, not another's",
+			cli: withChecks(config.Check{Name: "usage", ErrorPrefix: "A: ", ErrorMessage: "usage hit"},
+				config.Check{Name: "limits", ErrorPrefix: "B: ", ErrorMessage: "limits hit"}),
+			v: readiness.Verdict{Check: "limits", Windows: []string{readiness.WindowWeekly}}, want: "B: limits hit; weekly subscription quota exhausted"},
+		{name: "a check no longer configured falls back to the default prefix",
+			cli: withChecks(config.Check{Name: "usage", ErrorPrefix: "A: ", ErrorMessage: "usage hit"}),
+			v:   readiness.Verdict{Check: "gone", Windows: []string{readiness.WindowWeekly}}, want: "agrouter: weekly subscription quota exhausted"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, quotaLine(tc.a, tc.v))
+			assert.Equal(t, tc.want, quotaLine(tc.cli, tc.v))
 		})
 	}
 }

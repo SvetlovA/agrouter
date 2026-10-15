@@ -63,8 +63,8 @@ const (
 // DefaultAvailabilityTimeout bounds one CLI's availability checks when timeout is unset.
 const DefaultAvailabilityTimeout = 5 * time.Second
 
-// DefaultQuotaErrorPrefix starts the quota block line when quota_error_prefix is unset.
-const DefaultQuotaErrorPrefix = "agrouter: "
+// DefaultErrorPrefix starts a check's quota block line when its error_prefix is unset.
+const DefaultErrorPrefix = "agrouter: "
 
 // Availability is a [cli.<name>.availability] section with its checks: how exec verifies, before any
 // Jev request, that the CLI can run.
@@ -73,10 +73,6 @@ type Availability struct {
 	Checks  []Check       // in the order the checks key lists them
 	Timeout time.Duration // bounds all of the CLI's checks together
 	Unknown string        // UnknownAllow or UnknownBlock
-	// QuotaErrorPrefix and QuotaErrorMessage start the one line printed when quota blocks exec, so a
-	// caller can match it as the child's own limit message. Configured whitespace is preserved.
-	QuotaErrorPrefix  string
-	QuotaErrorMessage string
 }
 
 // Check is a [cli.<name>.availability.<check>] section: one prompt-free probe.
@@ -86,6 +82,10 @@ type Check struct {
 	Command    string // the probe executable; empty runs the CLI's own command
 	Args       []string
 	MinVersion string // the oldest CLI version whose response shape the transport knows; empty for any
+	// ErrorPrefix and ErrorMessage start the one line printed when this check's quota evidence blocks
+	// exec, so a caller can match it as the child's own limit message. Configured whitespace is preserved.
+	ErrorPrefix  string
+	ErrorMessage string
 }
 
 // Model is a [model.<section>] section.

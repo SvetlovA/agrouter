@@ -115,8 +115,8 @@ func TestLoad_Embedded(t *testing.T) {
 		EffortArgs: []string{"-c", `effort="{effort}"`},
 		PromptArgs: []string{"--", "{prompt}"},
 		Availability: &Availability{
-			Enabled: true, Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow, QuotaErrorPrefix: DefaultQuotaErrorPrefix,
-			Checks: []Check{{Name: "usage", Transport: TransportJSONHelper}},
+			Enabled: true, Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow,
+			Checks: []Check{{Name: "usage", Transport: TransportJSONHelper, ErrorPrefix: DefaultErrorPrefix}},
 		},
 	}, alpha)
 	assert.Nil(t, cfg.CLIs[1].Availability, "a CLI without the section has no availability config")
@@ -467,41 +467,41 @@ func TestLoad_Availability(t *testing.T) {
 		want   *Availability
 	}{
 		{name: "defaults", cli: "alpha", want: &Availability{
-			Enabled: true, Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow, QuotaErrorPrefix: DefaultQuotaErrorPrefix,
-			Checks: []Check{{Name: "usage", Transport: TransportJSONHelper}},
+			Enabled: true, Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow,
+			Checks: []Check{{Name: "usage", Transport: TransportJSONHelper, ErrorPrefix: DefaultErrorPrefix}},
 		}},
 		{name: "every key, whitespace in quoted values preserved", cli: "alpha",
 			local: "[cli.alpha.availability]\nenabled = true\ntimeout = 2s\nunknown = block\n" +
-				"quota_error_prefix = \"ERROR: agrouter: \"\nquota_error_message = \"  Limit reached\"\n" +
 				"[cli.alpha.availability.usage]\ntransport = sdk-control-usage-v1\ncommand = alpha-status\n" +
-				"args = [\"--json\", \"\"]\nmin_version = 2.1.0\n",
+				"args = [\"--json\", \"\"]\nmin_version = 2.1.0\n" +
+				"error_prefix = \"ERROR: agrouter: \"\nerror_message = \"  Limit reached\"\n",
 			want: &Availability{
 				Enabled: true, Timeout: 2 * time.Second, Unknown: UnknownBlock,
-				QuotaErrorPrefix: "ERROR: agrouter: ", QuotaErrorMessage: "  Limit reached",
 				Checks: []Check{{Name: "usage", Transport: TransportSDKControlUsage, Command: "alpha-status",
-					Args: []string{"--json", ""}, MinVersion: "2.1.0"}},
+					Args: []string{"--json", ""}, MinVersion: "2.1.0",
+					ErrorPrefix: "ERROR: agrouter: ", ErrorMessage: "  Limit reached"}},
 			}},
 		{name: "a layer replaces the checks list, unlisted sections are ignored", cli: "alpha",
 			global: "[cli.alpha.availability.limits]\ntransport = jsonrpc-ratelimits-v1\n",
 			local:  "[cli.alpha.availability]\nchecks = limits, usage\n",
 			want: &Availability{
-				Enabled: true, Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow, QuotaErrorPrefix: DefaultQuotaErrorPrefix,
-				Checks: []Check{{Name: "limits", Transport: TransportJSONRPCRateLimit}, {Name: "usage", Transport: TransportJSONHelper}},
+				Enabled: true, Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow,
+				Checks: []Check{{Name: "limits", Transport: TransportJSONRPCRateLimit, ErrorPrefix: DefaultErrorPrefix}, {Name: "usage", Transport: TransportJSONHelper, ErrorPrefix: DefaultErrorPrefix}},
 			}},
 		{name: "disabled keeps its checks", cli: "alpha", local: "[cli.alpha.availability]\nenabled = false\n",
 			want: &Availability{
-				Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow, QuotaErrorPrefix: DefaultQuotaErrorPrefix,
-				Checks: []Check{{Name: "usage", Transport: TransportJSONHelper}},
+				Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow,
+				Checks: []Check{{Name: "usage", Transport: TransportJSONHelper, ErrorPrefix: DefaultErrorPrefix}},
 			}},
 		{name: "section without checks", cli: "beta", local: "[cli.beta.availability]\n",
-			want: &Availability{Enabled: true, Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow, QuotaErrorPrefix: DefaultQuotaErrorPrefix}},
+			want: &Availability{Enabled: true, Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow}},
 		{name: "a third CLI entirely in the local layer", cli: "gamma",
 			local: "[cli.gamma]\ncommand = gamma\nexec_args = []\nmodel_args = [\"-m\", \"{model}\"]\nprompt_args = [\"{prompt}\"]\n" +
 				"[cli.gamma.availability]\nchecks = status\n[cli.gamma.availability.status]\ntransport = json-helper\n" +
 				"command = gamma-status\nargs = [\"--json\"]\n",
 			want: &Availability{
-				Enabled: true, Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow, QuotaErrorPrefix: DefaultQuotaErrorPrefix,
-				Checks: []Check{{Name: "status", Transport: TransportJSONHelper, Command: "gamma-status", Args: []string{"--json"}}},
+				Enabled: true, Timeout: DefaultAvailabilityTimeout, Unknown: UnknownAllow,
+				Checks: []Check{{Name: "status", Transport: TransportJSONHelper, Command: "gamma-status", Args: []string{"--json"}, ErrorPrefix: DefaultErrorPrefix}},
 			}},
 	}
 	for _, tc := range tests {
@@ -529,10 +529,14 @@ func TestLoad_AvailabilityErrors(t *testing.T) {
 		{name: "bad enabled", local: "[cli.alpha.availability]\nenabled = sometimes\n", want: "[cli.alpha.availability] enabled"},
 		{name: "bad unknown policy", local: "[cli.alpha.availability]\nunknown = warn\n",
 			want: "[cli.alpha.availability] unknown: must be allow or block"},
-		{name: "control character in prefix", local: "[cli.alpha.availability]\nquota_error_prefix = \"a\tb\"\n",
-			want: "[cli.alpha.availability] quota_error_prefix: must not contain a newline or control character"},
-		{name: "escape in message", local: "[cli.alpha.availability]\nquota_error_message = \"x\x1b[31m\"\n",
-			want: "[cli.alpha.availability] quota_error_message: must not contain"},
+		{name: "control character in prefix", local: "[cli.alpha.availability.usage]\nerror_prefix = \"a\tb\"\n",
+			want: "[cli.alpha.availability.usage] error_prefix: must not contain a newline or control character"},
+		{name: "escape in message", local: "[cli.alpha.availability.usage]\nerror_message = \"x\x1b[31m\"\n",
+			want: "[cli.alpha.availability.usage] error_message: must not contain"},
+		{name: "moved quota prefix", local: "[cli.alpha.availability]\nquota_error_prefix = \"x: \"\n",
+			want: "): moved to [cli.alpha.availability.<check>] as error_prefix"},
+		{name: "moved quota message", local: "[cli.alpha.availability]\nquota_error_message = Limit\n",
+			want: "): moved to [cli.alpha.availability.<check>] as error_message"},
 		{name: "listed check without section", local: "[cli.alpha.availability]\nchecks = usage, limits\n",
 			want: "[cli.alpha.availability] checks: no [cli.alpha.availability.limits] section"},
 		{name: "missing transport", local: "[cli.alpha.availability.usage]\ntransport =\n",

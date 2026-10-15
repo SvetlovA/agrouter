@@ -98,7 +98,7 @@ func preflightBlock(cli config.CLI, v readiness.Verdict) *preflightError {
 	case v.Status != readiness.StatusUnavailable:
 		return &preflightError{line: fmt.Sprintf("agrouter: %s availability unverified: %s", cli.Name, v.Reason), code: exitUsage}
 	case v.Dimension == readiness.DimensionQuota:
-		return &preflightError{line: quotaLine(cli.Availability, v), code: runner.ExitStartFailure}
+		return &preflightError{line: quotaLine(cli, v), code: runner.ExitStartFailure}
 	}
 	return &preflightError{line: fmt.Sprintf("agrouter: %s unavailable: %s", cli.Name, v.Reason), code: runner.ExitStartFailure}
 }
@@ -107,12 +107,18 @@ func preflightBlock(cli config.CLI, v readiness.Verdict) *preflightError {
 var windowNames = map[string]string{readiness.WindowFiveHour: "five-hour", readiness.WindowWeekly: "weekly"}
 
 // quotaLine is "<prefix><message>; <windows> subscription quota exhausted[; resets at <RFC 3339>]",
-// the message part left out when unset. The reset is the latest of the blocking windows' resets and
-// is left out when any is unverified.
-func quotaLine(a *config.Availability, v readiness.Verdict) string {
-	prefix, message := config.DefaultQuotaErrorPrefix, ""
-	if a != nil {
-		prefix, message = a.QuotaErrorPrefix, a.QuotaErrorMessage
+// with the prefix and message of the check that found the block, the message part left out when
+// unset. The reset is the latest of the blocking windows' resets and is left out when any is
+// unverified.
+func quotaLine(cli config.CLI, v readiness.Verdict) string {
+	prefix, message := config.DefaultErrorPrefix, ""
+	if cli.Availability != nil {
+		for _, c := range cli.Availability.Checks {
+			if c.Name == v.Check {
+				prefix, message = c.ErrorPrefix, c.ErrorMessage
+				break
+			}
+		}
 	}
 	windows := make([]string, len(v.Windows))
 	for i, w := range v.Windows {

@@ -217,10 +217,10 @@ Exec then routes only over the CLI's options that are left. It never switches to
 |---|---|---|
 | some options are unverified (a probe timed out, was throttled, or did not report a window) and `unknown = allow` | `agrouter: warning: <cli> availability unknown: <reason>`, then routing and the child as usual | the child's |
 | nothing is left: missing executable or failed authentication | `agrouter: <cli> unavailable: <reason>` | `127` |
-| nothing is left: subscription quota exhausted | `<quota_error_prefix><quota_error_message>; <windows> subscription quota exhausted[; resets at <RFC 3339>]` | `127` |
+| nothing is left: subscription quota exhausted | `<error_prefix><error_message>; <windows> subscription quota exhausted[; resets at <RFC 3339>]` | `127` |
 | nothing is left under `unknown = block` | `agrouter: <cli> availability unverified: <reason>` | `2` |
 
-A preflight block prints no selection line, nothing on stdout, and makes no Jev request. (A block on a delegated model's default comes after routing; see [Exec fallback](#exec-fallback).) The reset is the latest reset of the exhausted windows, since a weekly window outlasts a five-hour one, and is left out when any of them is unverified. `quota_error_prefix` (default `agrouter: `) and `quota_error_message` come from config, so the line can match a caller's own limit pattern, for example a severity prefix such as `ERROR: agrouter: `. An unknown availability is never reported as a quota block. Readiness uses agrouter's configured context. Native arguments after `--` never alter or disable probes; native settings, profile and provider overrides apply only to the child.
+A preflight block prints no selection line, nothing on stdout, and makes no Jev request. (A block on a delegated model's default comes after routing; see [Exec fallback](#exec-fallback).) The reset is the latest reset of the exhausted windows, since a weekly window outlasts a five-hour one, and is left out when any of them is unverified. `error_prefix` (default `agrouter: `) and `error_message` come from the check that found the block, the first one in `checks` order, so the line can match a caller's own limit pattern, for example a severity prefix such as `ERROR: agrouter: `. An unknown availability is never reported as a quota block. Readiness uses agrouter's configured context. Native arguments after `--` never alter or disable probes; native settings, profile and provider overrides apply only to the child.
 
 The `<reason>` in these lines, and the reasons in the selection line's `readiness`, are fixed codes:
 
@@ -341,8 +341,8 @@ The former `[cli.<name>.args]` mapping sections are config errors that name the 
 Each CLI's exec readiness checks live under its own `[cli.<name>]` section, so a new CLI needs only config. A CLI without an availability section, or with `enabled = false`, gets the executable check only. Its quota is then unknown: each exec prints one `availability unknown` warning (`availability_not_configured` or `availability_disabled`), or exits `2` under `unknown = block`.
 
 ```text
-[cli.<name>.availability]            policy: which checks, timeout, unknown policy, quota line
-  └── [cli.<name>.availability.<check>]   one probe: transport, command, args, min_version
+[cli.<name>.availability]            policy: which checks, timeout, unknown policy
+  └── [cli.<name>.availability.<check>]   one probe: transport, command, args, min_version, quota line
 ```
 
 **Note:** the policy section lists its checks by name; each named check has its own subsection. Subsections not listed in `checks` are ignored, so a local layer can replace the list.
@@ -353,8 +353,6 @@ Each CLI's exec readiness checks live under its own `[cli.<name>]` section, so a
 | `checks` | comma-separated check names, run in order |
 | `timeout` | bound for all of the CLI's checks together (default `5s`); `[agrouter] timeout` bounds them too |
 | `unknown` | `allow` (default) runs with one warning when a check cannot verify; `block` exits `2` instead |
-| `quota_error_prefix` | start of the quota line (default `agrouter: `) |
-| `quota_error_message` | text after the prefix, for example a caller's limit pattern |
 
 | `[cli.<name>.availability.<check>]` key | Meaning |
 |---|---|
@@ -362,6 +360,8 @@ Each CLI's exec readiness checks live under its own `[cli.<name>]` section, so a
 | `command` | the probe executable; the CLI's own `command` when unset |
 | `args` | the probe's arguments, a JSON array |
 | `min_version` | for the two built-in transports: a CLI older than this, or one that reports no version, is unknown (`version_unsupported`) |
+| `error_prefix` | start of the quota line when this check finds the quota exhausted (default `agrouter: `); quote it to keep trailing spaces |
+| `error_message` | text after the prefix, for example a caller's limit pattern; used only for the quota line |
 
 Every probe runs in the real working directory, with the user's real settings and login, its own stdin, a 1 MiB response limit, and without the Jev key in its environment. A probe never sends a prompt or a user message, so it starts no inference. When it exits, times out or overflows, or a signal ends agrouter, agrouter kills its whole process tree (a process group on Unix, a Job Object on Windows).
 
@@ -502,13 +502,13 @@ When a subscription quota is exhausted, exec prints one quota line and exits `12
 
 ```ini
 # ~/.config/agrouter/config
-[cli.claude.availability]
-quota_error_prefix  = "agrouter: "
-quota_error_message = You've hit your limit
+[cli.claude.availability.usage]
+error_prefix  = "agrouter: "
+error_message = You've hit your limit
 
-[cli.codex.availability]
-quota_error_prefix  = "ERROR: agrouter: "
-quota_error_message = Rate limit exceeded
+[cli.codex.availability.limits]
+error_prefix  = "ERROR: agrouter: "
+error_message = Rate limit exceeded
 ```
 
 ```text

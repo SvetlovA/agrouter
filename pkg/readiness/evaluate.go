@@ -25,6 +25,9 @@ type Verdict struct {
 	// Dimension and Reason say what decided an unavailable or unknown verdict.
 	Dimension Dimension
 	Reason    string
+	// Check is the check whose evidence decided an unavailable verdict: for a quota block, the first
+	// blocking window's; empty for the executable lookup.
+	Check string
 	// Windows are the exhausted or denied quota windows of an unavailable quota verdict, in evidence
 	// order; an account-wide denial without a window adds nothing.
 	Windows []string
@@ -173,7 +176,7 @@ func (ev *Evaluation) judge(names []string, delegated bool) Verdict {
 			}
 			switch e.Status {
 			case StatusUnavailable:
-				return Verdict{Status: StatusUnavailable, Dimension: d, Reason: e.Reason}
+				return Verdict{Status: StatusUnavailable, Dimension: d, Reason: e.Reason, Check: e.Check}
 			case StatusAvailable, StatusNotApplicable, StatusUnknown:
 				// an unverified executable, auth or capability does not stop the child; it reports its own error
 			default:
@@ -257,7 +260,7 @@ func (t *quotaTally) add(e Evidence, now time.Time) {
 			return
 		}
 		if t.block.Reason == "" {
-			t.block.Reason = e.Reason
+			t.block.Reason, t.block.Check = e.Reason, e.Check
 		}
 		if e.Window != "" && !slices.Contains(t.block.Windows, e.Window) {
 			t.block.Windows = append(t.block.Windows, e.Window)
