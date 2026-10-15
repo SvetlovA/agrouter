@@ -335,6 +335,15 @@ All other native arguments, including configuration overrides, retain their cont
 
 When `prompt_args` puts the prompt after `--` and the native tokens already hold a `--`, a command-line prompt is exit `2`: the child would read the prompt's `--` as prompt text. Pass the prompt on stdin, or drop the extra `--`.
 
+Never put prompt text after agrouter's `--`. Agrouter does not read native tokens as a prompt, so Jev never sees that text, but the child may run it. A repeated native `-p` is harmless. Text after it, however, is a positional prompt for a CLI whose `-p` takes no value:
+
+```sh
+agrouter exec claude -p "fix the bug" -- -p "rename the module"
+# child: claude -p -p "rename the module" --model … --effort … -- "fix the bug"
+```
+
+**Note:** Claude takes its first positional argument as the prompt and ignores the second. It runs "rename the module" with the model and effort Jev chose for "fix the bug". With stdin instead of `-p`, the native text becomes the prompt and stdin is appended to it. Give the prompt to agrouter (`-p`, positional, `--prompt-file` or stdin), and keep only options after `--`.
+
 The former `[cli.<name>.args]` mapping sections are config errors that name the replacement keys. `[cli.<name>.availability]` sections configure the exec readiness checks.
 
 ### Availability checks
