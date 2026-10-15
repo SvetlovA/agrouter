@@ -28,6 +28,7 @@ const (
 	nullUnresolved    = "unresolved"           // routing failed with more than one CLI: nothing chosen
 	nullDelegated     = "delegated"            // routing succeeded and left the value to the child
 	nullNoEffort      = "no_applicable_effort" // the chosen model has no effort levels
+	nullEffortDropped = "effort_not_passable"  // the caller's --effort was dropped: the CLI has no effort_args
 )
 
 // reasonJSON is why routing failed: a normalized code, the failing stage when known, and a fixed

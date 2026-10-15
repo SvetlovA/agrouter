@@ -329,3 +329,60 @@ func keys(m map[string]any) []string {
 	}
 	return out
 }
+
+func TestApp_EffortWithoutEffortArgs(t *testing.T) {
+	// gamma has no effort_args and models without efforts, so a caller's --effort cannot be passed
+	gamma := strings.NewReplacer("COMMAND", helperCommand(t)).Replace(`
+[cli.gamma]
+command     = COMMAND
+description = A coding agent without effort levels.
+exec_args   = ["-p"]
+model_args  = ["--model", "{model}"]
+prompt_args = ["--", "{prompt}"]
+
+[model.plain]
+cli         = gamma
+name        = plain-1
+description = The only gamma model.
+`)
+	const warning = "agrouter: warning: dropped --effort high: gamma has no effort_args to pass it\n"
+	tests := []struct {
+		name        string
+		argv        []string
+		wantWarning bool
+		wantCode    string
+	}{
+		{name: "decision, effort dropped", argv: []string{"--cli", "gamma", "--effort", "high", "fix it"},
+			wantWarning: true, wantCode: nullEffortDropped},
+		{name: "decision, no effort asked", argv: []string{"--cli", "gamma", "fix it"}, wantCode: nullNoEffort},
+		{name: "exec, effort dropped", argv: []string{"exec", "gamma", "--effort", "high", "fix it"},
+			wantWarning: true, wantCode: nullEffortDropped},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.globalConfig(syntheticCLIs(t) + gamma)
+			r := e.run(tc.argv, nil)
+			require.Equal(t, 0, r.code, r.stderr)
+			assert.Empty(t, e.jev.requests(), "one option: no Jev request")
+
+			stderr := r.stderr
+			if tc.wantWarning {
+				var ok bool
+				stderr, ok = strings.CutPrefix(stderr, warning)
+				require.True(t, ok, "one warning first: %s", r.stderr)
+			}
+			assert.NotContains(t, stderr, "warning")
+
+			out := r.stdout
+			if tc.argv[0] == "exec" {
+				out = strings.TrimPrefix(stderr, selectionPrefix)
+				argv, _, _ := e.child()
+				assert.NotContains(t, argv, "high", "the child never gets the effort")
+			}
+			d := decision(t, out)
+			assert.Nil(t, d["effort"], "the selection never reports an effort the child does not get")
+			assert.Equal(t, tc.wantCode, d["null_reasons"].(map[string]any)["effort"].(map[string]any)["code"])
+		})
+	}
+}

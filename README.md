@@ -200,6 +200,7 @@ Decision JSON and the exec selection line explain a failed routing and every `nu
 | `unresolved` | routing failed with more than one CLI left; nothing was chosen |
 | `delegated` | routing succeeded and left the value to the child, for example the effort of a passed-through `--model` |
 | `no_applicable_effort` | the chosen model has no effort levels |
+| `effort_not_passable` | the caller's `--effort` was dropped: the chosen CLI has no `effort_args` (one warning on stderr) |
 
 Messages never carry the prompt, `--doc` text, the key or Jev's response body. A value the caller fixed (`--cli`, `--model`, `--effort`) stays set after a failure. For example, `--cli=alpha` with the model stage timing out prints:
 
@@ -316,7 +317,7 @@ argv = command + exec_args + native options + model_args + effort_args + native 
 |---|---|
 | `exec_args` | the noninteractive invocation, for example `["-p"]` or `["exec"]`; required, may be `[]` |
 | `model_args` | how to pass the model, with `{model}`; required |
-| `effort_args` | how to pass the effort, with `{effort}`; required when a model of the CLI has efforts |
+| `effort_args` | how to pass the effort, with `{effort}`; required when a model of the CLI has efforts. Without it, a caller's `--effort` is dropped with one warning |
 | `prompt_args` | how to pass the prompt; `{prompt}` must be its last element and a whole token; required |
 
 Template keys are JSON arrays of strings. Only `{model}`, `{effort}` and `{prompt}` are placeholders, each only in its own key. An unset model or effort leaves its args out, so the CLI's own default applies.

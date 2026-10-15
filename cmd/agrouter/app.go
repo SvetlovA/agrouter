@@ -226,6 +226,9 @@ type routed struct {
 	captured *prompt.Result
 	options  []optionJSON
 	checked  *checked // exec's preflight; nil in decision mode
+	// effortDropped is true when the caller's --effort was dropped: the chosen CLI has no effort_args
+	// to pass it.
+	effortDropped bool
 }
 
 // route reads --prompt-file and every --doc, captures the prompt and decides, all within the routing
@@ -309,7 +312,21 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 	for i, o := range el.Options {
 		options[i] = optionJSON{ID: o.ID, CLI: o.CLI, Model: o.Name, Effort: el.EffortFor(o)}
 	}
-	return routed{Decision: d, captured: captured, options: options, checked: pre}, nil
+	dropped := a.dropUnpassableEffort(cfg, &d)
+	return routed{Decision: d, captured: captured, options: options, checked: pre, effortDropped: dropped}, nil
+}
+
+// dropUnpassableEffort clears d's effort when its CLI has no effort_args to pass it, with one warning,
+// so the selection never reports an effort the child does not receive. Only a caller's --effort can
+// get here: a CLI whose models have efforts must have effort_args.
+func (a *app) dropUnpassableEffort(cfg *config.Config, d *router.Decision) bool {
+	cli, ok := cfg.CLIByName(d.CLI)
+	if d.Effort == "" || !ok || len(cli.EffortArgs) > 0 {
+		return false
+	}
+	fmt.Fprintf(a.stderr, "agrouter: warning: dropped --effort %s: %s has no effort_args to pass it\n", d.Effort, cli.Name)
+	d.Effort, d.NoEffort = "", true
+	return true
 }
 
 // printDecision writes concise or indented verbose JSON to stdout.
@@ -341,6 +358,9 @@ func (a *app) writeDecision(out any, verbose bool) int {
 // selectionOutput is the selection of d; failure is the routing error when no CLI was chosen.
 func selectionOutput(d routed, verbose bool, failure error) selectionJSON {
 	out := selection(d.Decision, verbose, failure)
+	if d.effortDropped && out.NullReasons != nil {
+		out.NullReasons.Effort = &nullReasonJSON{nullEffortDropped, "The CLI has no effort_args to pass the requested effort"}
+	}
 	if verbose {
 		out.Options = d.options
 	}
