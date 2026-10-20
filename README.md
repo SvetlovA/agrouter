@@ -221,7 +221,7 @@ Exec then routes only over the CLI's options that are left. It never switches to
 | nothing is left: subscription quota exhausted | `<error_prefix><error_message>; <windows> subscription quota exhausted[; resets at <RFC 3339>]` | `127` |
 | nothing is left under `unknown = block` | `agrouter: <cli> availability unverified: <reason>` | `2` |
 
-A preflight block prints no selection line, nothing on stdout, and makes no Jev request. (A block on a delegated model's default comes after routing; see [Exec fallback](#exec-fallback).) The reset is the latest reset of the exhausted windows, since a weekly window outlasts a five-hour one, and is left out when any of them is unverified. `error_prefix` (default `agrouter: `) and `error_message` come from the check that found the block, the first one in `checks` order, so the line can match a caller's own limit pattern, for example a severity prefix such as `ERROR: agrouter: `. An unknown availability is never reported as a quota block. Readiness uses agrouter's configured context. Native arguments after `--` never alter or disable probes; native settings, profile and provider overrides apply only to the child.
+A preflight block prints no selection line, nothing on stdout, and makes no Jev request. (A block on a delegated model's default comes after routing; see [Exec fallback](#exec-fallback).) The reset is the latest reset of the exhausted windows, since a weekly window outlasts a five-hour one, and is left out when any of them is unverified. `error_prefix` (default `ERROR: agrouter: `) and `error_message` come from the check that found the block, the first one in `checks` order, so the line can match a caller's own limit pattern. An unknown availability is never reported as a quota block. Readiness uses agrouter's configured context. Native arguments after `--` never alter or disable probes; native settings, profile and provider overrides apply only to the child.
 
 The `<reason>` in these lines, and the reasons in the selection line's `readiness`, are fixed codes:
 
@@ -370,7 +370,7 @@ Each CLI's exec readiness checks live under its own `[cli.<name>]` section, so a
 | `command` | the probe executable; the CLI's own `command` when unset |
 | `args` | the probe's arguments, a JSON array |
 | `min_version` | for the two built-in transports: a CLI older than this, or one that reports no version, is unknown (`version_unsupported`) |
-| `error_prefix` | start of the quota line when this check finds the quota exhausted (default `agrouter: `); quote it to keep trailing spaces |
+| `error_prefix` | start of the quota line when this check finds the quota exhausted (default `ERROR: agrouter: `); quote it to keep trailing spaces |
 | `error_message` | text after the prefix, for example a caller's limit pattern; used only for the quota line |
 
 Every probe runs in the real working directory, with the user's real settings and login, its own stdin, a 1 MiB response limit, and without the Jev key in its environment. A probe never sends a prompt or a user message, so it starts no inference. When it exits, times out or overflows, or a signal ends agrouter, agrouter kills its whole process tree (a process group on Unix, a Job Object on Windows).
@@ -508,23 +508,25 @@ codex_reasoning_effort =
 wait_on_limit          = 15m
 ```
 
-When a subscription quota is exhausted, exec prints one quota line and exits `127`, and Ralphex's own limit patterns decide whether to wait and retry. Each retry probes again, without asking Jev, until the quota is back; a weekly block outlasts a five-hour reset. Ralphex's Claude executor matches limit patterns on any line, while its Codex executor matches them only on `ERROR:`, `FATAL:` or `PANIC:` lines, so the Codex line needs a severity prefix:
+When a subscription quota is exhausted, exec prints one quota line and exits `127`, and Ralphex's own limit patterns decide whether to wait and retry. Each retry probes again, without asking Jev, until the quota is back; a weekly block outlasts a five-hour reset. Ralphex's Claude executor matches limit patterns anywhere in a failed run's output, while its Codex executor matches them only on `ERROR:`, `FATAL:` or `PANIC:` lines. The default `ERROR: agrouter: ` prefix satisfies both, and the default `error_message` values match Ralphex's default limit patterns:
 
 ```ini
-# ~/.config/agrouter/config
+# ~/.config/agrouter/config (the defaults)
 [cli.claude.availability.usage]
-error_prefix  = "agrouter: "
+error_prefix  = "ERROR: agrouter: "
 error_message = You've hit your limit
 
 [cli.codex.availability.limits]
 error_prefix  = "ERROR: agrouter: "
-error_message = Rate limit exceeded
+error_message = You've hit your usage limit
 ```
 
 ```text
-agrouter: You've hit your limit; weekly subscription quota exhausted; resets at 2026-10-13T15:00:00Z
-ERROR: agrouter: Rate limit exceeded; weekly subscription quota exhausted; resets at 2026-10-13T15:00:00Z
+ERROR: agrouter: You've hit your limit; weekly subscription quota exhausted; resets at 2026-10-13T15:00:00Z
+ERROR: agrouter: You've hit your usage limit; weekly subscription quota exhausted; resets at 2026-10-13T15:00:00Z
 ```
+
+A local `.agrouter/config` that sets `error_prefix = "agrouter: "` overrides this default, and then Ralphex's Codex executor no longer recognizes the line and stops instead of waiting.
 
 **Note:** only the exec CLI's own line is printed. An authentication failure or an unknown availability never uses this wording, so Ralphex does not mistake it for a limit.
 

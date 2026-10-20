@@ -98,7 +98,8 @@ unknown = allow
 #   min_version    the oldest CLI version the built-in transports know; older or unreported is unknown
 #                  (version_unsupported). ignored by json-helper. default: empty (any version)
 #   error_prefix   start of the one line printed when this check finds every option's subscription
-#                  quota exhausted; quote it to keep trailing spaces. default: "agrouter: "
+#                  quota exhausted; quote it to keep trailing spaces. default: "ERROR: agrouter: ",
+#                  whose severity prefix Ralphex's Codex executor needs to match the line as a limit
 #   error_message  text after the prefix, before "; <windows> subscription quota exhausted", so a caller
 #                  can match it as the child's own limit message. used only for that quota line; other
 #                  blocks keep agrouter's own wording. default: empty (the line starts with the windows)
@@ -113,7 +114,7 @@ transport     = sdk-control-usage-v1
 # command       =
 args          = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config", "--settings", "{\"disableAllHooks\":true}"]
 min_version   = 2.1.296
-error_prefix  = "agrouter: "
+error_prefix  = "ERROR: agrouter: "
 error_message = You've hit your limit
 
 [cli.codex]
@@ -142,7 +143,7 @@ transport     = jsonrpc-ratelimits-v1
 # command       =
 args          = ["app-server"]
 min_version   = 0.162.1
-error_prefix  = "agrouter: "
+error_prefix  = "ERROR: agrouter: "
 error_message = You've hit your usage limit
 
 # [model.<section>]: one catalog model. the section name forms the option id, so it cannot hold "@".

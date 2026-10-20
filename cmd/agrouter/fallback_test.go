@@ -154,7 +154,7 @@ func TestApp_ExecFallbackDefaultsAndReadiness(t *testing.T) {
 
 		assert.Equal(t, runner.ExitStartFailure, r.code)
 		assert.Empty(t, r.stdout)
-		assert.Equal(t, "agrouter: weekly subscription quota exhausted; resets at 2026-10-13T13:00:00Z\n", r.stderr,
+		assert.Equal(t, "ERROR: agrouter: weekly subscription quota exhausted; resets at 2026-10-13T13:00:00Z\n", r.stderr,
 			"the quota line alone: no warning and no selection line")
 	})
 
