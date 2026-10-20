@@ -63,9 +63,8 @@ const (
 // DefaultAvailabilityTimeout bounds one CLI's availability checks when timeout is unset.
 const DefaultAvailabilityTimeout = 5 * time.Second
 
-// DefaultErrorPrefix starts a check's quota block line when its error_prefix is unset. The severity
-// prefix lets a caller that trusts only error-marked stderr lines match the line as a limit.
-const DefaultErrorPrefix = "ERROR: agrouter: "
+// DefaultErrorPrefix starts a check's quota block line when its error_prefix is unset.
+const DefaultErrorPrefix = "agrouter: "
 
 // Availability is a [cli.<name>.availability] section with its checks: how exec verifies, before any
 // Jev request, that the CLI can run.
