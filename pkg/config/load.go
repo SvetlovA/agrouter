@@ -28,6 +28,12 @@ type Sources struct {
 	LocalPath  string
 }
 
+// LocalDir is the .agrouter directory under workDir: the local config and the default log directory
+// live in it.
+func LocalDir(workDir string) string {
+	return filepath.Join(workDir, ".agrouter")
+}
+
 // DefaultPaths returns the global config path (AGROUTER_CONFIG_DIR or ~/.config/agrouter) and the local
 // .agrouter/config path under workDir.
 func DefaultPaths(workDir string) (global, local string, err error) {
@@ -39,7 +45,7 @@ func DefaultPaths(workDir string) (global, local string, err error) {
 		}
 		dir = filepath.Join(home, ".config", "agrouter")
 	}
-	return filepath.Join(dir, "config"), filepath.Join(workDir, ".agrouter", "config"), nil
+	return filepath.Join(dir, "config"), filepath.Join(LocalDir(workDir), "config"), nil
 }
 
 // ResolveAPIKey applies the key precedence and returns the key with the layer that decided it:

@@ -498,6 +498,14 @@ func TestLoad_InlineCommentKeptInValue(t *testing.T) {
 	assert.Equal(t, "jev-1 ; pinned", cfg.Agrouter.JevModel, "IgnoreInlineComment: comments must be on their own lines")
 }
 
+func TestLocalDir(t *testing.T) {
+	work := filepath.Join("some", "work")
+	assert.Equal(t, filepath.Join(work, ".agrouter"), LocalDir(work))
+	_, local, err := DefaultPaths(work)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Dir(local), LocalDir(work), "the local config lives in the local directory")
+}
+
 func TestDefaultPaths(t *testing.T) {
 	work := filepath.Join("some", "work")
 

@@ -159,13 +159,18 @@ func (c *consoleLog) stop(err error) {
 	}
 }
 
+// defaultLogSubdir is the default log_dir inside the local .agrouter directory. It is the only log
+// directory agrouter keeps out of git; the embedded config's log_dir names it.
+const defaultLogSubdir = "logs"
+
 // logIgnoreRules keep the default log directory out of git, ralphex-style: the file ignores itself
 // and the logs, while the sibling config stays trackable.
-var logIgnoreRules = []string{".gitignore", "logs/"}
+var logIgnoreRules = []string{".gitignore", defaultLogSubdir + "/"}
 
 // ensureLogIgnored makes dir/.gitignore end with logIgnoreRules, creating the directory and the
 // file when missing and never truncating. The rules are appended unless they already are the file's
-// last lines, so a later negation (!logs/) cannot undo them.
+// last lines, so a later negation (!logs/) cannot undo them. Invocations racing on a fresh directory
+// may each append the pair; git reads the repeats as the same rules, so no lock is taken.
 func ensureLogIgnored(dir string) error {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create %s: %w", dir, err)

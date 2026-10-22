@@ -321,11 +321,13 @@ type Budget struct {
 - Modify: `cmd/agrouter/app.go`
 - Modify: `cmd/agrouter/app_test.go`
 
-- [ ] build a fresh tee at the top of `run()`, before `newDebugLog` (`app.go:125`), and `defer` its close; keep the raw stderr for the child (`app.go:405`)
-- [ ] after config loads, resolve `log_dir` against the work directory; run the ignore setup only for the default directory; start file mirroring (skip with the warning if ignore setup fails)
-- [ ] write tests: selection, warnings, routing-skipped/run-skipped and debug lines mirrored; child stderr/stdout and decision JSON never mirrored (prompt and argv markers absent); config-error invocations write nothing; repeated `app.run` calls do not stack mirrors or warnings
-- [ ] write tests: a custom `log_dir` (relative, and absolute via `t.TempDir()`) gets the log and no ignore file is written; concurrent invocations keep lines intact; a read-only work directory warns once and the exit code is unchanged
-- [ ] run tests - must pass before next task
+- [x] build a fresh tee at the top of `run()`, before `newDebugLog` (`app.go:125`), and `defer` its close; keep the raw stderr for the child (`app.go:405`)
+- [x] after config loads, resolve `log_dir` against the work directory; run the ignore setup only for the default directory; start file mirroring (skip with the warning if ignore setup fails)
+- [x] write tests: selection, warnings, routing-skipped/run-skipped and debug lines mirrored; child stderr/stdout and decision JSON never mirrored (prompt and argv markers absent); config-error invocations write nothing; repeated `app.run` calls do not stack mirrors or warnings
+- [x] write tests: a custom `log_dir` (relative, and absolute via `t.TempDir()`) gets the log and no ignore file is written; concurrent invocations keep lines intact; a read-only work directory warns once and the exit code is unchanged
+- [x] run tests - must pass before next task
+- ➕ `config.LocalDir(workDir)` added so the default log directory is `LocalDir/logs` without repeating `.agrouter`; mirroring starts once `setup` fully succeeds (config, catalog and `router.New`), so a `request_tokens` over the provider limit also writes nothing
+- ⚠️ first runs racing on a fresh `.agrouter` may each append the ignore rules; git reads the repeats as the same rules, so no lock was added (documented on `ensureLogIgnored`, asserted in the concurrency test)
 
 ### Task 10: Verify acceptance criteria
 

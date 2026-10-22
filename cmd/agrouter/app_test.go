@@ -13,6 +13,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -27,6 +29,7 @@ import (
 	"github.com/SvetlovA/agrouter/pkg/config"
 	"github.com/SvetlovA/agrouter/pkg/config/defaults"
 	"github.com/SvetlovA/agrouter/pkg/jev"
+	"github.com/SvetlovA/agrouter/pkg/readiness"
 	"github.com/SvetlovA/agrouter/pkg/router"
 	"github.com/SvetlovA/agrouter/pkg/runner"
 )
@@ -344,10 +347,16 @@ func (e *env) run(argv []string, stdin io.Reader) result {
 
 func (e *env) runWithRunner(argv []string, stdin io.Reader, child CommandRunner) result {
 	var stdout, stderr bytes.Buffer
-	a := &app{
+	code := e.app(stdin, &stdout, &stderr, child).run(argv)
+	return result{code: code, stdout: stdout.String(), stderr: stderr.String()}
+}
+
+// app is an invocation wired to the environment, for tests that run one app more than once.
+func (e *env) app(stdin io.Reader, stdout, stderr io.Writer, child CommandRunner) *app {
+	return &app{
 		stdin:    stdin,
-		stdout:   &stdout,
-		stderr:   &stderr,
+		stdout:   stdout,
+		stderr:   stderr,
 		getenv:   os.Getenv,
 		workDir:  e.workDir,
 		embedded: defaults.Config,
@@ -361,8 +370,6 @@ func (e *env) runWithRunner(argv []string, stdin io.Reader, child CommandRunner)
 		checker: e.checker,
 		now:     func() time.Time { return testNow },
 	}
-	code := a.run(argv)
-	return result{code: code, stdout: stdout.String(), stderr: stderr.String()}
 }
 
 // child reads what the helper recorded.
@@ -1400,7 +1407,7 @@ func TestApp_InstallsConfig(t *testing.T) {
 			trimmed := strings.TrimSpace(line)
 			assert.True(t, trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";"), line)
 		}
-		assert.NoDirExists(t, filepath.Join(e.workDir, ".agrouter"))
+		assert.NoFileExists(t, filepath.Join(e.workDir, ".agrouter", "config"), "only the global config is installed")
 	})
 	for _, flag := range []string{"--help", "--version"} {
 		t.Run(flag, func(t *testing.T) {
@@ -1442,4 +1449,269 @@ func TestStdinReader(t *testing.T) {
 	require.NoError(t, err)
 	defer f.Close()
 	assert.Equal(t, f, stdinReader(f))
+}
+
+// mirrorPath is the console log in the default log directory of the environment's work directory.
+func (e *env) mirrorPath() string {
+	return filepath.Join(e.workDir, ".agrouter", "logs", logFileName)
+}
+
+var logStamp = regexp.MustCompile(`^\S+ pid=\d+ `)
+
+// mirrored reads the console log at path and returns its lines without their stamps, which must be there.
+func mirrored(t *testing.T, path string) string {
+	t.Helper()
+	var out strings.Builder
+	for line := range strings.Lines(readFile(t, path)) {
+		loc := logStamp.FindStringIndex(line)
+		require.NotNil(t, loc, "unstamped log line %q", line)
+		out.WriteString(line[loc[1]:])
+	}
+	return out.String()
+}
+
+// skippedCLIWarning is the warning for an unknown --cli, a line every invocation can produce.
+func skippedCLIWarning(name string) string {
+	return "agrouter: warning: skipped --cli " + name + ": not an enabled CLI; routing across every CLI\n"
+}
+
+func TestApp_MirrorLog(t *testing.T) {
+	skipWarning := skippedCLIWarning("nope")
+	nopeArgv := []string{"--cli=nope", "fix it"}
+
+	t.Run("agrouter's lines are copied, the child's and stdout are not", func(t *testing.T) {
+		const (
+			promptMarker = "PROMPT-MARKER"
+			argvMarker   = "ARGV-MARKER"
+			keyMarker    = "KEY-MARKER"
+		)
+		e := newEnv(t)
+		e.globalConfig(madeUpConfig(t, "acme", "test-child", "large", "future-model", "thorough"))
+		t.Setenv(envDebug, "1")
+		t.Setenv(legacyCLIEnv, "alpha")
+		child := &mocks.CommandRunnerMock{RunFunc: func(_ context.Context, c runner.Command) (int, error) {
+			_, _ = fmt.Fprintln(c.Stdout, "CHILD-STDOUT")
+			_, _ = fmt.Fprintln(c.Stderr, "CHILD-STDERR")
+			return 3, nil
+		}}
+		r := e.runWithRunner([]string{"exec", "acme", "--model=preferred", "--effort=thorough",
+			"--jev-api-key=" + keyMarker, promptMarker, "--", argvMarker}, nil, child)
+		require.Equal(t, 3, r.code, r.stderr)
+		assert.Equal(t, "CHILD-STDOUT\n", r.stdout)
+
+		log := mirrored(t, e.mirrorPath())
+		assert.Equal(t, strings.Replace(r.stderr, "CHILD-STDERR\n", "", 1), log,
+			"every line agrouter wrote, in order: warning, debug, selection")
+		for _, want := range []string{"agrouter: warning: " + legacyCLIEnv, "agrouter debug: ", selectionPrefix} {
+			assert.Contains(t, log, want)
+		}
+		raw := readFile(t, e.mirrorPath())
+		for _, secret := range []string{promptMarker, argvMarker, keyMarker, "CHILD-STDOUT", "CHILD-STDERR"} {
+			assert.NotContains(t, raw, secret)
+		}
+		assert.True(t, strings.HasPrefix(raw, testNow.UTC().Format(time.RFC3339)+" pid="+strconv.Itoa(os.Getpid())+" "), raw)
+	})
+
+	t.Run("decision JSON stays on stdout", func(t *testing.T) {
+		e := newSyntheticEnv(t)
+		e.jev.pick = "fast@low"
+		r := e.run([]string{"--verbose", "--cli=nope", "PROMPT-MARKER"}, nil)
+		require.Equal(t, 0, r.code, r.stderr)
+		require.Contains(t, r.stdout, "PROMPT-MARKER", "the verbose decision carries the argv")
+
+		assert.Equal(t, skipWarning, mirrored(t, e.mirrorPath()))
+		raw := readFile(t, e.mirrorPath())
+		assert.NotContains(t, raw, "PROMPT-MARKER")
+		assert.NotContains(t, raw, `"argv"`)
+	})
+
+	t.Run("readiness blocks are copied", func(t *testing.T) {
+		tests := []struct {
+			name string
+			env  func(t *testing.T) *env
+			want string
+		}{
+			{"before routing", func(t *testing.T) *env {
+				e := newSyntheticEnv(t)
+				e.globalConfig(syntheticCLIs(t) + usageCheck("error_message = Limit reached"))
+				e.checker = reportChecker(func(cli config.CLI) readiness.Report {
+					return withQuota(cli, free(readiness.WindowFiveHour), exhausted(readiness.WindowWeekly, 24*time.Hour))
+				})
+				return e
+			}, routingSkipped("subscription quota exhausted")},
+			{"after routing", func(t *testing.T) *env {
+				e := failingEnv(t, "effort", func(*fakeJev) {})
+				e.checker = defaultsChecker("deep-1", "", exhausted(readiness.WindowWeekly, time.Hour, "strong"))
+				return e
+			}, runSkipped("subscription quota exhausted")},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				e := tc.env(t)
+				r := e.runWithRunner([]string{"exec", "alpha", "fix it"}, nil, noChild(t))
+				require.Equal(t, runner.ExitStartFailure, r.code, r.stderr)
+				assert.Empty(t, r.stdout)
+
+				assert.Equal(t, r.stderr, mirrored(t, e.mirrorPath()))
+				assert.Contains(t, r.stderr, tc.want)
+			})
+		}
+	})
+
+	t.Run("invocations that fail before the config is ready write nothing", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			config string
+			argv   []string
+		}{
+			{"usage error", "", []string{"--no-such-flag"}},
+			{"invalid config", "\n[agrouter]\nrequest_tokens = 0\n", []string{"fix it"}},
+			{"request_tokens over the provider limit", "\n[agrouter]\nrequest_tokens = 40000\n", []string{"fix it"}},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				e := newEnv(t)
+				e.globalConfig(syntheticCLIs(t) + tc.config)
+				r := e.run(tc.argv, nil)
+				assert.Equal(t, exitUsage, r.code)
+				assert.NotEmpty(t, r.stderr)
+				assert.NoDirExists(t, filepath.Join(e.workDir, ".agrouter"))
+			})
+		}
+	})
+
+	t.Run("one app run repeatedly does not stack mirrors or warnings", func(t *testing.T) {
+		e := newSyntheticEnv(t)
+		e.jev.pick = "fast@low"
+		var stdout, stderr bytes.Buffer
+		a := e.app(nil, &stdout, &stderr, runner.Runner{})
+		for range 3 {
+			require.Equal(t, exitOK, a.run(nopeArgv), stderr.String())
+		}
+
+		assert.Equal(t, strings.Repeat(skipWarning, 3), stderr.String())
+		assert.Equal(t, strings.Repeat(skipWarning, 3), mirrored(t, e.mirrorPath()), "each run copies its own line once")
+		assert.Same(t, &stderr, a.stderr, "the console is restored")
+		assert.Nil(t, a.childStderr)
+		assert.Equal(t, ".gitignore\nlogs/\n", readFile(t, filepath.Join(e.workDir, ".agrouter", ".gitignore")),
+			"the ignore rules are written once")
+		assert.NoFileExists(t, filepath.Join(e.workDir, ".agrouter", "config"))
+	})
+
+	t.Run("log_dir", func(t *testing.T) {
+		abs := filepath.Join(t.TempDir(), "elsewhere")
+		tests := []struct {
+			name    string
+			logDir  string
+			dir     func(e *env) string
+			ignored bool
+		}{
+			{"relative", "custom/logs", func(e *env) string { return filepath.Join(e.workDir, "custom", "logs") }, false},
+			{"absolute", abs, func(*env) string { return abs }, false},
+			{"another directory under .agrouter", ".agrouter/other", func(e *env) string {
+				return filepath.Join(e.workDir, ".agrouter", "other")
+			}, false},
+			{"the default directory spelled out", "./.agrouter/logs", func(e *env) string {
+				return filepath.Join(e.workDir, ".agrouter", "logs")
+			}, true},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				e := newEnv(t)
+				e.globalConfig(syntheticCLIs(t) + "\n[agrouter]\nlog_dir = " + tc.logDir + "\n")
+				e.jev.pick = "fast@low"
+				r := e.run(nopeArgv, nil)
+				require.Equal(t, exitOK, r.code, r.stderr)
+
+				dir := tc.dir(e)
+				assert.Equal(t, skipWarning, mirrored(t, filepath.Join(dir, logFileName)))
+				ignore := filepath.Join(e.workDir, ".agrouter", ".gitignore")
+				if tc.ignored {
+					assert.FileExists(t, ignore)
+				} else {
+					assert.NoFileExists(t, ignore, "a custom log_dir is the user's to manage")
+					assert.NoFileExists(t, filepath.Join(dir, ".gitignore"))
+				}
+			})
+		}
+	})
+
+	t.Run("concurrent invocations keep their lines intact", func(t *testing.T) {
+		e := newSyntheticEnv(t)
+		e.jev.pick = "fast@low"
+		const invocations = 12
+		var wg sync.WaitGroup
+		for i := range invocations {
+			wg.Go(func() {
+				r := e.run([]string{"--cli=nope" + strconv.Itoa(i), "fix it"}, nil)
+				assert.Equal(t, exitOK, r.code, r.stderr)
+			})
+		}
+		wg.Wait()
+
+		want := make([]string, 0, invocations)
+		for i := range invocations {
+			want = append(want, strings.TrimSuffix(skippedCLIWarning("nope"+strconv.Itoa(i)), "\n"))
+		}
+		got := strings.Split(strings.TrimSuffix(mirrored(t, e.mirrorPath()), "\n"), "\n")
+		assert.ElementsMatch(t, want, got)
+		// first runs racing on a fresh directory may each append the rules; only the rules are there
+		ignore := readFile(t, filepath.Join(e.workDir, ".agrouter", ".gitignore"))
+		assert.True(t, endsWithLines([]byte(ignore), logIgnoreRules), ignore)
+		for line := range strings.Lines(ignore) {
+			assert.Contains(t, logIgnoreRules, strings.TrimSuffix(line, "\n"), ignore)
+		}
+	})
+}
+
+func TestApp_MirrorLogFailure(t *testing.T) {
+	const argvFix = "fix it"
+	// control is the console output of the same invocation with a working log
+	control := func(t *testing.T) result {
+		e := newSyntheticEnv(t)
+		e.jev.pick = "fast@low"
+		return e.run([]string{argvFix}, nil)
+	}
+	tests := []struct {
+		name     string
+		breakLog func(t *testing.T, e *env)
+	}{
+		{"log_dir below a file", func(t *testing.T, e *env) {
+			require.NoError(t, os.WriteFile(filepath.Join(e.workDir, "blocked"), []byte("file"), 0o600))
+			e.globalConfig(syntheticCLIs(t) + "\n[agrouter]\nlog_dir = blocked/logs\n")
+		}},
+		{"ignore file is a directory", func(t *testing.T, e *env) {
+			require.NoError(t, os.MkdirAll(filepath.Join(e.workDir, ".agrouter", ".gitignore"), 0o750))
+		}},
+		{"read-only work directory", func(t *testing.T, e *env) {
+			if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+				t.Skip("directory permissions do not stop this user")
+			}
+			require.NoError(t, os.Chmod(e.workDir, 0o500))       //nolint:gosec // a read-only directory is the case under test
+			t.Cleanup(func() { _ = os.Chmod(e.workDir, 0o700) }) //nolint:gosec // restored so the temporary directory can be removed
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			want := control(t)
+			require.Equal(t, exitOK, want.code, want.stderr)
+			require.Empty(t, want.stderr)
+
+			e := newSyntheticEnv(t)
+			e.jev.pick = "fast@low"
+			tc.breakLog(t, e)
+			var stdout, stderr bytes.Buffer
+			a := e.app(nil, &stdout, &stderr, runner.Runner{})
+			for range 2 {
+				require.Equal(t, exitOK, a.run([]string{argvFix}), stderr.String())
+			}
+
+			lines := strings.Split(strings.TrimSuffix(stderr.String(), "\n"), "\n")
+			require.Len(t, lines, 2, "one warning per invocation, none from the failed mirror itself")
+			for _, line := range lines {
+				assert.True(t, strings.HasPrefix(line, "agrouter: warning: log: "), line)
+			}
+			assert.Equal(t, strings.Repeat(want.stdout, 2), stdout.String(), "the decision is unchanged")
+		})
+	}
 }
