@@ -130,6 +130,15 @@ func TestApp_ExecFallback(t *testing.T) {
 	}
 }
 
+// blockedAfterRouting splits exec's stderr after a block that followed routing: the selection routing
+// produced, the run-skipped line, then the block line, each with its newline.
+func blockedAfterRouting(t *testing.T, stderr string) (map[string]any, string, string) {
+	t.Helper()
+	lines := strings.Split(strings.TrimSuffix(stderr, "\n"), "\n")
+	require.Len(t, lines, 3, stderr)
+	return selectionLog(t, lines[0]+"\n"), lines[1] + "\n", lines[2] + "\n"
+}
+
 func TestApp_ExecFallbackDefaultsAndReadiness(t *testing.T) {
 	deepBlocked := exhausted(readiness.WindowWeekly, time.Hour, "strong")
 
@@ -154,8 +163,32 @@ func TestApp_ExecFallbackDefaultsAndReadiness(t *testing.T) {
 
 		assert.Equal(t, runner.ExitStartFailure, r.code)
 		assert.Empty(t, r.stdout)
-		assert.Equal(t, "agrouter: weekly subscription quota exhausted; resets at 2026-10-13T13:00:00Z\n", r.stderr,
-			"the quota line alone: no warning and no selection line")
+		sel, skipped, block := blockedAfterRouting(t, r.stderr)
+		assert.Equal(t, runSkipped("subscription quota exhausted"), skipped)
+		assert.Equal(t, "agrouter: weekly subscription quota exhausted; resets at 2026-10-13T13:00:00Z\n", block,
+			"the quota line keeps its wording")
+		assert.Equal(t, "alpha", sel["cli"])
+		assert.Nil(t, sel["model"])
+		assert.Nil(t, sel["effort"])
+		assert.NotNil(t, sel["reason"], "the selection routing produced says why it is undecided")
+		for _, key := range []string{"effective", "fallback", "readiness"} {
+			assert.NotContains(t, sel, key, "the line claims nothing about a run")
+		}
+	})
+
+	t.Run("a verified default on an unsupported model stops the fallback", func(t *testing.T) {
+		e := failingEnv(t, "effort", func(*fakeJev) {})
+		e.checker = defaultsChecker("deep-1", "", readiness.Evidence{Dimension: readiness.DimensionCapability,
+			Status: readiness.StatusUnavailable, Reason: readiness.ReasonUnsupportedModel, Check: "models",
+			Scope: readiness.Scope{Models: []string{"strong"}}})
+		r := e.runWithRunner([]string{"exec", "alpha", "fix it"}, nil, noChild(t))
+
+		assert.Equal(t, runner.ExitStartFailure, r.code)
+		assert.Empty(t, r.stdout)
+		sel, skipped, block := blockedAfterRouting(t, r.stderr)
+		assert.Equal(t, runSkipped("model not supported"), skipped)
+		assert.Equal(t, "agrouter: alpha unavailable: unsupported_model\n", block)
+		assert.Nil(t, sel["model"])
 	})
 
 	t.Run("an unknown delegated default under a scoped block", func(t *testing.T) {
@@ -180,7 +213,11 @@ func TestApp_ExecFallbackDefaultsAndReadiness(t *testing.T) {
 		r := e.runWithRunner([]string{"exec", "alpha", "fix it"}, nil, noChild(t))
 
 		assert.Equal(t, exitUsage, r.code)
-		assert.Equal(t, "agrouter: alpha availability unverified: delegated_model_unverified\n", r.stderr)
+		assert.Empty(t, r.stdout)
+		sel, skipped, block := blockedAfterRouting(t, r.stderr)
+		assert.Equal(t, runSkipped("availability unverified"), skipped)
+		assert.Equal(t, "agrouter: alpha availability unverified: delegated_model_unverified\n", block)
+		assert.Equal(t, "alpha", sel["cli"])
 	})
 
 	t.Run("a verified default outside the block runs", func(t *testing.T) {

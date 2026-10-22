@@ -296,11 +296,11 @@ type Budget struct {
 - Modify: `cmd/agrouter/app.go`, `cmd/agrouter/readiness.go`, `cmd/agrouter/fallback.go`
 - Modify: `cmd/agrouter/readiness_test.go`, `cmd/agrouter/app_test.go`
 
-- [ ] carry a fixed reason on `preflightError` (quota, executable missing, authentication, availability unverified, model not supported); on the pre-routing path print `agrouter: routing skipped: <cli> <reason>; routing provider was not called; child CLI was not started` before the existing line
-- [ ] on the post-routing `execSelection` block, log the selection routing produced, then print `agrouter: run skipped: <cli> <reason>; child CLI was not started`
-- [ ] extend `TestApp_ExecBlockedAcrossInvocations` and the readiness block cases: explanation first, zero provider requests, no child started, quota line, prefix, reset info and exit code unchanged across retries
-- [ ] write tests for each block kind, including the capability verdict, on both paths; stdout stays empty
-- [ ] run tests - must pass before next task
+- [x] carry a fixed reason on `preflightError` (quota, executable missing, authentication, availability unverified, model not supported); on the pre-routing path print `agrouter: routing skipped: <cli> <reason>; routing provider was not called; child CLI was not started` before the existing line
+- [x] on the post-routing `execSelection` block, log the selection routing produced, then print `agrouter: run skipped: <cli> <reason>; child CLI was not started`
+- [x] extend `TestApp_ExecBlockedAcrossInvocations` and the readiness block cases: explanation first, zero provider requests, no child started, quota line, prefix, reset info and exit code unchanged across retries
+- [x] write tests for each block kind, including the capability verdict, on both paths; stdout stays empty
+- [x] run tests - must pass before next task
 
 ### Task 8: Add the line-buffering console tee
 

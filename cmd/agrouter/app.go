@@ -149,6 +149,8 @@ func (a *app) run(argv []string) int {
 		a.debug.decision(d.Decision)
 		a.debug.failed(err)
 		if blocked, ok := errors.AsType[*preflightError](err); ok {
+			// the block came before any routing request, so say why routing never ran
+			fmt.Fprintln(a.stderr, blocked.routingSkipped())
 			fmt.Fprintln(a.stderr, blocked.line)
 			return blocked.code
 		}
@@ -172,6 +174,9 @@ func (a *app) run(argv []string) int {
 	// --verbose is agrouter's decision detail; the exec selection line stays concise
 	s, blocked := a.execSelection(cli, req, d)
 	if blocked != nil {
+		// routing chose before the block, so its selection is logged; the skipped line does not claim a run
+		a.logSelection(s)
+		fmt.Fprintln(a.stderr, blocked.runSkipped())
 		fmt.Fprintln(a.stderr, blocked.line)
 		return blocked.code
 	}
