@@ -344,10 +344,10 @@ type Budget struct {
 
 ### Task 11: [Final] Update documentation
 
-- [ ] README: the four `[agrouter]` keys, the long-context example, the known default-size limitation, the always-on log, `log_dir` (default ignored ralphex-style via `.agrouter/.gitignore`; a custom directory is user-managed), the routing-skipped/run-skipped lines, `request_too_long` in the reason table; the `Request size` section and the removal of the re-split promise at `README.md:115` already landed in task 10: check them and cover the rest
-- [ ] CLAUDE.md: replace the hardcoded-budget assumption; provider limits live in the adapter; note the console mirror log beside the stdout/stderr rules; recovery is gone
-- [ ] `git rm` both backlog items in the commit that lands them
-- [ ] move this plan to `docs/plans/completed/`
+- [x] README: the four `[agrouter]` keys, the long-context example, the known default-size limitation, the always-on log, `log_dir` (default ignored ralphex-style via `.agrouter/.gitignore`; a custom directory is user-managed), the routing-skipped/run-skipped lines, `request_too_long` in the reason table; the `Request size` section and the removal of the re-split promise at `README.md:115` already landed in task 10: check them and cover the rest
+- [x] CLAUDE.md: replace the hardcoded-budget assumption; provider limits live in the adapter; note the console mirror log beside the stdout/stderr rules; recovery is gone
+- [x] `git rm` both backlog items in the commit that lands them (done in this commit)
+- [x] move this plan to `docs/plans/completed/` (done in this commit)
 
 ## Post-Completion
 

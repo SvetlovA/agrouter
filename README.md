@@ -110,10 +110,11 @@ Complexity uses Jev's Score question with ten ordered descriptions. Jev returns 
 
 ### Request size
 
-agrouter cannot count tokens, so it estimates them from bytes and sizes every routing request from two `[agrouter]` keys:
+agrouter cannot count tokens, so it estimates them from bytes and sizes every routing request from these `[agrouter]` keys:
 
 | Key | Meaning | Default |
 |---|---|---|
+| `long_context` | turn on the routing provider's long-input mode; it raises the provider's limits, not `request_tokens` | `false` |
 | `request_tokens` | the allowance of one routing request: its state plus all its questions; input that does not fit is split into chunks | `30000` |
 | `bytes_per_token` | estimated bytes per token; lower it and the same text counts as more tokens, so it is split sooner | `3` |
 
@@ -211,6 +212,7 @@ Decision JSON and the exec selection line explain a failed routing and every `nu
 | `jev_unauthorized` | Jev rejected the key (HTTP 401) |
 | `jev_timeout` | `[agrouter] timeout` passed |
 | `jev_canceled` | routing was canceled |
+| `request_too_long` | the provider rejected the routing request as longer than its context length; it is never resent (see [Request size](#request-size)) |
 | `jev_api_error` | Jev answered with another error status, including rate limits that outlasted the retries |
 | `jev_transport_error` | Jev could not be reached, or the connection failed |
 | `jev_invalid_answer` | Jev answered with an answer that does not fit the question |
@@ -244,7 +246,7 @@ Exec then routes only over the CLI's options that are left. It never switches to
 | nothing is left: subscription quota exhausted | `<error_prefix><error_message>; <windows> subscription quota exhausted[; resets at <RFC 3339>]` | `127` |
 | nothing is left under `unknown = block` | `agrouter: <cli> availability unverified: <reason>` | `2` |
 
-A preflight block prints no selection line, nothing on stdout, and makes no Jev request. (A block on a delegated model's default comes after routing; see [Exec fallback](#exec-fallback).) The reset is the latest reset of the exhausted windows, since a weekly window outlasts a five-hour one, and is left out when any of them is unverified. `error_prefix` (default `agrouter: `) and `error_message` come from the check that found the block, the first one in `checks` order, so the line can match a caller's own limit pattern, for example a severity prefix such as `ERROR: agrouter: `. An unknown availability is never reported as a quota block. Readiness uses agrouter's configured context. Native arguments after `--` never alter or disable probes; native settings, profile and provider overrides apply only to the child.
+A preflight block prints no selection line, nothing on stdout, and makes no Jev request. It does print one explanation line before the lines above: `agrouter: routing skipped: <cli> <reason>; routing provider was not called; child CLI was not started`, where the reason is fixed text (`subscription quota exhausted`, `executable missing`, `authentication failed`, `availability unverified`, `model not supported`, `unavailable`). A block found after routing, such as a delegated model's default, is reported the same way with the Jev call already made: agrouter logs the selection routing produced, then prints `agrouter: run skipped: <cli> <reason>; child CLI was not started` (see [Exec fallback](#exec-fallback)). The reset is the latest reset of the exhausted windows, since a weekly window outlasts a five-hour one, and is left out when any of them is unverified. `error_prefix` (default `agrouter: `) and `error_message` come from the check that found the block, the first one in `checks` order, so the line can match a caller's own limit pattern, for example a severity prefix such as `ERROR: agrouter: `. An unknown availability is never reported as a quota block. Readiness uses agrouter's configured context. Native arguments after `--` never alter or disable probes; native settings, profile and provider overrides apply only to the child.
 
 The `<reason>` in these lines, and the reasons in the selection line's `readiness`, are fixed codes:
 
@@ -295,6 +297,22 @@ Note: the first line is readable without parsing JSON; the second carries the sa
 Values Jev chose before the failure (the model when only the effort stage failed) and values the caller fixed keep their source and are never listed as fallbacks. Top-level `model`/`effort` stay `null` whenever agrouter passes no selection flag, even when `effective` shows a verified default. A catalog default or a model list's recommendation is never reported as verified. An intentional omission (a model without effort levels, the effort of a passed-through `--model`) is no fallback and prints no warning.
 
 A delegated model is checked against model-scoped quota blocks. When the verified default is blocked, exec prints the quota line and exits `127` without starting the child, as a preflight block does. When the default is unknown and some model has its own block, the model is unverified (`delegated_model_unverified`): a warning under `unknown = allow`, exit `2` under `unknown = block`.
+
+### Console log
+
+Every line agrouter itself writes to stderr (warnings, errors, the `agrouter: selection:` line, the skipped lines and `AGROUTER_DEBUG=1` output) is also appended to `<log_dir>/agrouter.log`, so a caller that hides agrouter's stderr, such as Ralphex's Codex executor, still leaves the routing outcome on disk. The log is always on and has no switch. Each line is stamped:
+
+```text
+2026-10-22T15:17:03Z pid=1234 agrouter: selection: {"cli":"codex","model":null,"effort":null}
+```
+
+| Key | Meaning | Default |
+|---|---|---|
+| `log_dir` | directory of `agrouter.log`; a relative path is resolved against the working directory | `.agrouter/logs` |
+
+The console output is unchanged. The child's stdout and stderr and agrouter's own stdout (decision JSON) are never copied. The log is append-only and never rotated or trimmed. Invocations that fail before the config loads (usage and config errors) write nothing, since `log_dir` is not known yet. A log failure prints one `agrouter: warning: log: ...` line and changes neither the output nor the exit code.
+
+With the default directory, agrouter keeps the log out of git the way Ralphex does for its own logs: it makes `.agrouter/.gitignore` end with the rules `.gitignore` and `logs/`, so `.agrouter/config` stays trackable. A custom `log_dir` is yours to manage: agrouter creates the directory but writes no ignore file for it.
 
 ## Configuration
 
