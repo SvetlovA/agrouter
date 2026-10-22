@@ -152,6 +152,46 @@ func TestValidate_Violations(t *testing.T) {
 			want:  []string{"[agrouter] timeout = 0s: must be positive"},
 		},
 		{
+			name:  "request_tokens zero",
+			local: "[agrouter]\nrequest_tokens = 0\n",
+			want:  []string{"[agrouter] request_tokens = 0: must be positive"},
+		},
+		{
+			name:  "request_tokens negative",
+			local: "[agrouter]\nrequest_tokens = -5\n",
+			want:  []string{"[agrouter] request_tokens = -5: must be positive"},
+		},
+		{
+			name:  "bytes_per_token zero",
+			local: "[agrouter]\nbytes_per_token = 0\n",
+			want:  []string{"[agrouter] bytes_per_token = 0: must be a finite number greater than zero"},
+		},
+		{
+			name:  "bytes_per_token negative",
+			local: "[agrouter]\nbytes_per_token = -2.5\n",
+			want:  []string{"[agrouter] bytes_per_token = -2.5: must be a finite number greater than zero"},
+		},
+		{
+			name:  "bytes_per_token NaN",
+			local: "[agrouter]\nbytes_per_token = NaN\n",
+			want:  []string{"[agrouter] bytes_per_token = NaN: must be a finite number greater than zero"},
+		},
+		{
+			name:  "bytes_per_token positive infinity",
+			local: "[agrouter]\nbytes_per_token = +Inf\n",
+			want:  []string{"[agrouter] bytes_per_token = +Inf: must be a finite number greater than zero"},
+		},
+		{
+			name:  "bytes_per_token negative infinity",
+			local: "[agrouter]\nbytes_per_token = -Inf\n",
+			want:  []string{"[agrouter] bytes_per_token = -Inf: must be a finite number greater than zero"},
+		},
+		{
+			name:  "blank log_dir",
+			local: "[agrouter]\nlog_dir =\n",
+			want:  []string{"[agrouter] log_dir: must not be empty"},
+		},
+		{
 			name:  "several violations reported together",
 			local: "[agrouter]\ntimeout = 0s\n[model.beta-two]\ncli = beta\n",
 			want:  []string{"timeout = 0s", "[model.beta-two] name: required"},
@@ -182,6 +222,10 @@ func TestValidate_Allowed(t *testing.T) {
 			"model_args = [\"--model\", \"{model}\"]\neffort_args = [\"--effort\", \"{effort}\"]\nprompt_args = [\"--\", \"{prompt}\"]\n" +
 			"[model.gamma-one]\ncli = gamma\nname = gamma-one\nefforts = low, high\n"},
 		{name: "no effort_args when no model has efforts", local: ""},
+		{name: "fractional ratio", local: "[agrouter]\nbytes_per_token = 2.5\n"},
+		{name: "very small finite ratio", local: "[agrouter]\nbytes_per_token = 1e-300\n"},
+		{name: "very large finite ratio", local: "[agrouter]\nbytes_per_token = 1e300\n"},
+		{name: "huge request_tokens", local: "[agrouter]\nrequest_tokens = 9000000000\n"},
 		{name: "model of a disabled cli is dropped, not unknown", local: "[cli.beta]\nenabled = false\n"},
 	}
 	for _, tc := range tests {

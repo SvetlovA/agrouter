@@ -30,6 +30,7 @@ func requestFixture(t *testing.T) (*config.Config, *catalog.Catalog) {
 	t.Helper()
 	cfg := &config.Config{
 		Agrouter: config.Agrouter{JevModel: "test-jev", Timeout: time.Second,
+			RequestTokens: 30000, BytesPerToken: 3, LogDir: "logs",
 			RoutingPolicy:    "Prefer the cheapest option that can do the task.",
 			ComplexityPolicy: "Judge the codebase as a whole."},
 		CLIs: []config.CLI{

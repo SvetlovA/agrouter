@@ -18,6 +18,9 @@ const catalogConfig = `
 timeout = 10s
 routing_policy = Prefer cheap.
 complexity_policy = Judge the codebase.
+request_tokens = 20000
+bytes_per_token = 3
+log_dir = logs
 
 [cli.alpha]
 command     = alpha

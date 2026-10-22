@@ -206,13 +206,13 @@ type Budget struct {
 - Modify: `pkg/config/config_test.go`, `pkg/config/validate_test.go` and other `pkg/config` fixtures
 - Modify: synthetic fixtures that skip the embedded layer and now fail validation (`pkg/catalog/catalog_test.go:16-20`, `pkg/readiness/readiness_test.go:228`, `pkg/router/router_test.go:32` `requestFixture`)
 
-- [ ] add `LongContext bool`, `RequestTokens int`, `BytesPerToken float64`, `LogDir string` to `Agrouter`; parse `long_context` (`strconv.ParseBool`), `request_tokens`, `bytes_per_token`, `log_dir` in `load.go` with layering like the existing keys
-- [ ] validate provider-neutrally: ratio finite and `> 0`, `request_tokens > 0`, `log_dir` non-empty after trimming; no provider limits in `pkg/config`
-- [ ] add the keys, marked "default:" in the key reference header, with provider-neutral comments and the commented long-context example block, to `pkg/config/defaults/config`
-- [ ] set the new keys explicitly in synthetic fixtures that bypass the embedded layer
-- [ ] write tests for parsing and layering (embedded < global < local), a key omitted in global/local inheriting the embedded value, relative/absolute/blank `log_dir`
-- [ ] write tests for validation (zero, negative, NaN, ±Inf ratio; zero/negative `request_tokens`); keep the embedded-config smoke test; do not pin shipped defaults
-- [ ] run tests - must pass before next task
+- [x] add `LongContext bool`, `RequestTokens int`, `BytesPerToken float64`, `LogDir string` to `Agrouter`; parse `long_context` (`strconv.ParseBool`), `request_tokens`, `bytes_per_token`, `log_dir` in `load.go` with layering like the existing keys
+- [x] validate provider-neutrally: ratio finite and `> 0`, `request_tokens > 0`, `log_dir` non-empty after trimming; no provider limits in `pkg/config`
+- [x] add the keys, marked "default:" in the key reference header, with provider-neutral comments and the commented long-context example block, to `pkg/config/defaults/config`
+- [x] set the new keys explicitly in synthetic fixtures that bypass the embedded layer
+- [x] write tests for parsing and layering (embedded < global < local), a key omitted in global/local inheriting the embedded value, relative/absolute/blank `log_dir`
+- [x] write tests for validation (zero, negative, NaN, ±Inf ratio; zero/negative `request_tokens`); keep the embedded-config smoke test; do not pin shipped defaults
+- [x] run tests - must pass before next task
 
 ### Task 2: Provider adapter: limits, long-context header, overflow classification and reported tokens
 

@@ -247,6 +247,14 @@ func (s *section) decodeAgrouter(a *Agrouter) error {
 			a.RoutingPolicy = e.value
 		case "complexity_policy":
 			a.ComplexityPolicy = e.value
+		case "long_context":
+			a.LongContext, err = strconv.ParseBool(e.value)
+		case "request_tokens":
+			a.RequestTokens, err = strconv.Atoi(e.value)
+		case "bytes_per_token":
+			a.BytesPerToken, err = strconv.ParseFloat(e.value, 64)
+		case "log_dir":
+			a.LogDir = e.value
 		default:
 			if hint, ok := removedAgrouterKeys[k]; ok {
 				return s.removedKey(k, hint)

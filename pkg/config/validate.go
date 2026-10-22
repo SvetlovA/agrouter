@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -46,6 +47,15 @@ func (a Agrouter) validate() []error {
 		if strings.TrimSpace(q.text) == "" {
 			errs = append(errs, fmt.Errorf("[agrouter] %s: must not be empty", q.key))
 		}
+	}
+	if a.RequestTokens <= 0 {
+		errs = append(errs, fmt.Errorf("[agrouter] request_tokens = %d: must be positive", a.RequestTokens))
+	}
+	if math.IsNaN(a.BytesPerToken) || math.IsInf(a.BytesPerToken, 0) || a.BytesPerToken <= 0 {
+		errs = append(errs, fmt.Errorf("[agrouter] bytes_per_token = %v: must be a finite number greater than zero", a.BytesPerToken))
+	}
+	if strings.TrimSpace(a.LogDir) == "" {
+		errs = append(errs, errors.New("[agrouter] log_dir: must not be empty"))
 	}
 	return errs
 }
