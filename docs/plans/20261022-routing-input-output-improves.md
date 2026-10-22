@@ -271,10 +271,10 @@ type Budget struct {
 - Modify: `cmd/agrouter/reason.go`
 - Modify: `cmd/agrouter/reason_test.go`, `cmd/agrouter/app_test.go`
 
-- [ ] map `jev.ErrTooLong` to `request_too_long` with the stage and the fixed provider-neutral detail; leave other status errors on `jev_api_error`
-- [ ] write tests for the code and the full message in decision JSON (`reason`, `null_reasons`) and in the exec fallback warning, with an `httptest` provider returning the structured 400
-- [ ] write tests that an unrelated 400 and a 422 still report `jev_api_error`
-- [ ] run tests - must pass before next task
+- [x] map `jev.ErrTooLong` to `request_too_long` with the stage and the fixed provider-neutral detail; leave other status errors on `jev_api_error`
+- [x] write tests for the code and the full message in decision JSON (`reason`, `null_reasons`) and in the exec fallback warning, with an `httptest` provider returning the structured 400
+- [x] write tests that an unrelated 400 and a 422 still report `jev_api_error`
+- [x] run tests - must pass before next task
 
 ### Task 6: Report estimated and provider-reported tokens in debug output
 

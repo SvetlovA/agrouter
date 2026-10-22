@@ -16,6 +16,7 @@ const (
 	reasonTimeout        = "jev_timeout"
 	reasonCanceled       = "jev_canceled"
 	reasonAPIError       = "jev_api_error"
+	reasonTooLong        = "request_too_long" // provider-neutral: the routing request is over the provider's context length
 	reasonTransportError = "jev_transport_error"
 	reasonInvalidAnswer  = "jev_invalid_answer"
 	reasonEmptyAnswer    = "jev_empty_answer"
@@ -73,6 +74,8 @@ func failureCode(err error) string {
 		return reasonNoKey
 	case errors.Is(err, jev.ErrUnauthorized):
 		return reasonUnauthorized
+	case errors.Is(err, jev.ErrTooLong):
+		return reasonTooLong
 	case errors.Is(err, context.DeadlineExceeded):
 		return reasonTimeout
 	case errors.Is(err, context.Canceled):
@@ -103,6 +106,7 @@ var failureDetails = map[string]string{
 	reasonNoKey:          "no Jev API key is set",
 	reasonUnauthorized:   "the Jev API key was rejected",
 	reasonAPIError:       "Jev returned an error status",
+	reasonTooLong:        "routing request over the provider's context length; lower request_tokens or bytes_per_token",
 	reasonTransportError: "Jev could not be reached",
 	reasonInvalidAnswer:  "Jev returned an invalid answer",
 	reasonEmptyAnswer:    "Jev returned no answer",

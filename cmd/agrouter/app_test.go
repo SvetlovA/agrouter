@@ -79,9 +79,11 @@ type fakeJev struct {
 	level     string
 	failDocs  bool
 	failStage string
-	// how failStage fails: with failStatus (0: 400), with a 200 carrying failAnswer as its answer
-	// ("omit" leaves it out), by never answering (failHang) or by dropping the connection (failDrop)
+	// how failStage fails: with failStatus (0: 400) and, when set, failBody as the JSON error body,
+	// with a 200 carrying failAnswer as its answer ("omit" leaves it out), by never answering
+	// (failHang) or by dropping the connection (failDrop)
 	failStatus int
+	failBody   string
 	failAnswer string
 	failHang   bool
 	failDrop   bool
@@ -190,6 +192,10 @@ func (f *fakeJev) fail(w http.ResponseWriter, r *http.Request, stage string) {
 		_, _ = io.WriteString(w, `{"answers":{}}`)
 	case f.failAnswer != "":
 		_, _ = io.WriteString(w, `{"answers":{"`+stage+`":`+f.failAnswer+`}}`)
+	case f.failBody != "":
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(cmp.Or(f.failStatus, http.StatusBadRequest))
+		_, _ = io.WriteString(w, f.failBody)
 	default:
 		http.Error(w, stage+" stage rejected", cmp.Or(f.failStatus, http.StatusBadRequest))
 	}
