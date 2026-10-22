@@ -331,18 +331,20 @@ type Budget struct {
 
 ### Task 10: Verify acceptance criteria
 
-- [ ] verify the structured 400 yields `request_too_long` with no resend, and other 400/422 yield `jev_api_error`
-- [ ] verify `long_context` sends the header and changes only the provider limits; the `request_tokens` limit check under both limit sets
-- [ ] verify a Codex-style caller that drops stderr still leaves the selection in `.agrouter/logs/agrouter.log`, and that `.agrouter/config` stays trackable
-- [ ] verify no new user-facing name, message or comment mentions Jev outside `pkg/jev` and the long-context example comment
-- [ ] verify the README states the known default-size limitation and the tuning path
-- [ ] run full test suite: `make test`
-- [ ] run lint: `make lint`, plus `GOOS=linux`, `GOOS=darwin` and `--build-tags=eval`
-- [ ] verify coverage is 80%+ per package (mocks excluded)
+- [x] verify the structured 400 yields `request_too_long` with no resend, and other 400/422 yield `jev_api_error`
+- [x] verify `long_context` sends the header and changes only the provider limits; the `request_tokens` limit check under both limit sets
+- [x] verify a Codex-style caller that drops stderr still leaves the selection in `.agrouter/logs/agrouter.log`, and that `.agrouter/config` stays trackable
+- [x] verify no new user-facing name, message or comment mentions Jev outside `pkg/jev` and the long-context example comment
+- [x] verify the README states the known default-size limitation and the tuning path
+- [x] run full test suite: `make test`
+- [x] run lint: `make lint`, plus `GOOS=linux`, `GOOS=darwin` and `--build-tags=eval`
+- [x] verify coverage is 80%+ per package (mocks excluded)
+- ➕ the README had no limitation or tuning text, so the `Request size` section (keys, `request_too_long`, the known limitation, the tuning path and the long-context example) and the removal of the re-split clause at `README.md:115` landed here; task 11 keeps the rest of the README work
+- ➕ added the app-level case `a caller that drops stderr still has the selection in the log` (stderr is `io.Discard`; in a temporary git repository the log is ignored and `.agrouter/config` is not)
 
 ### Task 11: [Final] Update documentation
 
-- [ ] README: the four `[agrouter]` keys, the long-context example, the known default-size limitation, the always-on log, `log_dir` (default ignored ralphex-style via `.agrouter/.gitignore`; a custom directory is user-managed), the routing-skipped/run-skipped lines, `request_too_long` in the reason table; remove the re-split promise at `README.md:115`
+- [ ] README: the four `[agrouter]` keys, the long-context example, the known default-size limitation, the always-on log, `log_dir` (default ignored ralphex-style via `.agrouter/.gitignore`; a custom directory is user-managed), the routing-skipped/run-skipped lines, `request_too_long` in the reason table; the `Request size` section and the removal of the re-split promise at `README.md:115` already landed in task 10: check them and cover the rest
 - [ ] CLAUDE.md: replace the hardcoded-budget assumption; provider limits live in the adapter; note the console mirror log beside the stdout/stderr rules; recovery is gone
 - [ ] `git rm` both backlog items in the commit that lands them
 - [ ] move this plan to `docs/plans/completed/`

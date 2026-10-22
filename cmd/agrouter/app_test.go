@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -1523,6 +1524,35 @@ func TestApp_MirrorLog(t *testing.T) {
 		raw := readFile(t, e.mirrorPath())
 		assert.NotContains(t, raw, "PROMPT-MARKER")
 		assert.NotContains(t, raw, `"argv"`)
+	})
+
+	t.Run("a caller that drops stderr still has the selection in the log", func(t *testing.T) {
+		if _, err := exec.LookPath("git"); err != nil {
+			t.Skip("git is not on PATH")
+		}
+		e := newEnv(t)
+		e.globalConfig(madeUpConfig(t, "acme", "test-child", "large", "future-model", "thorough"))
+		git := func(args ...string) error {
+			cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", e.workDir}, args...)...)
+			cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
+			return cmd.Run()
+		}
+		require.NoError(t, git("init", "--quiet"))
+		require.NoError(t, os.MkdirAll(filepath.Join(e.workDir, ".agrouter"), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(e.workDir, ".agrouter", "config"), []byte("[agrouter]\n"), 0o600))
+
+		child := &mocks.CommandRunnerMock{RunFunc: func(context.Context, runner.Command) (int, error) { return 0, nil }}
+		var stdout bytes.Buffer
+		code := e.app(nil, &stdout, io.Discard, child).run([]string{"exec", "acme", "--model=preferred", "--effort=thorough", "fix it"})
+		require.Equal(t, exitOK, code)
+
+		assert.Contains(t, mirrored(t, e.mirrorPath()), selectionPrefix)
+		require.NoError(t, git("check-ignore", "--quiet", filepath.Join(".agrouter", "logs", logFileName)),
+			"the log stays out of git")
+		var exitErr *exec.ExitError
+		require.ErrorAs(t, git("check-ignore", "--quiet", filepath.Join(".agrouter", "config")), &exitErr,
+			"the local config stays trackable")
+		assert.Equal(t, 1, exitErr.ExitCode(), "exit 1 means not ignored")
 	})
 
 	t.Run("readiness blocks are copied", func(t *testing.T) {

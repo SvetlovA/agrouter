@@ -108,11 +108,34 @@ This stage runs only when `--doc` is given and more than one option is left. If 
 
 Complexity uses Jev's Score question with ten ordered descriptions. Jev returns a numeric score from 0 to 9, which agrouter scales to 0 to 10 before combining document chunks. Evidence remains a separate Noul weight; confidence is recorded only.
 
+### Request size
+
+agrouter cannot count tokens, so it estimates them from bytes and sizes every routing request from two `[agrouter]` keys:
+
+| Key | Meaning | Default |
+|---|---|---|
+| `request_tokens` | the allowance of one routing request: its state plus all its questions; input that does not fit is split into chunks | `30000` |
+| `bytes_per_token` | estimated bytes per token; lower it and the same text counts as more tokens, so it is split sooner | `3` |
+
+The routing provider's own limits are checked at startup: `request_tokens` must stay 2000 tokens below them, or agrouter exits `2` and names the value and the limit. A request the provider still rejects as too long is never resent. Routing fails with the reason `request_too_long`, and the error says how many tokens agrouter estimated against `request_tokens`.
+
+**Known limitation:** with the shipped defaults, log or code heavy prompts can still overflow. Those texts hold more tokens per byte than `bytes_per_token = 3` assumes, so a request agrouter thinks fits can be over the provider's limit, and routing fails with `request_too_long` instead of splitting it. To tune, run with `AGROUTER_DEBUG=1` and compare each request's `tokens: estimated N, provider reported M` line, then lower `bytes_per_token` (`2.5` is a suggested starting point) until the estimate is not below the reported count, or lower `request_tokens`. The other way out is the provider's long-input mode, `long_context = true`: it raises the provider's limits, at the same price but slower and less accurate, and does not raise `request_tokens`, so raise that too:
+
+```ini
+[agrouter]
+long_context    = true
+request_tokens  = 128000
+bytes_per_token = 2.5
+timeout         = 120s
+```
+
+These values are a starting point, not calibrated; compare the `tokens:` lines and tune.
+
 ### Long inputs
 
 A prompt with its files that is too large for one request is split into chunks, all sent at once. Each chunk also rates how relevant its text is to the task, and the chunks' answers are averaged with that relevance as weight, so filler with zero relevance has no effect. Low but non-zero relevance still dilutes the result when there is a lot of it. Every routing stage asks all chunks and pools their answers; every chunk then moves on to the same narrowed next stage.
 
-`[agrouter] timeout` covers the whole routing: reading the inputs, the complexity stage and every routing stage. Routing makes up to three sequential Jev round trips (`cli`, `model`, `effort`), plus one for the complexity stage with `--doc`; chunks within a stage run in parallel, but a re-split after a too-large request adds another round trip. The timeout is cooperative: reading stdin and files and every Jev request stop at it, but splitting and encoding a very large input do not. Raise it when routing often runs out of time, typically with very long inputs, many `--doc` files or a slow network.
+`[agrouter] timeout` covers the whole routing: reading the inputs, the complexity stage and every routing stage. Routing makes up to three sequential Jev round trips (`cli`, `model`, `effort`), plus one for the complexity stage with `--doc`; chunks within a stage run in parallel. The timeout is cooperative: reading stdin and files and every Jev request stop at it, but splitting and encoding a very large input do not. Raise it when routing often runs out of time, typically with very long inputs, many `--doc` files or a slow network.
 
 Decision mode:
 
