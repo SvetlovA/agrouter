@@ -308,12 +308,12 @@ type Budget struct {
 - Create: `cmd/agrouter/consolelog.go`
 - Create: `cmd/agrouter/consolelog_test.go`
 
-- [ ] add a tee writer that writes the console first and unchanged, buffers lines until given a log file path, replays the buffer to the file only, then appends `<RFC3339 UTC> pid=<n> <line>` with one `O_APPEND` write per complete line; `Close` flushes a partial line
-- [ ] add the default-directory ignore setup: ensure `<workDir>/.agrouter/.gitignore` ends with `.gitignore` and `logs/` (create, fix a missing final newline, append unless they are already the last two lines, never truncate)
-- [ ] on any failure, emit at most one console-only warning per tee and stop mirroring; never alter console output
-- [ ] write tests: fragmented writes produce whole lines; buffered lines replayed to the file only; console bytes identical with and without a file; partial line flushed; one warning on an unwritable path
-- [ ] write tests for the ignore setup: new file, existing content kept, missing final newline, an existing `!logs/` followed by our rules, idempotent on repeat; in a temporary repository (skip without `git`) `git check-ignore` matches the log and not `.agrouter/config`
-- [ ] run tests - must pass before next task
+- [x] add a tee writer that writes the console first and unchanged, buffers lines until given a log file path, replays the buffer to the file only, then appends `<RFC3339 UTC> pid=<n> <line>` with one `O_APPEND` write per complete line; `Close` flushes a partial line
+- [x] add the default-directory ignore setup: ensure `<workDir>/.agrouter/.gitignore` ends with `.gitignore` and `logs/` (create, fix a missing final newline, append unless they are already the last two lines, never truncate)
+- [x] on any failure, emit at most one console-only warning per tee and stop mirroring; never alter console output
+- [x] write tests: fragmented writes produce whole lines; buffered lines replayed to the file only; console bytes identical with and without a file; partial line flushed; one warning on an unwritable path
+- [x] write tests for the ignore setup: new file, existing content kept, missing final newline, an existing `!logs/` followed by our rules, idempotent on repeat; in a temporary repository (skip without `git`) `git check-ignore` matches the log and not `.agrouter/config`
+- [x] run tests - must pass before next task
 
 ### Task 9: Wire the mirror log into the app
 
