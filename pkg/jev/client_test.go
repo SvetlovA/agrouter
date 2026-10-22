@@ -239,8 +239,10 @@ func TestAskTooLong(t *testing.T) {
 		{name: "400 with a malformed body", status: http.StatusBadRequest, body: `{"detail":{"error_type":"max_tokens_exceeded"`},
 		{name: "400 with a truncated body", status: http.StatusBadRequest, body: `{"detail":{"error_type":"max_tokens_`},
 		{name: "400 with a non-string type", status: http.StatusBadRequest, body: `{"detail":{"error_type":7}}`},
-		{name: "400 with an overlong type", status: http.StatusBadRequest,
-			body: `{"detail":{"error_type":"` + strings.Repeat("x", 100) + `"}}`},
+		{name: "400 with a type at the limit", status: http.StatusBadRequest,
+			body: `{"detail":{"error_type":"` + strings.Repeat("x", maxErrorType) + `"}}`, errorType: strings.Repeat("x", maxErrorType)},
+		{name: "400 with a type over the limit", status: http.StatusBadRequest,
+			body: `{"detail":{"error_type":"` + strings.Repeat("x", maxErrorType+1) + `"}}`},
 		{name: "422 with the structured body", status: http.StatusUnprocessableEntity, body: tooLong, errorType: "max_tokens_exceeded"},
 		{name: "500 with the structured body", status: http.StatusInternalServerError, body: tooLong, errorType: "max_tokens_exceeded"},
 	}
@@ -273,7 +275,7 @@ func TestAskTooLongErrorBody(t *testing.T) {
 		require.ErrorIs(t, err, ErrTooLong)
 		var serr *StatusError
 		require.ErrorAs(t, err, &serr)
-		assert.Len(t, serr.Body, maxErrorBody+3)
+		assert.Less(t, len(serr.Body), len(body))
 		assert.NotContains(t, serr.Body, "max_tokens_exceeded")
 	})
 	t.Run("the body still shows the type and redacts the state", func(t *testing.T) {

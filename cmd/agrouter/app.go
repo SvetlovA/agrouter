@@ -56,14 +56,17 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer) *app {
 		getenv:   os.Getenv,
 		workDir:  wd,
 		embedded: defaults.Config,
-		newJev: func(key string, longContext bool) router.JevClient {
-			c := jev.New(key)
-			c.LongContext = longContext
-			return c
-		},
-		runner:  runner.Runner{},
-		checker: readiness.Checker{Dir: wd},
+		newJev:   func(key string, longContext bool) router.JevClient { return newJevClient(key, longContext) },
+		runner:   runner.Runner{},
+		checker:  readiness.Checker{Dir: wd},
 	}
+}
+
+// newJevClient is the Jev client for key, sending the long-context header when longContext is set.
+func newJevClient(key string, longContext bool) *jev.Client {
+	c := jev.New(key)
+	c.LongContext = longContext
+	return c
 }
 
 func (a *app) clock() time.Time {

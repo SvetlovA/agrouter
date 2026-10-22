@@ -83,3 +83,15 @@ func TestFanoutCallerDeadlineEndsIt(t *testing.T) {
 	assert.Nil(t, seq)
 	require.ErrorIs(t, err, context.Canceled)
 }
+
+func TestFanoutCompleteAnswersStandAfterTheDeadline(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	f := fanout[int, string]{name: "item", ask: func(_ context.Context, c int) (string, error) {
+		return fmt.Sprintf("answer %d", c), nil
+	}}
+	seq, err := f.run(ctx, []int{1, 2})
+	cancel() // the deadline passes after every answer came in
+	require.NoError(t, err)
+	require.Len(t, seq, 2)
+	assert.Equal(t, "answer 2", seq[1].answer)
+}

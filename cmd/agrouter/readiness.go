@@ -137,7 +137,7 @@ func unavailableText(d readiness.Dimension) string {
 		return skipAuth
 	case readiness.DimensionCapability:
 		return skipModel
-	case readiness.DimensionQuota:
+	case readiness.DimensionQuota: // preflightBlock words a quota block itself; listed for the exhaustive check
 		return skipQuota
 	}
 	return skipUnavailable

@@ -362,9 +362,8 @@ func (e *env) app(stdin io.Reader, stdout, stderr io.Writer, child CommandRunner
 		workDir:  e.workDir,
 		embedded: defaults.Config,
 		newJev: func(key string, longContext bool) router.JevClient {
-			c := jev.New(key)
+			c := newJevClient(key, longContext)
 			c.URL = e.jev.srv.URL
-			c.LongContext = longContext
 			return c
 		},
 		runner:  child,
@@ -586,6 +585,15 @@ func TestApp_Decision(t *testing.T) {
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Contains(t, r.stdout, `"a <b> & c"`)
 	})
+}
+
+func TestNewApp_LongContextReachesClient(t *testing.T) {
+	a := newApp(nil, io.Discard, io.Discard)
+	for _, want := range []bool{false, true} {
+		c, ok := a.newJev("key", want).(*jev.Client)
+		require.True(t, ok)
+		assert.Equal(t, want, c.LongContext)
+	}
 }
 
 func TestApp_LongContext(t *testing.T) {
