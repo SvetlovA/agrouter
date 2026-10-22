@@ -1,0 +1,296 @@
+# agrouter embedded defaults: the v1 catalog and invocation descriptors.
+# Loaded with IgnoreInlineComment, so comments must be on their own lines.
+# Override any key in ~/.config/agrouter/config (AGROUTER_CONFIG_DIR) or .agrouter/config;
+# remove a section with enabled = false.
+# every key is written out here. each section kind starts with a key reference: "default" is what
+# agrouter uses when no layer sets the key; "required" keys have no default and must be set.
+# environment variables are set in the process environment, not as keys in this file:
+# TYPESAFE_API_KEY: overrides [agrouter] api_key; --jev-api-key takes precedence,
+# including an explicitly empty --jev-api-key, which clears the key.
+# AGROUTER_CONFIG_DIR: directory containing the global config file, replacing
+# ~/.config/agrouter; .agrouter/config in the working directory still overrides it.
+# AGROUTER_DEBUG=1: enables redacted diagnostics on stderr; it is separate from
+# --verbose, which controls decision details. other values leave debug disabled.
+# these are the only supported environment variables; model, effort, --doc,
+# --verbose, timeout and jev_model have no environment-variable overrides.
+
+# [agrouter]: how agrouter talks to Jev.
+#   api_key            TypeSafe API key for Jev. default: empty (no key)
+#   jev_model          the Jev model answering the routing questions. required (no fallback)
+#   timeout            total routing budget, a Go duration. required, must be positive
+#   routing_policy     cost/quality preference for choosing the CLI, model and effort. required
+#   complexity_policy  how the --doc stage judges the project. required
+[agrouter]
+# TypeSafe API key for Jev. Empty = no key. Prefer the env var or the global config;
+# never put it in a local .agrouter/config that may be committed.
+# before using Jev routing, uncomment [agrouter] and api_key in the generated global
+# config and enter your TypeSafe API key, or set TYPESAFE_API_KEY in the environment.
+# precedence: --jev-api-key > non-empty TYPESAFE_API_KEY > local > global > embedded.
+# api_key   =
+# pin a versioned id (e.g. jev-1.13.0) to keep routing stable across Jev releases
+jev_model = jev-latest
+# total routing budget: reading stdin and files, the --doc complexity stage and up to three sequential
+# routing stages (cli, model, effort), each sending its chunks at once, with retries.
+# cooperative: reading and network stop at it, splitting and encoding do not. raise it for very long inputs
+timeout   = 30s
+
+# the questions sent to Jev, and what each state field holds, are built into agrouter; these two
+# keys hold only the preference they follow. both must be non-empty. jev_model above is the model
+# answering the questions, not one of the catalog models being chosen.
+# routing_policy: the cost/quality preference for choosing the CLI, model and effort, sent with
+# every routing question, for a prompt sent whole and for each chunk of a split one.
+routing_policy = Choose the option with the lowest cost that can reliably satisfy this task's requirements. Compare the supplied model prices and the effort descriptions, including their effect on token usage. Prefer cheaper options when their capabilities are sufficient. Choose a more expensive model or higher effort when it materially improves the likelihood of completing this specific task correctly. Prefer less time when cost and capability are comparable. The project complexity, when present, rates the codebase the task runs in: use it as context for how hard this specific task is there, not as a substitute for judging the task (a typo fix stays trivial in any codebase).
+# complexity_policy: how the --doc stage judges the project the docs describe before routing.
+complexity_policy = Judge the codebase as a whole: its size, architecture, dependencies and constraints, not any single task in it.
+
+# how agrouter invokes each CLI. argv = command + exec_args + native options + model_args
+# + effort_args + any native "--" and its remaining tokens + prompt_args. Only {model}, {effort}
+# and {prompt} are placeholders, each only in its own key; model_args/effort_args are left out
+# when the value is left to the CLI. Agrouter replaces native --model/-m and --effort selections;
+# other native arguments pass through unchanged. Emit selections after native options so they win.
+# exec_args, model_args and prompt_args are required; effort_args when a model has efforts.
+#
+# [cli.<name>]: one CLI. names cannot contain ".".
+#   enabled      false removes the CLI with its models, efforts and availability checks. default: true
+#   command      the executable, looked up on PATH. required
+#   description  what the CLI is good at, sent to Jev in the cli stage. default: empty
+#   exec_args    the noninteractive invocation, always emitted first; JSON array. required, may be []
+#   model_args   how to pass the model, with {model}; JSON array. required
+#   effort_args  how to pass the effort, with {effort}; JSON array. required when a model of the CLI has efforts
+#   prompt_args  how to pass the prompt; {prompt} must be its last element. required
+
+[cli.claude]
+enabled         = true
+command         = claude
+description     = Claude Code (Anthropic). Agentic coding CLI with file editing, shell, subagents (Task tool) and MCP.
+# always emitted first: non-interactive mode
+exec_args       = ["-p"]
+model_args      = ["--model", "{model}"]
+effort_args     = ["--effort", "{effort}"]
+# always emitted last and only when there is a prompt: {prompt} = the -p, positional and --prompt-file text,
+# after "--" so text starting with "-" is never parsed as a flag. claude -p reads stdin, and appends it after the prompt argument
+prompt_args     = ["--", "{prompt}"]
+
+# exec-only, prompt-free availability check before routing. unknown = allow runs the CLI with one
+# warning when the check cannot verify; block exits 2 instead. enabled = false skips the check.
+#
+# [cli.<name>.availability]: the exec readiness policy. without this section, only the executable
+# is checked and quota is unknown (availability_not_configured).
+#   enabled              false skips every check except the executable; quota is then unknown
+#                        (availability_disabled). default: true
+#   checks               comma-separated check section names, run in order; sections not listed are
+#                        ignored. default: empty (quota unknown, availability_not_configured)
+#   timeout              bound for all of this CLI's checks together, a Go duration; [agrouter] timeout
+#                        bounds them too. default: 5s
+#   unknown              allow runs with one warning when a check cannot verify; block exits 2 instead.
+#                        default: allow
+[cli.claude.availability]
+enabled = true
+checks  = usage
+timeout = 5s
+unknown = allow
+
+# [cli.<name>.availability.<check>]: one prompt-free probe.
+#   transport      json-helper, sdk-control-usage-v1 (stream-json control reads) or jsonrpc-ratelimits-v1
+#                  (stdio JSON-RPC rate-limit reads). required
+#   command        the probe executable. default: empty (the CLI's own command, following overrides of it)
+#   args           the probe's arguments; JSON array. default: empty (no arguments)
+#   min_version    the oldest CLI version the built-in transports know; older or unreported is unknown
+#                  (version_unsupported). ignored by json-helper. default: empty (any version)
+#   error_prefix   start of the one line printed when this check finds every option's subscription
+#                  quota exhausted; quote it to keep trailing spaces. default: "agrouter: "
+#   error_message  text after the prefix, before "; <windows> subscription quota exhausted", so a caller
+#                  can match it as the child's own limit message. used only for that quota line; other
+#                  blocks keep agrouter's own wording. default: empty (the line starts with the windows)
+#
+# stream-json control reads only (initialize, version, usage, settings): never a user message, so no
+# inference. Runs in the real working directory with the real settings and login, so API-key and
+# provider settings still apply; only hooks, MCP servers and session persistence are turned off.
+# no --bare: it skips the OAuth/keychain login. measured cold start: about 1.6s (2.1.296).
+# error_message matches Ralphex's claude limit patterns.
+[cli.claude.availability.usage]
+transport     = sdk-control-usage-v1
+# command       =
+args          = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config", "--settings", "{\"disableAllHooks\":true}"]
+min_version   = 2.1.296
+error_prefix  = "agrouter: "
+error_message = You've hit your limit
+
+[cli.codex]
+enabled               = true
+command               = codex
+description           = Codex CLI (OpenAI). Agentic coding CLI with sandboxed shell, apply_patch and multi-agent spawn_agent.
+exec_args             = ["exec"]
+model_args            = ["--model", "{model}"]
+# -c values are TOML; the quotes are part of the token (no shell)
+effort_args           = ["-c", "model_reasoning_effort=\"{effort}\""]
+# codex exec reads stdin when no prompt argument is given, and appends it as a <stdin> block when one is
+prompt_args           = ["--", "{prompt}"]
+
+[cli.codex.availability]
+enabled = true
+checks  = limits
+timeout = 5s
+unknown = allow
+
+# stdio app-server reads only (initialize, account, rate limits, effective config for the working
+# directory, model list): never a thread or a turn, so no inference, no login and no config write.
+# The rate limits come from the CLI's own login, which it refreshes itself; API-key and custom
+# provider setups report no subscription windows. measured cold start: about 0.5s (0.162.1).
+[cli.codex.availability.limits]
+transport     = jsonrpc-ratelimits-v1
+# command       =
+args          = ["app-server"]
+min_version   = 0.162.1
+# Ralphex's Codex executor matches limit patterns only on ERROR:/FATAL:/PANIC: stderr lines
+error_prefix  = "ERROR: agrouter: "
+error_message = You've hit your usage limit
+
+# [model.<section>]: one catalog model. the section name forms the option id, so it cannot hold "@".
+#   enabled      false removes the model. default: true
+#   cli          the [cli.<name>] the model runs on; must be enabled. required
+#   name         the value substituted into {model}; unique across names and aliases. required
+#   aliases      other values --model accepts for this model, comma-separated; unique across the
+#                catalog. default: empty
+#   efforts      the [effort.<cli>.<level>] levels the model supports, comma-separated.
+#                default: empty (no effort stage; effort is left to the CLI)
+#   description  what the model is for, with its price, sent to Jev in the model stage. default: empty
+#   source       documentation link, for maintainers only; never sent. default: empty
+
+# Claude models. Efforts match `claude --help` in Claude Code 2.1.294. Aliases are the short --model
+# values whose resolvedModel is this model in the CLI's initialize model list (Claude Code 2.1.300);
+# "default" is left out: it follows the account's recommended model, not a fixed one.
+# Sources: https://platform.claude.com/docs/en/about-claude/models/overview
+# and https://platform.claude.com/docs/en/about-claude/models/choosing-a-model
+
+[model.claude-fable-5-1]
+enabled     = true
+cli         = claude
+name        = claude-fable-5-1
+aliases     = fable
+efforts     = low, medium, high, xhigh, max
+description = Most capable model open to all customers. For demanding reasoning and long-horizon agentic work: multi-hour agent sessions, multistep deep research, analysis carried through to a finished document, spreadsheet or deck. Use when Opus 5.5 at higher effort still falls short. Slower; input USD 10 / output USD 50 per million tokens.
+source      = https://platform.claude.com/docs/en/models/fable-5-1/overview
+
+[model.claude-opus-5-5]
+enabled     = true
+cli         = claude
+name        = claude-opus-5-5
+aliases     = opus
+efforts     = low, medium, high, xhigh, max
+description = For long-running agentic coding and knowledge work: multi-hour autonomous coding, large-scale refactoring, complex systems engineering, vision-heavy workflows. Recommended starting point for most workloads. Moderate latency; input USD 4 / output USD 20 per million tokens.
+source      = https://platform.claude.com/docs/en/models/opus-5-5/overview
+
+[model.claude-sonnet-5-5]
+enabled     = true
+cli         = claude
+name        = claude-sonnet-5-5
+aliases     = sonnet
+efforts     = low, medium, high, xhigh, max
+description = Best combination of speed and intelligence. Everyday coding, code generation, data analysis, agentic tool use. Fast; input USD 2 / output USD 10 per million tokens.
+source      = https://platform.claude.com/docs/en/models/sonnet-5-5/overview
+
+[model.claude-haiku-5-5]
+enabled     = true
+cli         = claude
+name        = claude-haiku-5-5
+aliases     = haiku
+efforts     = low, medium, high, xhigh, max
+description = Fastest model, for high-volume, latency-sensitive work: classification, extraction, routing, chat, short tool tasks, subagent tasks. Use medium for most work including agentic coding, low for simple high-volume requests, high for longer agent tasks and strict instruction following. Fastest; input USD 0.10 / output USD 0.50 per million tokens (USD 0.50 / 2.50 for prompts over 100K tokens).
+source      = https://platform.claude.com/docs/en/models/haiku-5-5/overview
+
+# [effort.<cli>.<level>]: one effort level of a CLI, as the CLI's effort flag spells it.
+#   enabled      false removes the level's description. default: true
+#   description  what the level trades off, sent to Jev in the effort stage. default: empty
+#   source       documentation link, for maintainers only; never sent. default: empty
+
+# Claude effort levels. Source for all: https://platform.claude.com/docs/en/build-with-claude/effort
+
+[effort.claude.low]
+enabled     = true
+description = Most efficient: significant token savings with some capability reduction. Simpler tasks that need speed and low cost, such as subagents.
+source      = https://platform.claude.com/docs/en/build-with-claude/effort
+
+[effort.claude.medium]
+enabled     = true
+description = Balanced, with moderate token savings. Agentic tasks balancing speed, cost and performance.
+source      = https://platform.claude.com/docs/en/build-with-claude/effort
+
+[effort.claude.high]
+enabled     = true
+description = Spends as many tokens as the task needs for excellent results. Complex reasoning, difficult coding problems, agentic tasks.
+source      = https://platform.claude.com/docs/en/build-with-claude/effort
+
+[effort.claude.xhigh]
+enabled     = true
+description = Extended capability for long-horizon work: long-running agentic and coding tasks (over 30 minutes).
+source      = https://platform.claude.com/docs/en/build-with-claude/effort
+
+[effort.claude.max]
+enabled     = true
+description = Absolute maximum capability with no limit on token spending. The deepest reasoning; can overthink simple or structured tasks.
+source      = https://platform.claude.com/docs/en/build-with-claude/effort
+
+# Codex models: the latest generation (GPT-6) only. Efforts come from what the Codex CLI advertises
+# (~/.codex/models_cache.json, client 0.158.0), not from the API pages. No aliases: the app-server
+# model list (0.162.1) has no short names, and its display names differ from the names only in case.
+# Sources: https://developers.openai.com/api/docs/models/<id> and https://learn.chatgpt.com/docs/models
+
+[model.gpt-6-astra]
+enabled     = true
+cli         = codex
+name        = gpt-6-astra
+# aliases     =
+efforts     = low, medium, high, xhigh, max, ultra
+description = Frontier intelligence for the most demanding end-to-end reasoning, coding, computer use, research and documents, where quality and judgment dominate. Input USD 10 / output USD 50 per million tokens.
+source      = https://developers.openai.com/api/docs/models/gpt-6-astra
+
+[model.gpt-6.1-sol]
+enabled     = true
+cli         = codex
+name        = gpt-6.1-sol
+# aliases     =
+efforts     = low, medium, high, xhigh, max, ultra
+description = Workhorse for complex coding and agent workflows; better factual reliability than 5.6 Sol. The capable everyday choice. Input USD 2 / output USD 10 per million tokens.
+source      = https://developers.openai.com/api/docs/models/gpt-6.1-sol
+
+[model.gpt-6-luna]
+enabled     = true
+cli         = codex
+name        = gpt-6-luna
+# aliases     =
+efforts     = low, medium, high, xhigh, max
+description = Fast and affordable: focused, high-volume extraction, classification, transformations, structured summaries and focused coding. Input USD 0.10 / output USD 0.50 per million tokens.
+source      = https://developers.openai.com/api/docs/models/gpt-6-luna
+
+# Codex effort levels. Source for all: https://developers.openai.com/api/docs/guides/reasoning
+
+[effort.codex.low]
+enabled     = true
+description = Modest reasoning for scoped tool use, planning and coding; favours latency and cost.
+source      = https://developers.openai.com/api/docs/guides/reasoning
+
+[effort.codex.medium]
+enabled     = true
+description = Balanced depth and reliability for multi-step agentic coding, research and everyday work.
+source      = https://developers.openai.com/api/docs/guides/reasoning
+
+[effort.codex.high]
+enabled     = true
+description = Harder debugging and planning; favours quality over latency.
+source      = https://developers.openai.com/api/docs/guides/reasoning
+
+[effort.codex.xhigh]
+enabled     = true
+description = Long-running deep research, security or code review, where the gain justifies the extra cost and time.
+source      = https://developers.openai.com/api/docs/guides/reasoning
+
+[effort.codex.max]
+enabled     = true
+description = The most demanding problems: more exploration and verification, depth over speed.
+source      = https://developers.openai.com/api/docs/guides/reasoning
+
+[effort.codex.ultra]
+enabled     = true
+description = CLI-level orchestration that spawns parallel subagents automatically. Only for complex work that divides into meaningful independent parts.
+source      = https://learn.chatgpt.com/docs/models
