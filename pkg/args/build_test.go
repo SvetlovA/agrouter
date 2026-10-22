@@ -135,6 +135,9 @@ func TestBuildMadeUpCLI(t *testing.T) {
 timeout         = 10s
 routing_policy  = Prefer the cheapest option.
 complexity_policy = Judge the whole codebase.
+request_tokens    = 20000
+bytes_per_token   = 3
+log_dir           = logs
 
 [cli.zeta]
 command     = zeta-agent

@@ -22,12 +22,12 @@ func TestAskScore(t *testing.T) {
 			"probabilities":{"0":0,"1":0.5,"2":0.5},"confidence":0.7,
 			"legend":{"0":"small","1":"medium","2":"large"}}}}`)
 	})
-	answers, err := c.Ask(t.Context(), Request{Model: "test-jev", State: map[string]any{"docs": []string{"three services"}},
+	resp, err := c.Ask(t.Context(), Request{Model: "test-jev", State: map[string]any{"docs": []string{"three services"}},
 		Questions: map[string]Question{"complexity": q}})
 	require.NoError(t, err)
 	assert.Equal(t, Answer{Type: TypeScore, Score: 1.5, Confidence: 0.7,
 		Probabilities: map[string]float64{"0": 0, "1": 0.5, "2": 0.5},
-		Legend:        map[string]string{"0": "small", "1": "medium", "2": "large"}}, answers["complexity"])
+		Legend:        map[string]string{"0": "small", "1": "medium", "2": "large"}}, resp.Answers["complexity"])
 }
 
 func TestScoreValidation(t *testing.T) {

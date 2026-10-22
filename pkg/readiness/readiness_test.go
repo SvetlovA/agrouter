@@ -225,7 +225,7 @@ func TestCheck_MultipleChecks(t *testing.T) {
 // a CLI that exists only in a local config layer gets readiness from configuration alone
 func TestCheck_ThirdCLIFromLocalConfig(t *testing.T) {
 	dir := t.TempDir()
-	embedded := "[agrouter]\ntimeout = 10s\nrouting_policy = cheap\ncomplexity_policy = whole\n" +
+	embedded := "[agrouter]\ntimeout = 10s\nrouting_policy = cheap\ncomplexity_policy = whole\nrequest_tokens = 20000\nbytes_per_token = 3\nlog_dir = logs\n" +
 		"[cli.tool-a]\ncommand = tool-a\nexec_args = []\nmodel_args = [\"-m\", \"{model}\"]\nprompt_args = [\"{prompt}\"]\n"
 	local := "[cli.tool-c]\ncommand = " + os.Args[0] + "\nexec_args = []\nmodel_args = [\"-m\", \"{model}\"]\nprompt_args = [\"{prompt}\"]\n" +
 		"[cli.tool-c.availability]\nchecks = status\nunknown = block\n" +

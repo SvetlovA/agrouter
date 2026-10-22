@@ -17,7 +17,7 @@ import (
 
 // JevClient asks Jev typed questions about a state; *jev.Client implements it.
 type JevClient interface {
-	Ask(ctx context.Context, req jev.Request) (map[string]jev.Answer, error)
+	Ask(ctx context.Context, req jev.Request) (jev.Response, error)
 }
 
 // ErrCannotDecide means Jev could not decide and more than one CLI is still eligible, so there is
@@ -35,14 +35,36 @@ type Router struct {
 	budget prompt.Budget
 }
 
-// New checks the questions against Jev's budget over the whole catalog and returns a router asking
-// client. A question over budget is a config error.
+// ErrRequestTokensOverLimit means request_tokens, with the reserve, exceeds what the routing
+// provider takes in one request.
+var ErrRequestTokensOverLimit = errors.New("request_tokens over the provider limit")
+
+// providerReserve is the room, in tokens, kept below the provider's limits for the estimate's error.
+const providerReserve = 2000
+
+// New checks request_tokens against the provider's limits and the questions against request_tokens
+// over the whole catalog, and returns a router asking client. Either check failing is a config error.
 func New(cfg *config.Config, cat *catalog.Catalog, client JevClient) (*Router, error) {
+	if err := checkLimits(cfg.Agrouter); err != nil {
+		return nil, err
+	}
 	b, err := budget(cfg, cat)
 	if err != nil {
 		return nil, err
 	}
 	return &Router{cfg: cfg, jev: client, budget: b}, nil
+}
+
+// checkLimits is an error when request_tokens, less providerReserve, would pass the provider's
+// limit for one question or for one whole request in the configured mode.
+func checkLimits(a config.Agrouter) error {
+	perQuestion, perRequest := jev.Limits(a.LongContext)
+	limit := min(perQuestion, perRequest)
+	if a.RequestTokens > limit-providerReserve {
+		return fmt.Errorf("config: [agrouter]: %w: request_tokens = %d, the provider takes %d per request (long_context = %t) less a %d reserve for the estimate, so at most %d",
+			ErrRequestTokensOverLimit, a.RequestTokens, limit, a.LongContext, providerReserve, limit-providerReserve)
+	}
+	return nil
 }
 
 // Decision is what runs: the CLI, and the model and effort to emit through its templates.

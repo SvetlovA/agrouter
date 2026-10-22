@@ -23,7 +23,7 @@ import (
 // pickAt), the complexity Score with its last level, and the Nouls (relevance, evidence) with 0.5,
 // over whatever criteria each request sends.
 func evalMock(pick string) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
 		out := map[string]jev.Answer{}
 		for id, q := range req.Questions {
 			if q.Type == jev.TypeNoul {
@@ -47,7 +47,7 @@ func evalMock(pick string) *mocks.JevClientMock {
 			out[id] = jev.Answer{Type: jev.TypeChoice, Choice: choice, Probabilities: probs, Confidence: 0.8}
 		}
 		return out, nil
-	}}
+	})}
 }
 
 // pickAt is the criterion name of option id pick ("<section>@<effort>" or "<section>") in the stage

@@ -18,6 +18,10 @@ jev_model = jev-latest
 timeout   = 10s
 routing_policy    = Prefer the cheapest option; compare ` + "`models`" + ` "well".
 complexity_policy = Judge the whole codebase.
+request_tokens    = 20000
+bytes_per_token   = 3
+long_context      = false
+log_dir           = .agrouter/logs
 
 [cli.alpha]
 command               = alpha
@@ -101,6 +105,9 @@ func TestLoad_Embedded(t *testing.T) {
 		Timeout:          10 * time.Second,
 		RoutingPolicy:    "Prefer the cheapest option; compare `models` \"well\".",
 		ComplexityPolicy: "Judge the whole codebase.",
+		RequestTokens:    20000,
+		BytesPerToken:    3,
+		LogDir:           ".agrouter/logs",
 	}, cfg.Agrouter)
 
 	require.Len(t, cfg.CLIs, 2)
@@ -190,6 +197,110 @@ name = local-new
 	assert.Equal(t, []string{"alpha-big", "alpha-small", "beta-one", "local-new"}, modelSections(cfg))
 	assert.Equal(t, "Local description.", cfg.Models[0].Description)
 	assert.Equal(t, "alpha-big-1", cfg.Models[0].Name, "other model keys stay embedded")
+}
+
+func TestLoad_SizingKeysLayering(t *testing.T) {
+	tests := []struct {
+		name          string
+		global, local string
+		want          func(t *testing.T, a Agrouter)
+	}{
+		{
+			name: "omitted everywhere keeps the embedded values",
+			want: func(t *testing.T, a Agrouter) {
+				assert.False(t, a.LongContext)
+				assert.Equal(t, 20000, a.RequestTokens)
+				assert.InDelta(t, 3.0, a.BytesPerToken, 0)
+				assert.Equal(t, ".agrouter/logs", a.LogDir)
+			},
+		},
+		{
+			name:   "global overrides the embedded layer and the rest is inherited",
+			global: "[agrouter]\nlong_context = true\nrequest_tokens = 120000\n",
+			want: func(t *testing.T, a Agrouter) {
+				assert.True(t, a.LongContext)
+				assert.Equal(t, 120000, a.RequestTokens)
+				assert.InDelta(t, 3.0, a.BytesPerToken, 0, "omitted in global: embedded value")
+				assert.Equal(t, ".agrouter/logs", a.LogDir, "omitted in global: embedded value")
+			},
+		},
+		{
+			name:   "local overrides global per key",
+			global: "[agrouter]\nlong_context = true\nrequest_tokens = 120000\nbytes_per_token = 2.5\n",
+			local:  "[agrouter]\nrequest_tokens = 90000\nlong_context = false\nlog_dir = logs/agrouter\n",
+			want: func(t *testing.T, a Agrouter) {
+				assert.False(t, a.LongContext, "local false beats global true")
+				assert.Equal(t, 90000, a.RequestTokens)
+				assert.InDelta(t, 2.5, a.BytesPerToken, 0, "omitted in local: global value")
+				assert.Equal(t, "logs/agrouter", a.LogDir)
+			},
+		},
+		{
+			name:  "accepted boolean spellings",
+			local: "[agrouter]\nlong_context = 1\n",
+			want:  func(t *testing.T, a Agrouter) { assert.True(t, a.LongContext) },
+		},
+		{
+			name:  "fractional ratio",
+			local: "[agrouter]\nbytes_per_token = 2.75\n",
+			want:  func(t *testing.T, a Agrouter) { assert.InDelta(t, 2.75, a.BytesPerToken, 0) },
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := load(t, tc.global, tc.local)
+			require.NoError(t, err)
+			tc.want(t, cfg.Agrouter)
+		})
+	}
+}
+
+func TestLoad_LogDir(t *testing.T) {
+	abs := filepath.Join(t.TempDir(), "agrouter-logs")
+	tests := []struct {
+		name  string
+		local string
+		want  string
+	}{
+		{name: "relative", local: "[agrouter]\nlog_dir = var/log\n", want: "var/log"},
+		{name: "absolute", local: "[agrouter]\nlog_dir = " + abs + "\n", want: abs},
+		{name: "surrounding spaces trimmed", local: "[agrouter]\nlog_dir =   var/log  \n", want: "var/log"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := load(t, "", tc.local)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, cfg.Agrouter.LogDir, "the config keeps the path as written; setup resolves it")
+		})
+	}
+
+	t.Run("blank is an error", func(t *testing.T) {
+		_, err := load(t, "", "[agrouter]\nlog_dir =\n")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "[agrouter] log_dir: must not be empty")
+	})
+}
+
+func TestLoad_SizingKeyErrors(t *testing.T) {
+	tests := []struct {
+		name  string
+		local string
+		want  string
+	}{
+		{name: "bad long_context", local: "[agrouter]\nlong_context = sometimes\n", want: `[agrouter] long_context = "sometimes" (local `},
+		{name: "request_tokens not a number", local: "[agrouter]\nrequest_tokens = many\n", want: `[agrouter] request_tokens = "many" (local `},
+		{name: "request_tokens fractional", local: "[agrouter]\nrequest_tokens = 1.5\n", want: `[agrouter] request_tokens = "1.5" (local `},
+		{name: "request_tokens with unit", local: "[agrouter]\nrequest_tokens = 30k\n", want: `[agrouter] request_tokens = "30k" (local `},
+		{name: "bytes_per_token not a number", local: "[agrouter]\nbytes_per_token = three\n", want: `[agrouter] bytes_per_token = "three" (local `},
+		{name: "bytes_per_token out of range", local: "[agrouter]\nbytes_per_token = 1e999\n", want: `[agrouter] bytes_per_token = "1e999" (local `},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := load(t, "", tc.local)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+		})
+	}
 }
 
 func TestLoad_Disabled(t *testing.T) {
@@ -385,6 +496,14 @@ func TestLoad_InlineCommentKeptInValue(t *testing.T) {
 	cfg, err := load(t, "", "[agrouter]\njev_model = jev-1 ; pinned\n")
 	require.NoError(t, err)
 	assert.Equal(t, "jev-1 ; pinned", cfg.Agrouter.JevModel, "IgnoreInlineComment: comments must be on their own lines")
+}
+
+func TestLocalDir(t *testing.T) {
+	work := filepath.Join("some", "work")
+	assert.Equal(t, filepath.Join(work, ".agrouter"), LocalDir(work))
+	_, local, err := DefaultPaths(work)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Dir(local), LocalDir(work), "the local config lives in the local directory")
 }
 
 func TestDefaultPaths(t *testing.T) {

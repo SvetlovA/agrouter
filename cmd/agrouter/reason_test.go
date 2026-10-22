@@ -16,6 +16,9 @@ import (
 	"github.com/SvetlovA/agrouter/pkg/router"
 )
 
+// tooLongDetail is the fixed detail of the request_too_long reason.
+const tooLongDetail = "routing request over the provider's context length; lower request_tokens or bytes_per_token"
+
 func TestFailureReason(t *testing.T) {
 	secret := errors.New("SECRET body with the prompt")
 	stage := func(level string, err error) error { return &router.StageError{Stage: level, Err: err} }
@@ -40,6 +43,27 @@ func TestFailureReason(t *testing.T) {
 			want: &reasonJSON{reasonAPIError, "cli", "Jev CLI selection failed: Jev returned an error status"}},
 		{name: "server error", err: stage(router.LevelComplexity, &jev.StatusError{Status: 500, Body: "SECRET"}),
 			want: &reasonJSON{reasonAPIError, "complexity", "Jev project complexity scoring failed: Jev returned an error status"}},
+		{name: "request over the context length", err: stage(router.LevelModel,
+			&jev.StatusError{Status: http.StatusBadRequest, ErrorType: "max_tokens_exceeded", Body: "SECRET"}),
+			want: &reasonJSON{reasonTooLong, "model", "Jev model selection failed: " + tooLongDetail}},
+		{name: "chunk over the context length", err: stage(router.LevelEffort,
+			fmt.Errorf("route 2 of 3: estimated 31000 tokens, request_tokens is 30000: %w",
+				&jev.StatusError{Status: http.StatusBadRequest, ErrorType: "max_tokens_exceeded"})),
+			want: &reasonJSON{reasonTooLong, "effort", "Jev effort selection failed: " + tooLongDetail}},
+		{name: "docs over the context length", err: stage(router.LevelComplexity,
+			&jev.StatusError{Status: http.StatusBadRequest, ErrorType: "max_tokens_exceeded"}),
+			want: &reasonJSON{reasonTooLong, "complexity", "Jev project complexity scoring failed: " + tooLongDetail}},
+		{name: "overflow through the cannot-decide error", err: fmt.Errorf("%w between a, b: %w", router.ErrCannotDecide,
+			stage(router.LevelCLI, &jev.StatusError{Status: http.StatusBadRequest, ErrorType: "max_tokens_exceeded"})),
+			want: &reasonJSON{reasonTooLong, "cli", "Jev CLI selection failed: " + tooLongDetail}},
+		{name: "400 of another type", err: stage(router.LevelModel,
+			&jev.StatusError{Status: http.StatusBadRequest, ErrorType: "invalid_request", Body: "SECRET"}),
+			want: &reasonJSON{reasonAPIError, "model", "Jev model selection failed: Jev returned an error status"}},
+		{name: "400 without a type", err: stage(router.LevelModel, &jev.StatusError{Status: http.StatusBadRequest, Body: "SECRET"}),
+			want: &reasonJSON{reasonAPIError, "model", "Jev model selection failed: Jev returned an error status"}},
+		{name: "422 with the overflow type", err: stage(router.LevelModel,
+			&jev.StatusError{Status: http.StatusUnprocessableEntity, ErrorType: "max_tokens_exceeded", Body: "SECRET"}),
+			want: &reasonJSON{reasonAPIError, "model", "Jev model selection failed: Jev returned an error status"}},
 		{name: "transport", err: stage(router.LevelModel, fmt.Errorf("%w: %w", jev.ErrTransport, secret)),
 			want: &reasonJSON{reasonTransportError, "model", "Jev model selection failed: Jev could not be reached"}},
 		{name: "invalid answer", err: stage(router.LevelModel, fmt.Errorf("%w: %w", jev.ErrInvalidAnswer, secret)),
@@ -117,6 +141,76 @@ func failingEnv(t *testing.T, stage string, fail func(*fakeJev)) *env {
 	return e
 }
 
+// Jev error bodies: the structured overflow and a 400 of another type, both echoing text that must
+// never reach the output.
+const (
+	tooLongBody = `{"detail":{"error_type":"max_tokens_exceeded","message":"SECRET stage rejected"}}`
+	otherBody   = `{"detail":{"error_type":"invalid_request","message":"SECRET stage rejected"}}`
+)
+
+func TestApp_RequestTooLong(t *testing.T) {
+	const wantMessage = "Jev model selection failed: " + tooLongDetail
+	wantReason := map[string]any{"code": reasonTooLong, "stage": "model", "message": wantMessage}
+
+	t.Run("decision", func(t *testing.T) {
+		e := failingEnv(t, "model", func(f *fakeJev) { f.failBody = tooLongBody })
+		r := e.run([]string{"--cli=alpha", "SECRET PROMPT fix it"}, nil)
+
+		require.Equal(t, exitOK, r.code, r.stderr)
+		d := decision(t, r.stdout)
+		assert.Equal(t, wantReason, d["reason"])
+		assert.Equal(t, map[string]any{
+			"model":  map[string]any{"code": nullRoutingFailed, "message": "Model delegated to the child after routing failed"},
+			"effort": map[string]any{"code": nullRoutingFailed, "message": "Effort delegated to the child after routing failed"},
+		}, d["null_reasons"])
+		assert.Len(t, e.jev.requests(), 1, "the overflow is never resent")
+		assert.NotContains(t, r.stdout, "SECRET stage rejected")
+		assert.NotContains(t, r.stderr, "SECRET stage rejected")
+	})
+
+	t.Run("decision with more than one CLI left", func(t *testing.T) {
+		e := failingEnv(t, "cli", func(f *fakeJev) { f.failBody = tooLongBody })
+		r := e.run([]string{"fix it"}, nil)
+
+		assert.Equal(t, exitUsage, r.code)
+		d := decision(t, r.stdout)
+		assert.Equal(t, map[string]any{"code": reasonTooLong, "stage": "cli",
+			"message": "Jev CLI selection failed: " + tooLongDetail}, d["reason"])
+		assert.Len(t, e.jev.requests(), 1, "the overflow is never resent")
+	})
+
+	t.Run("exec fallback", func(t *testing.T) {
+		e := failingEnv(t, "model", func(f *fakeJev) { f.failBody = tooLongBody })
+		r := e.run([]string{"exec", "alpha", "fix it"}, nil)
+
+		require.Equal(t, exitOK, r.code, r.stderr)
+		warning, s := fallbackLog(t, r.stderr)
+		assert.Contains(t, warning, "Jev routing failed at the model stage (request_too_long)")
+		assert.Equal(t, wantReason, s["reason"])
+		assert.Len(t, e.jev.requests(), 1, "the overflow is never resent")
+		assert.NotContains(t, r.stderr, "SECRET stage rejected")
+	})
+
+	t.Run("other 400 and 422 stay API errors", func(t *testing.T) {
+		for name, fail := range map[string]func(*fakeJev){
+			"400 of another type": func(f *fakeJev) { f.failBody = otherBody },
+			"400 with plain text": func(*fakeJev) {},
+			"422":                 func(f *fakeJev) { f.failStatus, f.failBody = http.StatusUnprocessableEntity, tooLongBody },
+		} {
+			t.Run(name, func(t *testing.T) {
+				e := failingEnv(t, "model", fail)
+				r := e.run([]string{"--cli=alpha", "fix it"}, nil)
+
+				require.Equal(t, exitOK, r.code, r.stderr)
+				reason, _ := decision(t, r.stdout)["reason"].(map[string]any)
+				assert.Equal(t, map[string]any{"code": reasonAPIError, "stage": "model",
+					"message": failureMessage(reasonAPIError, "model")}, reason)
+				assert.Len(t, e.jev.requests(), 1, "a rejected request is not resent")
+			})
+		}
+	})
+}
+
 func TestApp_FailureReasons(t *testing.T) {
 	const prompt = "SECRET PROMPT fix it"
 	causes := []struct {
@@ -128,6 +222,11 @@ func TestApp_FailureReasons(t *testing.T) {
 		{name: "missing key", fail: func(*fakeJev) {}, argv: []string{"--jev-api-key="}, code: reasonNoKey},
 		{name: "unauthorized", fail: func(f *fakeJev) { f.failStatus = http.StatusUnauthorized }, code: reasonUnauthorized},
 		{name: "API error", fail: func(f *fakeJev) { f.failStatus = http.StatusInternalServerError }, code: reasonAPIError},
+		{name: "request too long", fail: func(f *fakeJev) { f.failBody = tooLongBody }, code: reasonTooLong},
+		{name: "400 of another type", fail: func(f *fakeJev) { f.failBody = otherBody }, code: reasonAPIError},
+		{name: "422", fail: func(f *fakeJev) {
+			f.failStatus, f.failBody = http.StatusUnprocessableEntity, tooLongBody
+		}, code: reasonAPIError},
 		{name: "timeout", fail: func(f *fakeJev) { f.failHang = true }, code: reasonTimeout},
 		{name: "transport error", fail: func(f *fakeJev) { f.failDrop = true }, code: reasonTransportError},
 		{name: "invalid answer", fail: func(f *fakeJev) {

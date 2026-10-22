@@ -97,11 +97,11 @@ func TestAskOK(t *testing.T) {
 		_, _ = io.WriteString(w, okBody)
 	})
 
-	answers, err := c.Ask(t.Context(), testRequest())
+	resp, err := c.Ask(t.Context(), testRequest())
 	require.NoError(t, err)
 	assert.Equal(t, map[string]Answer{"route": {
 		Type: TypeChoice, Choice: "a", Probabilities: map[string]float64{"a": 0.7, "b@high": 0.3}, Confidence: 0.6,
-	}}, answers)
+	}}, resp.Answers)
 	assert.Equal(t, "Bearer "+testKey, got.auth)
 	assert.Equal(t, "application/json", got.contentType)
 	assert.Equal(t, "jev-latest", got.body["model"])
@@ -138,10 +138,10 @@ func TestAskChunkRequest(t *testing.T) {
 		"relevance":{"type":"noul","noul":0.25}}}`))
 	req := testRequest()
 	req.Questions["relevance"] = relevanceQuestion()
-	answers, err := c.Ask(t.Context(), req)
+	resp, err := c.Ask(t.Context(), req)
 	require.NoError(t, err)
-	assert.Equal(t, "b@high", answers["route"].Choice)
-	assert.Equal(t, Answer{Type: TypeNoul, Noul: 0.25}, answers["relevance"])
+	assert.Equal(t, "b@high", resp.Answers["route"].Choice)
+	assert.Equal(t, Answer{Type: TypeNoul, Noul: 0.25}, resp.Answers["relevance"])
 }
 
 func TestAskStatusErrors(t *testing.T) {
@@ -151,7 +151,7 @@ func TestAskStatusErrors(t *testing.T) {
 		sentinel error
 	}{
 		{"401", http.StatusUnauthorized, ErrUnauthorized},
-		{"422", http.StatusUnprocessableEntity, ErrUnprocessable},
+		{"422", http.StatusUnprocessableEntity, nil},
 		{"500", http.StatusInternalServerError, nil},
 		{"400", http.StatusBadRequest, nil},
 	}
@@ -169,11 +169,164 @@ func TestAskStatusErrors(t *testing.T) {
 			assert.Equal(t, tt.status, serr.Status)
 			assert.JSONEq(t, `{"error":"bad\nthing"}`, serr.Body)
 			assert.Equal(t, int32(1), calls.Load(), "not retried")
-			for _, s := range []error{ErrUnauthorized, ErrUnprocessable, ErrOverloaded, ErrMalformed} {
+			for _, s := range []error{ErrUnauthorized, ErrTooLong, ErrOverloaded, ErrMalformed} {
 				assert.Equal(t, errors.Is(s, tt.sentinel), errors.Is(err, s), s.Error())
 			}
 		})
 	}
+}
+
+func TestLimits(t *testing.T) {
+	tests := []struct {
+		name                    string
+		longContext             bool
+		perQuestion, perRequest int
+	}{
+		{name: "default", perQuestion: 32_000, perRequest: 64_000},
+		{name: "long context", longContext: true, perQuestion: 262_000, perRequest: 262_000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			perQuestion, perRequest := Limits(tt.longContext)
+			assert.Equal(t, tt.perQuestion, perQuestion)
+			assert.Equal(t, tt.perRequest, perRequest)
+		})
+	}
+}
+
+func TestAskLongContextHeader(t *testing.T) {
+	tests := []struct {
+		name        string
+		longContext bool
+		want        []string
+	}{
+		{name: "default sends no header"},
+		{name: "long context sends the header", longContext: true, want: []string{"true"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				got = r.Header.Values("TypeSafe-Danger-Zone-Long-Context")
+				_, _ = io.WriteString(w, okBody)
+			})
+			c.LongContext = tt.longContext
+			_, err := c.Ask(t.Context(), testRequest())
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestAskTooLong(t *testing.T) {
+	const tooLong = `{"detail":{"error_type":"max_tokens_exceeded"}}`
+	tests := []struct {
+		name      string
+		status    int
+		body      string
+		tooLong   bool
+		errorType string
+	}{
+		{name: "structured 400", status: http.StatusBadRequest, body: tooLong, tooLong: true, errorType: "max_tokens_exceeded"},
+		{name: "structured 400 with other detail fields", status: http.StatusBadRequest, tooLong: true,
+			body: `{"detail":{"message":"too long","error_type":"max_tokens_exceeded","limit":64000}}`, errorType: "max_tokens_exceeded"},
+		{name: "other error type", status: http.StatusBadRequest, body: `{"detail":{"error_type":"invalid_request"}}`,
+			errorType: "invalid_request"},
+		{name: "400 without a body", status: http.StatusBadRequest},
+		{name: "400 with a text body", status: http.StatusBadRequest, body: "max_tokens_exceeded"},
+		{name: "400 with a string detail", status: http.StatusBadRequest, body: `{"detail":"max_tokens_exceeded"}`},
+		{name: "400 with a top-level error type", status: http.StatusBadRequest, body: `{"error_type":"max_tokens_exceeded"}`},
+		{name: "400 with a malformed body", status: http.StatusBadRequest, body: `{"detail":{"error_type":"max_tokens_exceeded"`},
+		{name: "400 with a truncated body", status: http.StatusBadRequest, body: `{"detail":{"error_type":"max_tokens_`},
+		{name: "400 with a non-string type", status: http.StatusBadRequest, body: `{"detail":{"error_type":7}}`},
+		{name: "400 with a type at the limit", status: http.StatusBadRequest,
+			body: `{"detail":{"error_type":"` + strings.Repeat("x", maxErrorType) + `"}}`, errorType: strings.Repeat("x", maxErrorType)},
+		{name: "400 with a type over the limit", status: http.StatusBadRequest,
+			body: `{"detail":{"error_type":"` + strings.Repeat("x", maxErrorType+1) + `"}}`},
+		{name: "422 with the structured body", status: http.StatusUnprocessableEntity, body: tooLong, errorType: "max_tokens_exceeded"},
+		{name: "500 with the structured body", status: http.StatusInternalServerError, body: tooLong, errorType: "max_tokens_exceeded"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls atomic.Int32
+			c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.WriteHeader(tt.status)
+				_, _ = io.WriteString(w, tt.body)
+			})
+			_, err := c.Ask(t.Context(), testRequest())
+			var serr *StatusError
+			require.ErrorAs(t, err, &serr)
+			assert.Equal(t, tt.status, serr.Status)
+			assert.Equal(t, tt.errorType, serr.ErrorType)
+			assert.Equal(t, tt.tooLong, errors.Is(err, ErrTooLong))
+			require.NotErrorIs(t, err, ErrUnauthorized)
+			require.NotErrorIs(t, err, ErrOverloaded)
+			assert.Equal(t, int32(1), calls.Load(), "not retried")
+		})
+	}
+}
+
+func TestAskTooLongErrorBody(t *testing.T) {
+	t.Run("the type is read before the body is truncated", func(t *testing.T) {
+		body := `{"detail":{"padding":"` + strings.Repeat("x", 5000) + `","error_type":"max_tokens_exceeded"}}`
+		c := newTestClient(t, reply(http.StatusBadRequest, body))
+		_, err := c.Ask(t.Context(), testRequest())
+		require.ErrorIs(t, err, ErrTooLong)
+		var serr *StatusError
+		require.ErrorAs(t, err, &serr)
+		assert.Less(t, len(serr.Body), len(body))
+		assert.NotContains(t, serr.Body, "max_tokens_exceeded")
+	})
+	t.Run("the body still shows the type and redacts the state", func(t *testing.T) {
+		body := `{"detail":{"error_type":"max_tokens_exceeded","echo":"fix it"}}`
+		c := newTestClient(t, reply(http.StatusBadRequest, body))
+		_, err := c.Ask(t.Context(), testRequest())
+		require.ErrorIs(t, err, ErrTooLong)
+		assert.Contains(t, err.Error(), "max_tokens_exceeded")
+		assert.NotContains(t, err.Error(), "fix it")
+	})
+}
+
+func TestAskInputTokens(t *testing.T) {
+	const answer = `"answers":{"route":{"type":"choice","choice":"a","probabilities":{"a":0.7,"b@high":0.3},"confidence":0.6}}`
+	ptr := func(n int) *int { return &n }
+	tests := []struct {
+		name string
+		body string
+		want *int
+	}{
+		{name: "reported", body: `{` + answer + `,"usage":{"input_tokens":1234,"output_tokens":1}}`, want: ptr(1234)},
+		{name: "zero", body: `{` + answer + `,"usage":{"input_tokens":0}}`, want: ptr(0)},
+		{name: "usage absent", body: `{` + answer + `}`},
+		{name: "usage null", body: `{` + answer + `,"usage":null}`},
+		{name: "usage empty", body: `{` + answer + `,"usage":{}}`},
+		{name: "usage a number", body: `{` + answer + `,"usage":5}`},
+		{name: "usage a list", body: `{` + answer + `,"usage":[12]}`},
+		{name: "input tokens null", body: `{` + answer + `,"usage":{"input_tokens":null}}`},
+		{name: "input tokens a string", body: `{` + answer + `,"usage":{"input_tokens":"12"}}`},
+		{name: "input tokens a boolean", body: `{` + answer + `,"usage":{"input_tokens":true}}`},
+		{name: "input tokens an object", body: `{` + answer + `,"usage":{"input_tokens":{"n":12}}}`},
+		{name: "input tokens fractional", body: `{` + answer + `,"usage":{"input_tokens":12.5}}`},
+		{name: "input tokens negative", body: `{` + answer + `,"usage":{"input_tokens":-3}}`},
+		{name: "input tokens beyond int64", body: `{` + answer + `,"usage":{"input_tokens":99999999999999999999}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newTestClient(t, reply(http.StatusOK, tt.body))
+			resp, err := c.Ask(t.Context(), testRequest())
+			require.NoError(t, err, "usage never fails a valid answer")
+			assert.Equal(t, "a", resp.Answers["route"].Choice)
+			assert.Equal(t, tt.want, resp.InputTokens)
+		})
+	}
+}
+
+func TestAskInputTokensOnFailure(t *testing.T) {
+	c := newTestClient(t, reply(http.StatusOK, `{"answers":{},"usage":{"input_tokens":7}}`))
+	resp, err := c.Ask(t.Context(), testRequest())
+	require.ErrorIs(t, err, ErrMalformed)
+	assert.Equal(t, Response{}, resp, "no answers or tokens beside an error")
 }
 
 func TestAskRetriesThenSucceeds(t *testing.T) {
@@ -186,9 +339,9 @@ func TestAskRetriesThenSucceeds(t *testing.T) {
 			}
 			_, _ = io.WriteString(w, okBody)
 		})
-		answers, err := c.Ask(t.Context(), testRequest())
+		resp, err := c.Ask(t.Context(), testRequest())
 		require.NoError(t, err)
-		assert.Equal(t, "a", answers["route"].Choice)
+		assert.Equal(t, "a", resp.Answers["route"].Choice)
 		assert.Equal(t, int32(3), calls.Load())
 	}
 }
@@ -289,6 +442,17 @@ func TestAskRedactsEchoedKey(t *testing.T) {
 	assert.NotContains(t, err.Error(), testKey)
 }
 
+// requireUnprocessable asserts err is a plain 422 StatusError, matching no sentinel.
+func requireUnprocessable(t *testing.T, err error) {
+	t.Helper()
+	var serr *StatusError
+	require.ErrorAs(t, err, &serr)
+	assert.Equal(t, http.StatusUnprocessableEntity, serr.Status)
+	for _, s := range []error{ErrUnauthorized, ErrTooLong, ErrOverloaded, ErrMalformed} {
+		assert.NotErrorIs(t, err, s)
+	}
+}
+
 func TestAskRedactsEchoedState(t *testing.T) {
 	req := testRequest()
 	req.State = map[string]any{"prompt": "fix the \"secret\" bug\nnow", "files": []string{"token=abc"}}
@@ -298,7 +462,7 @@ func TestAskRedactsEchoedState(t *testing.T) {
 		_, _ = io.WriteString(w, `{"detail":[{"loc":["body","state"],"input":`+string(body)+`}]}`)
 	}
 	_, err := newTestClient(t, echo).Ask(t.Context(), req)
-	require.ErrorIs(t, err, ErrUnprocessable)
+	requireUnprocessable(t, err)
 	assert.NotContains(t, err.Error(), "secret")
 	assert.NotContains(t, err.Error(), "token=abc")
 	assert.Contains(t, err.Error(), `"loc":["body","state"]`)
@@ -311,7 +475,7 @@ func TestAskRedactsStateExcerpts(t *testing.T) {
 	// a validation error quoting only a prefix and a truncated middle of the inputs
 	body := `{"detail":"input too long: 'rotate the staging cred...' and 'word = hunter2-corr'"}`
 	_, err := newTestClient(t, reply(http.StatusUnprocessableEntity, body)).Ask(t.Context(), req)
-	require.ErrorIs(t, err, ErrUnprocessable)
+	requireUnprocessable(t, err)
 	assert.NotContains(t, err.Error(), "staging")
 	assert.NotContains(t, err.Error(), "hunter2")
 	assert.Contains(t, err.Error(), `{"detail":"input too long: '<redacted>...' and '<redacted>'"}`)
@@ -323,7 +487,7 @@ func TestAskRedactsStateEchoedWithoutHTMLEscaping(t *testing.T) {
 	// a server that escapes the newlines and tab but writes <, > and & as is
 	body := `{"detail":[{"input":"if a < b && c > d {\n\treturn\n}"}]}`
 	_, err := newTestClient(t, reply(http.StatusUnprocessableEntity, body)).Ask(t.Context(), req)
-	require.ErrorIs(t, err, ErrUnprocessable)
+	requireUnprocessable(t, err)
 	assert.Contains(t, err.Error(), `{"detail":[{"input":"<redacted>"}]}`)
 }
 
@@ -332,7 +496,7 @@ func TestAskRedactsMultilineExcerpt(t *testing.T) {
 	req.State = map[string]any{"prompt": "line one of the plan\nline two of the plan"}
 	body := `{"detail":"too long: 'line one of the plan\nline two...'"}`
 	_, err := newTestClient(t, reply(http.StatusUnprocessableEntity, body)).Ask(t.Context(), req)
-	require.ErrorIs(t, err, ErrUnprocessable)
+	requireUnprocessable(t, err)
 	assert.NotContains(t, err.Error(), "line one")
 	assert.NotContains(t, err.Error(), "line two")
 }
@@ -428,13 +592,13 @@ func TestAskProbabilitySlack(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			body := fmt.Sprintf(`{"answers":{"route":{"choice":"a","probabilities":{"a":0.5,"b@high":%g},"confidence":0}}}`, tc.other)
 			c := newTestClient(t, reply(http.StatusOK, body))
-			answers, err := c.Ask(t.Context(), testRequest())
+			resp, err := c.Ask(t.Context(), testRequest())
 			if tc.malformed {
 				require.ErrorIs(t, err, ErrMalformed)
 				return
 			}
 			require.NoError(t, err)
-			assert.Equal(t, map[string]float64{"a": 0.5, "b@high": tc.other}, answers["route"].Probabilities)
+			assert.Equal(t, map[string]float64{"a": 0.5, "b@high": tc.other}, resp.Answers["route"].Probabilities)
 		})
 	}
 }
@@ -458,9 +622,9 @@ func TestAskProbabilitySlackManyOptions(t *testing.T) {
 				}}})
 				require.NoError(t, err)
 				c := newTestClient(t, reply(http.StatusOK, string(body)))
-				answers, err := c.Ask(t.Context(), req)
+				resp, err := c.Ask(t.Context(), req)
 				require.NoError(t, err)
-				assert.Equal(t, probabilities, answers["route"].Probabilities)
+				assert.Equal(t, probabilities, resp.Answers["route"].Probabilities)
 			})
 		}
 	}

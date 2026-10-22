@@ -85,6 +85,16 @@ func noChild(t *testing.T) *mocks.CommandRunnerMock {
 	}}
 }
 
+// routingSkipped is the line a block of the synthetic alpha CLI found before routing prints ahead of its own line.
+func routingSkipped(reason string) string {
+	return "agrouter: routing skipped: alpha " + reason + "; routing provider was not called; child CLI was not started\n"
+}
+
+// runSkipped is the line a block of the synthetic alpha CLI found after routing prints ahead of its own line.
+func runSkipped(reason string) string {
+	return "agrouter: run skipped: alpha " + reason + "; child CLI was not started\n"
+}
+
 func TestApp_ExecPreflightBlocks(t *testing.T) {
 	both := []readiness.Evidence{exhausted(readiness.WindowFiveHour, time.Hour), exhausted(readiness.WindowWeekly, 72*time.Hour)}
 	tests := []struct {
@@ -94,28 +104,34 @@ func TestApp_ExecPreflightBlocks(t *testing.T) {
 		auth     readiness.Status // replaces auth available when set
 		missing  bool             // the executable is missing
 		code     int
+		skip     string // the reason in the routing-skipped line
 		line     string
 	}{
 		{name: "quota, default prefix, latest reset", config: usageCheck("error_message = Limit reached"),
-			evidence: both, code: runner.ExitStartFailure,
+			evidence: both, code: runner.ExitStartFailure, skip: "subscription quota exhausted",
 			line: "agrouter: Limit reached; five-hour and weekly subscription quota exhausted; resets at 2026-10-16T12:00:00Z"},
 		{name: "quota, severity prefix", config: usageCheck(`error_prefix = "ERROR: agrouter: "`, "error_message = Limit reached"),
 			evidence: []readiness.Evidence{free(readiness.WindowFiveHour), exhausted(readiness.WindowWeekly, 2*time.Hour)},
-			code:     runner.ExitStartFailure,
-			line:     "ERROR: agrouter: Limit reached; weekly subscription quota exhausted; resets at 2026-10-13T14:00:00Z"},
+			code:     runner.ExitStartFailure, skip: "subscription quota exhausted",
+			line: "ERROR: agrouter: Limit reached; weekly subscription quota exhausted; resets at 2026-10-13T14:00:00Z"},
 		{name: "quota, unverified reset left out", config: availability(),
 			evidence: []readiness.Evidence{exhausted(readiness.WindowFiveHour, time.Hour), exhausted(readiness.WindowWeekly, 0)},
-			code:     runner.ExitStartFailure, line: "agrouter: five-hour and weekly subscription quota exhausted"},
+			code:     runner.ExitStartFailure, skip: "subscription quota exhausted",
+			line: "agrouter: five-hour and weekly subscription quota exhausted"},
 		{name: "weekly survives a five-hour reset", config: availability(),
 			evidence: []readiness.Evidence{free(readiness.WindowFiveHour), exhausted(readiness.WindowWeekly, 24*time.Hour)},
-			code:     runner.ExitStartFailure, line: "agrouter: weekly subscription quota exhausted; resets at 2026-10-14T12:00:00Z"},
+			code:     runner.ExitStartFailure, skip: "subscription quota exhausted",
+			line: "agrouter: weekly subscription quota exhausted; resets at 2026-10-14T12:00:00Z"},
 		{name: "auth failure", auth: readiness.StatusUnavailable, evidence: both[:1], code: runner.ExitStartFailure,
-			line: "agrouter: alpha unavailable: auth_failed"},
+			skip: "authentication failed", line: "agrouter: alpha unavailable: auth_failed"},
 		{name: "missing executable", missing: true, code: runner.ExitStartFailure,
-			line: "agrouter: alpha unavailable: executable_missing"},
+			skip: "executable missing", line: "agrouter: alpha unavailable: executable_missing"},
+		{name: "unsupported model", evidence: []readiness.Evidence{{Dimension: readiness.DimensionCapability,
+			Status: readiness.StatusUnavailable, Reason: readiness.ReasonUnsupportedModel, Check: "models"}},
+			code: runner.ExitStartFailure, skip: "model not supported", line: "agrouter: alpha unavailable: unsupported_model"},
 		{name: "strict unknown", config: availability("unknown = block"),
 			evidence: []readiness.Evidence{unknownQuota(readiness.ReasonProbeThrottled)}, code: exitUsage,
-			line: "agrouter: alpha availability unverified: probe_throttled"},
+			skip: "availability unverified", line: "agrouter: alpha availability unverified: probe_throttled"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -138,7 +154,8 @@ func TestApp_ExecPreflightBlocks(t *testing.T) {
 
 			assert.Equal(t, tc.code, r.code)
 			assert.Empty(t, r.stdout)
-			assert.Equal(t, tc.line+"\n", r.stderr, "one line, no selection line")
+			assert.Equal(t, routingSkipped(tc.skip)+tc.line+"\n", r.stderr,
+				"the explanation, then the block line; no selection line")
 			assert.Empty(t, e.jev.requests(), "no complexity or selection request")
 		})
 	}
@@ -197,7 +214,8 @@ func TestApp_ExecPreflightFiltersOptions(t *testing.T) {
 		r := e.runWithRunner([]string{"exec", "alpha", "--model=strong", "fix it"}, nil, noChild(t))
 
 		assert.Equal(t, runner.ExitStartFailure, r.code)
-		assert.Equal(t, "agrouter: weekly subscription quota exhausted; resets at 2026-10-13T13:00:00Z\n", r.stderr)
+		assert.Equal(t, routingSkipped("subscription quota exhausted")+
+			"agrouter: weekly subscription quota exhausted; resets at 2026-10-13T13:00:00Z\n", r.stderr)
 		assert.Empty(t, e.jev.requests())
 	})
 
@@ -324,7 +342,8 @@ func TestApp_ExecBlockedAcrossInvocations(t *testing.T) {
 	e.checker = checker
 	e.jev.pick = "fast@high"
 
-	const line = "agrouter: Limit reached; weekly subscription quota exhausted; resets at 2026-10-14T12:00:00Z\n"
+	const line = "agrouter: routing skipped: alpha subscription quota exhausted; routing provider was not called; child CLI was not started\n" +
+		"agrouter: Limit reached; weekly subscription quota exhausted; resets at 2026-10-14T12:00:00Z\n"
 	for i := range 3 {
 		r := e.runWithRunner([]string{"exec", "alpha", "fix it"}, nil, noChild(t))
 		assert.Equal(t, runner.ExitStartFailure, r.code, "retry %d", i)
@@ -357,7 +376,8 @@ func TestApp_DecisionIndependentOfAvailability(t *testing.T) {
 	gated, gatedRequests := run(t, blocking)
 	execGated, execRequests := run(t, blocking, "exec", "alpha")
 
-	assert.Equal(t, "agrouter: alpha unavailable: auth_failed\n", execGated.stderr, "the same config blocks exec")
+	assert.Equal(t, routingSkipped("authentication failed")+"agrouter: alpha unavailable: auth_failed\n",
+		execGated.stderr, "the same config blocks exec")
 	assert.Empty(t, execRequests)
 
 	require.Equal(t, 0, plain.code, plain.stderr)
@@ -380,7 +400,8 @@ func TestApp_ExecPreflightWithJSONHelper(t *testing.T) {
 		{name: "ready", output: probe(`{"window":"weekly","status":"available"}`)},
 		{name: "weekly exhausted", code: runner.ExitStartFailure,
 			output: probe(`{"window":"weekly","status":"unavailable","reason":"quota_exhausted","reset_at":"2026-10-14T00:00:00Z"}`),
-			stderr: "agrouter: Limit reached; weekly subscription quota exhausted; resets at 2026-10-14T00:00:00Z\n"},
+			stderr: routingSkipped("subscription quota exhausted") +
+				"agrouter: Limit reached; weekly subscription quota exhausted; resets at 2026-10-14T00:00:00Z\n"},
 		{name: "malformed output", output: "not json", stderr: "agrouter: warning: alpha availability unknown: probe_malformed\n"},
 	}
 	for _, tc := range tests {
@@ -432,6 +453,47 @@ func TestQuotaLine(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, quotaLine(tc.cli, tc.v))
+		})
+	}
+}
+
+func TestPreflightBlock(t *testing.T) {
+	cli := config.CLI{Name: "alpha"}
+	tests := []struct {
+		name   string
+		v      readiness.Verdict
+		code   int
+		reason string
+		line   string
+	}{
+		{name: "quota", v: readiness.Verdict{Status: readiness.StatusUnavailable, Dimension: readiness.DimensionQuota,
+			Windows: []string{readiness.WindowWeekly}}, code: runner.ExitStartFailure, reason: "subscription quota exhausted",
+			line: "agrouter: weekly subscription quota exhausted"},
+		{name: "executable", v: readiness.Verdict{Status: readiness.StatusUnavailable, Dimension: readiness.DimensionExecutable,
+			Reason: readiness.ReasonExecutableMissing}, code: runner.ExitStartFailure, reason: "executable missing",
+			line: "agrouter: alpha unavailable: executable_missing"},
+		{name: "auth", v: readiness.Verdict{Status: readiness.StatusUnavailable, Dimension: readiness.DimensionAuth,
+			Reason: readiness.ReasonAuthFailed}, code: runner.ExitStartFailure, reason: "authentication failed",
+			line: "agrouter: alpha unavailable: auth_failed"},
+		{name: "capability", v: readiness.Verdict{Status: readiness.StatusUnavailable, Dimension: readiness.DimensionCapability,
+			Reason: readiness.ReasonUnsupportedModel}, code: runner.ExitStartFailure, reason: "model not supported",
+			line: "agrouter: alpha unavailable: unsupported_model"},
+		{name: "unverified", v: readiness.Verdict{Status: readiness.StatusUnknown, Dimension: readiness.DimensionQuota,
+			Reason: readiness.ReasonProbeThrottled}, code: exitUsage, reason: "availability unverified",
+			line: "agrouter: alpha availability unverified: probe_throttled"},
+		{name: "a dimension without its own wording", v: readiness.Verdict{Status: readiness.StatusUnavailable,
+			Dimension: "other", Reason: "x"}, code: runner.ExitStartFailure, reason: "unavailable",
+			line: "agrouter: alpha unavailable: x"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := preflightBlock(cli, tc.v)
+
+			assert.Equal(t, tc.code, err.code)
+			assert.Equal(t, tc.line, err.line)
+			assert.Equal(t, tc.line, err.Error())
+			assert.Equal(t, routingSkipped(tc.reason), err.routingSkipped()+"\n")
+			assert.Equal(t, runSkipped(tc.reason), err.runSkipped()+"\n")
 		})
 	}
 }
