@@ -233,6 +233,10 @@ func (a *app) startLog(mirror *consoleLog, logDir string) {
 			mirror.abandon(err)
 			return
 		}
+		if err := notSymlink(dir); err != nil {
+			mirror.abandon(err)
+			return
+		}
 	}
 	mirror.start(filepath.Join(dir, logFileName))
 }

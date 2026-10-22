@@ -1721,6 +1721,13 @@ func TestApp_MirrorLogFailure(t *testing.T) {
 		{"ignore file is a directory", func(t *testing.T, e *env) {
 			require.NoError(t, os.MkdirAll(filepath.Join(e.workDir, ".agrouter", ".gitignore"), 0o750))
 		}},
+		{"ignore file is a symlink", func(t *testing.T, e *env) {
+			linkTo(t, filepath.Join(t.TempDir(), "victim"), filepath.Join(e.workDir, ".agrouter", ".gitignore"))
+		}},
+		{"log directory is a symlink", func(t *testing.T, e *env) {
+			require.NoError(t, os.MkdirAll(filepath.Join(e.workDir, ".agrouter"), 0o750))
+			linkTo(t, t.TempDir(), filepath.Join(e.workDir, ".agrouter", "logs"))
+		}},
 		{"read-only work directory", func(t *testing.T, e *env) {
 			if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 				t.Skip("directory permissions do not stop this user")
@@ -1752,4 +1759,28 @@ func TestApp_MirrorLogFailure(t *testing.T) {
 			assert.Equal(t, strings.Repeat(want.stdout, 2), stdout.String(), "the decision is unchanged")
 		})
 	}
+}
+
+// linkTo makes link a symlink to target, creating link's directory. It skips where symlinks need
+// privileges the test user lacks.
+func linkTo(t *testing.T, target, link string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(link), 0o750))
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+}
+
+func TestApp_MirrorLogSymlinkTargetUntouched(t *testing.T) {
+	e := newSyntheticEnv(t)
+	e.jev.pick = "fast@low"
+	victim := filepath.Join(t.TempDir(), "gitconfig")
+	require.NoError(t, os.WriteFile(victim, []byte("[user]\n"), 0o600))
+	linkTo(t, victim, filepath.Join(e.workDir, ".agrouter", ".gitignore"))
+
+	var stdout, stderr bytes.Buffer
+	a := e.app(nil, &stdout, &stderr, runner.Runner{})
+	require.Equal(t, exitOK, a.run([]string{"fix it"}), stderr.String())
+	assert.Contains(t, stderr.String(), "symlink")
+	assert.Equal(t, "[user]\n", readFile(t, victim))
 }

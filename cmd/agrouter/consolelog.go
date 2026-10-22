@@ -83,12 +83,17 @@ func (c *consoleLog) record(line []byte) {
 	}
 }
 
-// start opens the log file, creating its directory, and replays the held lines to it only. A failure
-// stops mirroring with the warning. It has no effect once mirroring began or ended.
+// start opens the log file, creating its directory, and replays the held lines to it only. A log
+// file that is a symlink is refused, so a repository cannot redirect the append. A failure stops
+// mirroring with the warning. It has no effect once mirroring began or ended.
 func (c *consoleLog) start(path string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.off || c.file != nil {
+		return
+	}
+	if err := notSymlink(path); err != nil {
+		c.stop(err)
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
@@ -171,11 +176,20 @@ var logIgnoreRules = []string{".gitignore", defaultLogSubdir + "/"}
 // file when missing and never truncating. The rules are appended unless they already are the file's
 // last lines, so a later negation (!logs/) cannot undo them. Invocations racing on a fresh directory
 // may each append the pair; git reads the repeats as the same rules, so no lock is taken.
+//
+// The directory and the ignore file must not be symlinks: a cloned repository could otherwise point
+// them at a file outside it (a global git config, say) and have the rules appended there.
 func ensureLogIgnored(dir string) error {
+	path := filepath.Join(dir, ".gitignore")
+	if err := notSymlink(dir); err != nil {
+		return err
+	}
+	if err := notSymlink(path); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create %s: %w", dir, err)
 	}
-	path := filepath.Join(dir, ".gitignore")
 	data, err := os.ReadFile(path) //nolint:gosec // the ignore file next to the local config
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read %s: %w", path, err)
@@ -200,6 +214,23 @@ func ensureLogIgnored(dir string) error {
 	}
 	if err = f.Close(); err != nil {
 		return fmt.Errorf("close %s: %w", path, err)
+	}
+	return nil
+}
+
+// notSymlink fails when path exists and is a symlink. A missing path passes. The check is not
+// atomic with the later open; it guards against a repository that ships the link, not a concurrent
+// attacker on the same machine.
+func notSymlink(path string) error {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat %s: %w", path, err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symlink, refusing to write through it", path)
 	}
 	return nil
 }

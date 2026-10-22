@@ -312,7 +312,7 @@ Every line agrouter itself writes to stderr (warnings, errors, the `agrouter: se
 
 The console output is unchanged. The child's stdout and stderr and agrouter's own stdout (decision JSON) are never copied. The log is append-only and never rotated or trimmed. Invocations that fail before the config loads (usage and config errors) write nothing, since `log_dir` is not known yet. A log failure prints one `agrouter: warning: log: ...` line and changes neither the output nor the exit code.
 
-With the default directory, agrouter keeps the log out of git the way Ralphex does for its own logs: it makes `.agrouter/.gitignore` end with the rules `.gitignore` and `logs/`, so `.agrouter/config` stays trackable. A custom `log_dir` is yours to manage: agrouter creates the directory but writes no ignore file for it.
+With the default directory, agrouter keeps the log out of git the way Ralphex does for its own logs: it makes `.agrouter/.gitignore` end with the rules `.gitignore` and `logs/`, so `.agrouter/config` stays trackable. A custom `log_dir` is yours to manage: agrouter creates the directory but writes no ignore file for it. A symlinked `.agrouter`, `.agrouter/.gitignore`, `.agrouter/logs` or log file is refused with a warning, so a cloned repository cannot redirect these writes.
 
 ## Configuration
 

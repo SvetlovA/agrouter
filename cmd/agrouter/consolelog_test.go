@@ -326,6 +326,39 @@ func TestEnsureLogIgnored_Errors(t *testing.T) {
 	})
 }
 
+func TestSymlinksRefused(t *testing.T) {
+	victim := filepath.Join(t.TempDir(), "victim")
+	require.NoError(t, os.WriteFile(victim, []byte("keep\n"), 0o600))
+
+	t.Run("ignore file", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), ".agrouter")
+		linkTo(t, victim, filepath.Join(dir, ".gitignore"))
+		require.ErrorContains(t, ensureLogIgnored(dir), "symlink")
+		assert.Equal(t, "keep\n", readFile(t, victim))
+	})
+	t.Run("ignore directory", func(t *testing.T) {
+		root := t.TempDir()
+		target := filepath.Join(root, "target")
+		require.NoError(t, os.Mkdir(target, 0o750))
+		dir := filepath.Join(root, ".agrouter")
+		linkTo(t, target, dir)
+		require.ErrorContains(t, ensureLogIgnored(dir), "symlink")
+		assert.NoFileExists(t, filepath.Join(target, ".gitignore"))
+	})
+	t.Run("log file", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "logs", logFileName)
+		linkTo(t, victim, path)
+		var console bytes.Buffer
+		c := newConsoleLog(&console, stepClock())
+		_, err := c.Write([]byte("agrouter: line\n"))
+		require.NoError(t, err)
+		c.start(path)
+		c.close()
+		assert.Contains(t, console.String(), "symlink")
+		assert.Equal(t, "keep\n", readFile(t, victim))
+	})
+}
+
 func TestEnsureLogIgnored_Git(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not on PATH")
