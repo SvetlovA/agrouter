@@ -169,16 +169,18 @@ func TestRouteGoldenRequest(t *testing.T) {
 func TestNewQuestionOverBudget(t *testing.T) {
 	long := strings.Repeat("x", 100_000)
 	tests := []struct {
-		key  string
-		want []string // the budgets the long policy exhausts, each naming the key
+		key   string
+		value string
+		want  []string // the budgets the setting exhausts
 	}{
-		{"routing_policy", []string{"routing_policy leaves", "for the state", "beside the anchor"}},
-		{"complexity_policy", []string{"complexity_policy leaves", "for the doc state"}},
+		{"routing_policy", long, []string{"request_tokens", "routing_policy question leaves", "for the state", "beside the anchor"}},
+		{"complexity_policy", long, []string{"request_tokens", "complexity_policy questions leaves", "for the doc state"}},
+		{"request_tokens", "100", []string{"request_tokens 100 less", "for the state", "beside the anchor", "for the doc state"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.key, func(t *testing.T) {
 			local := filepath.Join(t.TempDir(), "config")
-			require.NoError(t, os.WriteFile(local, fmt.Appendf(nil, "[agrouter]\n%s = %s\n", tc.key, long), 0o600))
+			require.NoError(t, os.WriteFile(local, fmt.Appendf(nil, "[agrouter]\n%s = %s\n", tc.key, tc.value), 0o600))
 			cfg, err := config.Load(config.Sources{Embedded: defaults.Config, LocalPath: local})
 			require.NoError(t, err)
 			cat, err := catalog.Build(cfg)
@@ -194,15 +196,80 @@ func TestNewQuestionOverBudget(t *testing.T) {
 	}
 }
 
+func TestNewRequestTokensAloneNamesTheKey(t *testing.T) {
+	cfg, cat := requestFixture(t)
+	_, err := New(cfg, cat, &mocks.JevClientMock{})
+	require.NoError(t, err, "the fixture's policies fit its allowance")
+
+	cfg.Agrouter.RequestTokens = 500
+	_, err = New(cfg, cat, &mocks.JevClientMock{})
+	require.ErrorIs(t, err, prompt.ErrQuestionsOverBudget)
+	assert.Contains(t, err.Error(), "request_tokens 500")
+	require.NotErrorIs(t, err, ErrRequestTokensOverLimit)
+}
+
+func TestNewChecksProviderLimits(t *testing.T) {
+	for _, longContext := range []bool{false, true} {
+		perQuestion, perRequest := jev.Limits(longContext)
+		limit := min(perQuestion, perRequest)
+		top := limit - providerReserve
+		t.Run(fmt.Sprintf("long_context=%t", longContext), func(t *testing.T) {
+			cfg, cat := requestFixture(t)
+			cfg.Agrouter.LongContext = longContext
+
+			cfg.Agrouter.RequestTokens = top
+			r, err := New(cfg, cat, &mocks.JevClientMock{})
+			require.NoError(t, err, "request_tokens at the limit less the reserve")
+			assert.Equal(t, top, r.budget.RequestTokens)
+
+			cfg.Agrouter.RequestTokens = top + 1
+			_, err = New(cfg, cat, &mocks.JevClientMock{})
+			require.ErrorIs(t, err, ErrRequestTokensOverLimit)
+			msg := err.Error()
+			assert.Contains(t, msg, "config: [agrouter]")
+			assert.Contains(t, msg, fmt.Sprintf("request_tokens = %d", top+1), "the value")
+			assert.Contains(t, msg, fmt.Sprintf("takes %d per request", limit), "the provider limit")
+			assert.Contains(t, msg, fmt.Sprintf("%d reserve", providerReserve), "the reserve")
+			assert.Contains(t, msg, fmt.Sprintf("at most %d", top))
+			assert.Contains(t, msg, fmt.Sprintf("long_context = %t", longContext))
+			require.NotErrorIs(t, err, prompt.ErrQuestionsOverBudget)
+		})
+	}
+}
+
+func TestNewLongContextRaisesOnlyTheProviderLimit(t *testing.T) {
+	cfg, cat := requestFixture(t)
+	_, defaultLimit := jev.Limits(false)
+	_, longLimit := jev.Limits(true)
+	require.Greater(t, longLimit, defaultLimit)
+	cfg.Agrouter.RequestTokens = defaultLimit // over the default limits, under the long ones
+
+	_, err := New(cfg, cat, &mocks.JevClientMock{})
+	require.ErrorIs(t, err, ErrRequestTokensOverLimit, "request_tokens is not raised by long_context, so it is over the default limit")
+
+	cfg.Agrouter.LongContext = true
+	r, err := New(cfg, cat, &mocks.JevClientMock{})
+	require.NoError(t, err)
+	assert.Equal(t, defaultLimit, r.budget.RequestTokens, "long_context leaves request_tokens as configured")
+
+	cfg.Agrouter.LongContext = false
+	cfg.Agrouter.RequestTokens = 1000
+	_, err = New(cfg, cat, &mocks.JevClientMock{})
+	require.ErrorIs(t, err, prompt.ErrQuestionsOverBudget, "a small allowance is still checked against the questions")
+}
+
 func TestNewBudgetFromWholeCatalog(t *testing.T) {
 	cfg, cat := embedded(t)
 	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
 	b := r.budget
+	assert.Equal(t, cfg.Agrouter.RequestTokens, b.RequestTokens)
+	assert.InDelta(t, cfg.Agrouter.BytesPerToken, b.BytesPerToken, 0)
 	assert.Positive(t, b.State)
-	assert.Less(t, b.State, 30_000)
+	assert.Less(t, b.State, b.RequestTokens)
 	assert.Positive(t, b.Chunk)
+	assert.Less(t, b.Chunk, b.RequestTokens)
 	assert.GreaterOrEqual(t, b.Doc, prompt.MinStateTokens)
-	assert.Less(t, b.Doc, 30_000)
+	assert.Less(t, b.Doc, b.RequestTokens)
 }
 
 func TestRouteCannotDecide(t *testing.T) {

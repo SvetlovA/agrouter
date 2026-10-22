@@ -344,7 +344,7 @@ func TestRouteChunkGoldenRequest(t *testing.T) {
 	})
 	r := newRouter(t, cfg, cat, client)
 	// force a small state into two chunks; 12 of the tokens go to the widest index and count
-	r.budget = prompt.Budget{State: 1, Chunk: 132}
+	r.budget = prompt.Budget{Policy: r.budget.Policy, State: 1, Chunk: 132}
 	c := &prompt.Result{Prompt: "fix the flaky test in pkg/foo/foo_test.go",
 		Files:       []string{"package foo\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {\n\tt.Skip(\"flaky\")\n}\n"},
 		Attachments: []prompt.Attachment{{Source: "mentioned", Type: "image/png", Bytes: 48213}}}

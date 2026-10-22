@@ -706,12 +706,12 @@ func TestBudgetLargestStage(t *testing.T) {
 			b, err := budget(cfg, cat)
 			require.NoError(t, err)
 			chunk := sizes(cfg, cat, chunkGuide)
-			cliOnly, err := prompt.NewBudget(prompt.Questions{Route: s[LevelCLI], ChunkRoute: chunk[LevelCLI],
+			cliOnly, err := prompt.NewBudget(b.Policy, prompt.Questions{Route: s[LevelCLI], ChunkRoute: chunk[LevelCLI],
 				Relevance: 1, Complexity: 1, Evidence: 1})
 			require.NoError(t, err)
 			assert.Less(t, b.State, cliOnly.State, "the whole-state budget leaves room for the largest stage")
 			assert.Less(t, b.Chunk, cliOnly.Chunk, "the chunk budget leaves room for the largest stage")
-			largest, err := prompt.NewBudget(prompt.Questions{Route: s[tc.largest], ChunkRoute: chunk[tc.largest],
+			largest, err := prompt.NewBudget(b.Policy, prompt.Questions{Route: s[tc.largest], ChunkRoute: chunk[tc.largest],
 				Relevance: questionLen(questionRelevance, relevanceQuestion()), Complexity: 1, Evidence: 1})
 			require.NoError(t, err)
 			assert.Equal(t, largest.Chunk, b.Chunk, "sized by the largest stage with the chunk guide")
@@ -728,9 +728,9 @@ func TestBudgetPolicyOverBudget(t *testing.T) {
 		absent string
 	}{
 		{name: "routing_policy", mutate: func(ag *config.Agrouter) { ag.RoutingPolicy = long },
-			want: []string{"routing_policy leaves", "for the state", "beside the anchor"}, absent: "complexity_policy"},
+			want: []string{"routing_policy question leaves", "for the state", "beside the anchor"}, absent: "complexity_policy"},
 		{name: "complexity_policy", mutate: func(ag *config.Agrouter) { ag.ComplexityPolicy = long },
-			want: []string{"complexity_policy leaves", "for the doc state"}, absent: "routing_policy"},
+			want: []string{"complexity_policy questions leaves", "for the doc state"}, absent: "routing_policy"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

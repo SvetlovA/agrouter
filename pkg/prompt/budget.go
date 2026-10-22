@@ -8,23 +8,49 @@ import (
 	"unicode/utf8"
 )
 
-// Jev's limits and agrouter's shares of them, in estimated tokens.
+// Shares of a request, in estimated tokens.
 const (
-	bytesPerToken = 3
-
-	stateLimit      = 30_000 // state plus the longest question (Jev's 32k, less a 2k margin)
-	totalLimit      = 64_000 // state plus all questions
-	AnchorTokens    = 4_000  // the anchor repeated in every chunk request
-	attachmentShare = 1_000  // the anchor's share for attachments
-	MinStateTokens  = 2_000  // questions leaving less than this for the state are a config error
+	AnchorTokens    = 4_000 // the anchor repeated in every chunk request
+	attachmentShare = 1_000 // the anchor's share for attachments
+	MinStateTokens  = 2_000 // questions leaving less than this for the state are a config error
 )
 
 // ErrQuestionsOverBudget means the serialized questions leave too little room for the state.
 var ErrQuestionsOverBudget = errors.New("questions over budget")
 
-// Tokens estimates the tokens of n UTF-8 bytes: n ÷ 3, rounded up.
-func Tokens(n int) int {
-	return (n + bytesPerToken - 1) / bytesPerToken
+// Policy is how agrouter sizes routing requests: the estimator ratio and the allowance per request.
+type Policy struct {
+	BytesPerToken float64 // UTF-8 bytes estimated per token
+	RequestTokens int     // the whole serialized input of one request: state plus its questions
+}
+
+// Tokens estimates the tokens of n UTF-8 bytes: n ÷ BytesPerToken, rounded up. It saturates at
+// math.MaxInt and is never negative.
+func (p Policy) Tokens(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return saturate(math.Ceil(float64(n) / p.BytesPerToken))
+}
+
+// Bytes is the UTF-8 bytes that tokens estimate to: tokens × BytesPerToken, rounded down. It
+// saturates at math.MaxInt and is never negative.
+func (p Policy) Bytes(tokens int) int {
+	if tokens <= 0 {
+		return 0
+	}
+	return saturate(math.Floor(float64(tokens) * p.BytesPerToken))
+}
+
+// saturate converts f to an int, clamping to [0, math.MaxInt]; NaN and +Inf saturate high.
+func saturate(f float64) int {
+	switch {
+	case f <= 0:
+		return 0
+	case !(f < math.MaxInt): // 2^63 is the first float past MaxInt; also true for NaN and +Inf
+		return math.MaxInt
+	}
+	return int(f)
 }
 
 // Questions are the serialized sizes, in bytes, of the questions that go beside the state.
@@ -36,41 +62,49 @@ type Questions struct {
 	Evidence   int // a doc request's evidence question
 }
 
-// Budget is how many tokens the state may take in each kind of request.
+// Budget is how many tokens the state may take in each kind of request, under its policy.
 type Budget struct {
+	Policy
 	State int // the single request's state
 	Chunk int // a chunk request's state: anchor, chunk envelope and chunk text
 	Doc   int // a doc request's state: the docs whole, or one doc chunk in its envelope
 }
 
-// NewBudget derives the state budgets from the question sizes: the single state gets 30k minus the
-// route question; a chunk state gets 30k minus the longer chunk question, and no more than leaves
-// the state plus both questions within 64k; a doc state likewise beside the complexity and evidence
-// questions. It returns ErrQuestionsOverBudget when the single state, a chunk state beside a maximal
-// anchor, or a doc state would get less than MinStateTokens.
-func NewBudget(q Questions) (Budget, error) {
+// NewBudget derives the state budgets from the question sizes: each request's state gets
+// RequestTokens less the request's own questions. The single state gets it less the route question;
+// a chunk state less the chunk route and relevance questions; a doc state less the complexity and
+// evidence questions. It returns ErrQuestionsOverBudget when the single state, a chunk state beside a
+// maximal anchor, or a doc state would get less than MinStateTokens.
+func NewBudget(p Policy, q Questions) (Budget, error) {
 	b := Budget{
-		State: stateLimit - Tokens(q.Route),
-		Chunk: pairBudget(q.ChunkRoute, q.Relevance),
-		Doc:   pairBudget(q.Complexity, q.Evidence),
+		Policy: p,
+		State:  less(p.RequestTokens, p.Tokens(q.Route)),
+		Chunk:  less(less(p.RequestTokens, p.Tokens(q.ChunkRoute)), p.Tokens(q.Relevance)),
+		Doc:    less(less(p.RequestTokens, p.Tokens(q.Complexity)), p.Tokens(q.Evidence)),
 	}
 	var errs []error
 	if b.State < MinStateTokens {
-		errs = append(errs, fmt.Errorf("%w: routing_policy leaves %d tokens for the state, need %d", ErrQuestionsOverBudget, b.State, MinStateTokens))
+		errs = append(errs, fmt.Errorf("%w: request_tokens %d less the routing_policy question leaves %d tokens for the state, need %d",
+			ErrQuestionsOverBudget, p.RequestTokens, b.State, MinStateTokens))
 	}
 	if left := b.Chunk - AnchorTokens; left < MinStateTokens {
-		errs = append(errs, fmt.Errorf("%w: routing_policy leaves %d tokens beside the anchor in a chunk request, need %d", ErrQuestionsOverBudget, left, MinStateTokens))
+		errs = append(errs, fmt.Errorf("%w: request_tokens %d less the routing_policy chunk questions leaves %d tokens beside the anchor in a chunk request, need %d",
+			ErrQuestionsOverBudget, p.RequestTokens, left, MinStateTokens))
 	}
 	if b.Doc < MinStateTokens {
-		errs = append(errs, fmt.Errorf("%w: complexity_policy leaves %d tokens for the doc state, need %d", ErrQuestionsOverBudget, b.Doc, MinStateTokens))
+		errs = append(errs, fmt.Errorf("%w: request_tokens %d less the complexity_policy questions leaves %d tokens for the doc state, need %d",
+			ErrQuestionsOverBudget, p.RequestTokens, b.Doc, MinStateTokens))
 	}
 	return b, errors.Join(errs...)
 }
 
-// pairBudget is the state budget beside two questions of a and b serialized bytes: 30k minus the
-// longer one, and no more than leaves the state plus both within 64k.
-func pairBudget(a, b int) int {
-	return min(stateLimit-Tokens(max(a, b)), totalLimit-Tokens(a)-Tokens(b))
+// less is tokens minus n, a question estimate that is never negative, saturating at math.MinInt
+// instead of wrapping around to a positive.
+func less(tokens, n int) int {
+	if tokens < math.MinInt+n {
+		return math.MinInt
+	}
+	return tokens - n
 }
 
 // indexDigits is the decimal width reserved for a chunk's index and for its count: the widest int,
@@ -82,14 +116,14 @@ var indexDigits = len(strconv.Itoa(math.MaxInt))
 func chunkRoom(b Budget, anchorLen int) int {
 	// {"anchor":<anchor>,"chunk":{"field":"prompt","index":N,"of":N,"text":"<text>"}}
 	envelope := len(`{"anchor":,"chunk":{"field":"prompt","index":,"of":,"text":""}}`) + 2*indexDigits
-	return b.Chunk*bytesPerToken - anchorLen - envelope
+	return b.Bytes(b.Chunk) - anchorLen - envelope
 }
 
 // docRoom is the escaped doc text, in bytes, that fits in a doc chunk state of tokens.
-func docRoom(tokens int) int {
+func docRoom(p Policy, tokens int) int {
 	// {"doc":{"index":N,"of":N,"text":"<text>"}}
 	envelope := len(`{"doc":{"index":,"of":,"text":""}}`) + 2*indexDigits
-	return tokens*bytesPerToken - envelope
+	return p.Bytes(tokens) - envelope
 }
 
 // jsonLen is the length of s once encoded as a JSON string by encoding/json, without the quotes.

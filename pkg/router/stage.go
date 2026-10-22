@@ -3,6 +3,8 @@ package router
 import (
 	"cmp"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -172,14 +174,10 @@ func (r *Router) stage(ctx context.Context, el *Eligibility, lv level, gs []grou
 
 // ask sends state in one Choice request over gs and returns the chosen group's index.
 func (r *Router) ask(ctx context.Context, el *Eligibility, lv level, gs []group, state prompt.State) (int, *jev.Answer, error) {
-	req := jev.Request{
-		Model:     r.cfg.Agrouter.JevModel,
-		State:     state,
-		Questions: map[string]jev.Question{lv.name: stageQuestion(r.cfg, lv, wholeGuide, gs, el.effort)},
-	}
-	resp, err := r.jev.Ask(ctx, req)
+	questions := map[string]jev.Question{lv.name: stageQuestion(r.cfg, lv, wholeGuide, gs, el.effort)}
+	resp, err := r.jev.Ask(ctx, jev.Request{Model: r.cfg.Agrouter.JevModel, State: state, Questions: questions})
 	if err != nil {
-		return 0, nil, fmt.Errorf("route request: %w", err)
+		return 0, nil, fmt.Errorf("route request: %w", r.sized(err, state, questions))
 	}
 	answer, ok := resp.Answers[lv.name]
 	if !ok {
@@ -190,6 +188,29 @@ func (r *Router) ask(ctx context.Context, el *Eligibility, lv level, gs []group,
 		return 0, nil, err
 	}
 	return slices.Index(names, answer.Choice), &answer, nil
+}
+
+// estimate is the tokens agrouter counts in a request carrying state and questions, both serialized.
+func (r *Router) estimate(state any, questions map[string]jev.Question) int {
+	return r.budget.Tokens(encodedLen(state) + encodedLen(questions))
+}
+
+// encodedLen is the length of v encoded as JSON, 0 if it cannot be: an estimate for messages only.
+func encodedLen(v any) int {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return 0
+	}
+	return len(data)
+}
+
+// sized adds to an over-length error from the provider what the user needs to size requests: the
+// estimate of the whole request against request_tokens. Other errors pass through.
+func (r *Router) sized(err error, state any, questions map[string]jev.Question) error {
+	if !errors.Is(err, jev.ErrTooLong) {
+		return err
+	}
+	return fmt.Errorf("estimated %d tokens, request_tokens is %d: %w", r.estimate(state, questions), r.budget.RequestTokens, err)
 }
 
 // scoresOf returns answer's probability for every name, in order. A missing probability, or a

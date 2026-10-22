@@ -78,13 +78,10 @@ func (r *Router) pooled(ctx context.Context, el *Eligibility, lv level, gs []gro
 // question id for every criterion in names.
 func (r *Router) askChunk(ctx context.Context, id string, names []string, anchor prompt.Anchor,
 	questions map[string]jev.Question, c prompt.Chunk) (routeAnswer, error) {
-	resp, err := r.jev.Ask(ctx, jev.Request{
-		Model:     r.cfg.Agrouter.JevModel,
-		State:     prompt.ChunkState{Anchor: anchor, Chunk: c},
-		Questions: questions,
-	})
+	state := prompt.ChunkState{Anchor: anchor, Chunk: c}
+	resp, err := r.jev.Ask(ctx, jev.Request{Model: r.cfg.Agrouter.JevModel, State: state, Questions: questions})
 	if err != nil {
-		return routeAnswer{}, fmt.Errorf("chunk request: %w", err)
+		return routeAnswer{}, fmt.Errorf("chunk request: %w", r.sized(err, state, questions))
 	}
 	answers := resp.Answers
 	route, ok := answers[id]

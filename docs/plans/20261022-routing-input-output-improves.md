@@ -255,15 +255,15 @@ type Budget struct {
 - Modify: `pkg/prompt/chunk_test.go`, `pkg/prompt/doc_test.go`
 - Modify: `pkg/router/router_test.go`, `stage_test.go`, `pool_test.go`, `project_test.go`, `complexity_test.go`, `question_test.go`
 
-- [ ] add `prompt.Policy` (saturating `Tokens`/`Bytes`) and embed it in `Budget`; replace `bytesPerToken`, `stateLimit`, `totalLimit`, `pairBudget` and package-level `Tokens`; `StateTokens`/`DocsTokens` take a `Policy`, `anchor` uses it, `DocChunks` takes a `Budget`
-- [ ] `NewBudget(p Policy, q Questions)`: state budgets are `RequestTokens` minus the request's question estimates, each subtraction checked against what remains; `ErrQuestionsOverBudget` messages name `request_tokens` and the policy question
-- [ ] `router.New` checks `request_tokens ≤ min(jev.Limits(long_context)) − 2000` and builds the policy from `cfg.Agrouter`
-- [ ] wrap the overflowing request's error with stage, chunk `i of n`, `estimated N tokens` and `request_tokens`
-- [ ] write tests for budget derivation with synthetic question sizes and ratios (fractional, very small and very large finite ratios: no overflow, no negative or wrapped budgets), and that chunk/doc room and anchor limits follow the ratio; update `Budget{...}` literals with an explicit policy
-- [ ] write tests for `router.New`: `request_tokens` at and over the provider limit under both limit sets; a too-small `request_tokens` alone naming `request_tokens` (update `router_test.go:174-191`)
-- [ ] write tests that the overflow error carries the stage, chunk position, estimate and `request_tokens`, and no prompt marker
-- [ ] run `go test ./pkg/router -update` and confirm there is no golden diff
-- [ ] run tests - must pass before next task
+- [x] add `prompt.Policy` (saturating `Tokens`/`Bytes`) and embed it in `Budget`; replace `bytesPerToken`, `stateLimit`, `totalLimit`, `pairBudget` and package-level `Tokens`; `StateTokens`/`DocsTokens` take a `Policy`, `anchor` uses it, `DocChunks` takes a `Budget`
+- [x] `NewBudget(p Policy, q Questions)`: state budgets are `RequestTokens` minus the request's question estimates, each subtraction checked against what remains; `ErrQuestionsOverBudget` messages name `request_tokens` and the policy question
+- [x] `router.New` checks `request_tokens ≤ min(jev.Limits(long_context)) − 2000` and builds the policy from `cfg.Agrouter`
+- [x] wrap the overflowing request's error with stage, chunk `i of n`, `estimated N tokens` and `request_tokens`
+- [x] write tests for budget derivation with synthetic question sizes and ratios (fractional, very small and very large finite ratios: no overflow, no negative or wrapped budgets), and that chunk/doc room and anchor limits follow the ratio; update `Budget{...}` literals with an explicit policy
+- [x] write tests for `router.New`: `request_tokens` at and over the provider limit under both limit sets; a too-small `request_tokens` alone naming `request_tokens` (update `router_test.go:174-191`)
+- [x] write tests that the overflow error carries the stage, chunk position, estimate and `request_tokens`, and no prompt marker
+- [x] run `go test ./pkg/router -update` and confirm there is no golden diff
+- [x] run tests - must pass before next task
 
 ### Task 5: Add the request_too_long reason code
 
