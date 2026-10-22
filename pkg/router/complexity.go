@@ -2,7 +2,6 @@ package router
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -28,28 +27,28 @@ type ComplexityResult struct {
 }
 
 // complexity scores the docs: one request when they all fit, and otherwise one per doc chunk, all
-// at once. A 422 on the whole docs splits them at half their size or of the doc budget, whichever is
-// smaller, once; a 422 on a doc chunk halves it, once. Any other failure, a second 422 or the deadline is an error: supplied docs are
-// never dropped.
+// at once. Any failure or the deadline is an error, and a rejected request is never resent: supplied
+// docs are never dropped.
 func (r *Router) complexity(ctx context.Context, captured *prompt.Result) (*ComplexityResult, error) {
 	questions := complexityQuestions(r.cfg.Agrouter)
-	chunks, resplit := captured.SplitDocs(r.budget), false
+	chunks := captured.SplitDocs(r.budget)
 	if chunks == nil {
 		score, err := r.askDocs(ctx, captured.DocsState(), questions)
-		if err == nil {
-			score.Index, score.Of = 1, 1
-			return reduce([]DocScore{score}), nil
-		}
-		if !errors.Is(err, jev.ErrUnprocessable) {
+		if err != nil {
 			return nil, err
 		}
-		if captured.DocsTokens() < prompt.MinStateTokens {
-			return nil, fmt.Errorf("%w: %w", errUnsplittable, err)
-		}
-		// half of the docs' own size, so a single doc well under the budget is still cut in two
-		chunks, resplit = captured.DocChunks(min(r.budget.Doc, captured.DocsTokens())/2), true
+		score.Index, score.Of = 1, 1
+		return reduce([]DocScore{score}), nil
 	}
-	seq, err := r.docFanout(questions).run(ctx, chunks, resplit)
+	f := fanout[prompt.DocChunk, DocScore]{
+		name: "doc chunk",
+		ask: func(ctx context.Context, c prompt.DocChunk) (DocScore, error) {
+			score, err := r.askDocs(ctx, prompt.DocChunkState{Doc: c}, questions)
+			score.Index, score.Of = c.Index, c.Of
+			return score, err
+		},
+	}
+	seq, err := f.run(ctx, chunks)
 	if err != nil {
 		return nil, err
 	}
@@ -58,24 +57,6 @@ func (r *Router) complexity(ctx context.Context, captured *prompt.Result) (*Comp
 		scores[i] = p.answer
 	}
 	return reduce(scores), nil
-}
-
-// docFanout asks doc chunk requests with questions.
-func (r *Router) docFanout(questions map[string]jev.Question) fanout[prompt.DocChunk, DocScore] {
-	return fanout[prompt.DocChunk, DocScore]{
-		name: "doc chunk",
-		ask: func(ctx context.Context, c prompt.DocChunk) (DocScore, error) {
-			score, err := r.askDocs(ctx, prompt.DocChunkState{Doc: c}, questions)
-			score.Index, score.Of = c.Index, c.Of
-			return score, err
-		},
-		halve: prompt.HalveDoc,
-		text:  func(c prompt.DocChunk) string { return c.Text },
-		number: func(c prompt.DocChunk, index, of int) prompt.DocChunk {
-			c.Index, c.Of = index, of
-			return c
-		},
-	}
 }
 
 // askDocs sends one doc request and scores its validated answers.

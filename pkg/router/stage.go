@@ -3,7 +3,6 @@ package router
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 
@@ -124,7 +123,6 @@ func skippedStages(el *Eligibility, o catalog.Option) []Stage {
 type routeState struct {
 	captured *prompt.Result
 	split    *prompt.Split // nil: sent whole
-	resplit  bool          // the chunks come from re-splitting a whole state Jev rejected
 }
 
 // decide asks the levels in order over a private copy of el's options. A level with one group is
@@ -156,28 +154,16 @@ func (r *Router) decide(ctx context.Context, el *Eligibility, captured *prompt.R
 }
 
 // stage asks one level over gs and returns the winning group's index. A whole state goes in one
-// request; a 422 on it re-splits it at half the chunk budget, once, and the chunks are pooled for
-// this level and every later one.
+// request; a split state is pooled over its chunks. A request the provider rejects is never resent.
 func (r *Router) stage(ctx context.Context, el *Eligibility, lv level, gs []group, st *routeState) (int, Stage, error) {
 	if st.split == nil {
 		i, answer, err := r.ask(ctx, el, lv, gs, st.captured.State())
-		if err == nil {
-			return i, Stage{Level: lv.name, Choice: gs[i].label, Answer: answer}, nil
-		}
-		if !errors.Is(err, jev.ErrUnprocessable) {
+		if err != nil {
 			return 0, Stage{}, err
 		}
-		if st.captured.StateTokens() < prompt.MinStateTokens {
-			return 0, Stage{}, fmt.Errorf("%w: %w", errUnsplittable, err)
-		}
-		// State 0 forces the split even though the state fit the full budget
-		split, splitErr := st.captured.Split(prompt.Budget{Chunk: r.budget.Chunk / 2})
-		if splitErr != nil {
-			return 0, Stage{}, fmt.Errorf("re-split after %w: %w", err, splitErr)
-		}
-		st.split, st.resplit = split, true
+		return i, Stage{Level: lv.name, Choice: gs[i].label, Answer: answer}, nil
 	}
-	i, p, err := r.pooled(ctx, el, lv, gs, st.split, st.resplit)
+	i, p, err := r.pooled(ctx, el, lv, gs, st.split)
 	if err != nil {
 		return 0, Stage{}, err
 	}

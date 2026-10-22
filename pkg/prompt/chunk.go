@@ -137,29 +137,6 @@ func (r *Result) Split(b Budget) (*Split, error) {
 	return &Split{Anchor: anchor, Chunks: chunks}, nil
 }
 
-// Halve cuts c into pieces of at most half its escaped text, on the same line and UTF-8 boundaries
-// as Split, for a chunk Jev rejected with a 422. The pieces keep c's field and file; numbering them
-// is the caller's, since the whole sequence changes.
-func Halve(c Chunk) []Chunk {
-	pieces := halveText(c.Text)
-	out := make([]Chunk, len(pieces))
-	for i, text := range pieces {
-		out[i] = Chunk{Field: c.Field, File: c.File, Text: text}
-	}
-	return out
-}
-
-// halveText cuts text into pieces of at most half its escaped length, on line and UTF-8 boundaries;
-// empty text is one empty piece.
-func halveText(text string) []string {
-	room := max((jsonLen(text)+1)/2, len(`\u0000`)) // at least the widest escaped rune, so cut advances
-	pieces := cut(text, room)
-	if len(pieces) == 0 {
-		pieces = []string{""}
-	}
-	return pieces
-}
-
 // anchor builds the anchor within AnchorTokens: attachments (summarized when over their share),
 // then the prompt, whole or head and tail, then head and tail of the files while room lasts. It
 // reports whether the prompt is whole in it.

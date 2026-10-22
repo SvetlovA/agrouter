@@ -2,6 +2,9 @@ package router
 
 import (
 	"context"
+	"net/http"
+	"sync"
+	"time"
 
 	"github.com/SvetlovA/agrouter/pkg/jev"
 )
@@ -12,5 +15,55 @@ func answersOnly(fn func(context.Context, jev.Request) (map[string]jev.Answer, e
 	return func(ctx context.Context, req jev.Request) (jev.Response, error) {
 		answers, err := fn(ctx, req)
 		return jev.Response{Answers: answers}, err
+	}
+}
+
+// rejection is a provider rejection a request can fail with, and what the router must make of it.
+type rejection struct {
+	name    string
+	err     error
+	status  int
+	tooLong bool // matches jev.ErrTooLong
+}
+
+// rejections are the kinds of rejected request: the structured overflow, any other 400, and a 422.
+var rejections = []rejection{
+	{name: "overflow", err: tooLong(), status: http.StatusBadRequest, tooLong: true},
+	{name: "other 400", err: &jev.StatusError{Status: http.StatusBadRequest, ErrorType: "invalid_request"},
+		status: http.StatusBadRequest},
+	{name: "422", err: unprocessable(), status: http.StatusUnprocessableEntity},
+}
+
+// tooLong is the provider's rejection of a request over its context length.
+func tooLong() error {
+	return &jev.StatusError{Status: http.StatusBadRequest, ErrorType: "max_tokens_exceeded"}
+}
+
+func unprocessable() error { return &jev.StatusError{Status: http.StatusUnprocessableEntity} }
+
+// gate holds each request that reaches it until n have, so a test sees every chunk in flight
+// before any of them fails; no request waits for another to finish.
+type gate struct {
+	n       int
+	mu      sync.Mutex
+	arrived int
+	open    chan struct{}
+}
+
+func newGate(n int) *gate { return &gate{n: n, open: make(chan struct{})} }
+
+// wait reports whether all n requests arrived before the timeout.
+func (g *gate) wait() bool {
+	g.mu.Lock()
+	g.arrived++
+	if g.arrived == g.n {
+		close(g.open)
+	}
+	g.mu.Unlock()
+	select {
+	case <-g.open:
+		return true
+	case <-time.After(5 * time.Second):
+		return false
 	}
 }

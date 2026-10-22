@@ -242,10 +242,10 @@ type Budget struct {
 - Modify: `pkg/router/stage_test.go`, `pkg/router/pool_test.go`, `pkg/router/complexity_test.go`
 - Modify: `pkg/prompt/chunk_test.go`, `pkg/prompt/doc_test.go`, `pkg/jev/client_test.go`
 
-- [ ] delete the whole-state re-split and `routeState.resplit` (`stage.go:158-178`), the 422 branch, `resplitRejected` and its loop (`fanout.go:82,104-125`), the `resplit` flag and `halve`/`text`/`number` callbacks (`pool.go:54-65`, `complexity.go:43-50,72`), `errUnsplittable`, `prompt.Halve`/`HalveDoc`/`halveText`, and `jev.ErrUnprocessable`; keep `cut`, `headTail`, `DocChunks`
-- [ ] rewrite the 422 recovery tests as no-resubmit tests: a structured 400 at whole, chunk, doc and effort level is never sent a second time (assert per request, with a barrier where an exact count matters) and the stage fails with `ErrTooLong`; another 400 and a 422 fail as plain status errors
-- [ ] keep fan-out cancellation, ordering and deadline-success coverage; drop tests that only covered `Halve`/`HalveDoc`; redaction tests use a plain 422 `StatusError`
-- [ ] run tests - must pass before next task
+- [x] delete the whole-state re-split and `routeState.resplit` (`stage.go:158-178`), the 422 branch, `resplitRejected` and its loop (`fanout.go:82,104-125`), the `resplit` flag and `halve`/`text`/`number` callbacks (`pool.go:54-65`, `complexity.go:43-50,72`), `errUnsplittable`, `prompt.Halve`/`HalveDoc`/`halveText`, and `jev.ErrUnprocessable`; keep `cut`, `headTail`, `DocChunks`
+- [x] rewrite the 422 recovery tests as no-resubmit tests: a structured 400 at whole, chunk, doc and effort level is never sent a second time (assert per request, with a barrier where an exact count matters) and the stage fails with `ErrTooLong`; another 400 and a 422 fail as plain status errors
+- [x] keep fan-out cancellation, ordering and deadline-success coverage; drop tests that only covered `Halve`/`HalveDoc`; redaction tests use a plain 422 `StatusError`
+- [x] run tests - must pass before next task
 
 ### Task 4: Derive request budgets from the policy and check provider limits
 

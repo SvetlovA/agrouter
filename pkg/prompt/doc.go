@@ -68,14 +68,3 @@ func (r *Result) DocChunks(tokens int) []DocChunk {
 	}
 	return chunks
 }
-
-// HalveDoc cuts c into pieces of at most half its escaped text, like Halve, for a doc chunk Jev
-// rejected with a 422. The pieces keep c's doc; numbering them is the caller's.
-func HalveDoc(c DocChunk) []DocChunk {
-	pieces := halveText(c.Text)
-	out := make([]DocChunk, len(pieces))
-	for i, text := range pieces {
-		out[i] = DocChunk{Doc: c.Doc, Text: text}
-	}
-	return out
-}

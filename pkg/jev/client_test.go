@@ -151,7 +151,7 @@ func TestAskStatusErrors(t *testing.T) {
 		sentinel error
 	}{
 		{"401", http.StatusUnauthorized, ErrUnauthorized},
-		{"422", http.StatusUnprocessableEntity, ErrUnprocessable},
+		{"422", http.StatusUnprocessableEntity, nil},
 		{"500", http.StatusInternalServerError, nil},
 		{"400", http.StatusBadRequest, nil},
 	}
@@ -169,7 +169,7 @@ func TestAskStatusErrors(t *testing.T) {
 			assert.Equal(t, tt.status, serr.Status)
 			assert.JSONEq(t, `{"error":"bad\nthing"}`, serr.Body)
 			assert.Equal(t, int32(1), calls.Load(), "not retried")
-			for _, s := range []error{ErrUnauthorized, ErrUnprocessable, ErrTooLong, ErrOverloaded, ErrMalformed} {
+			for _, s := range []error{ErrUnauthorized, ErrTooLong, ErrOverloaded, ErrMalformed} {
 				assert.Equal(t, errors.Is(s, tt.sentinel), errors.Is(err, s), s.Error())
 			}
 		})
@@ -258,7 +258,7 @@ func TestAskTooLong(t *testing.T) {
 			assert.Equal(t, tt.status, serr.Status)
 			assert.Equal(t, tt.errorType, serr.ErrorType)
 			assert.Equal(t, tt.tooLong, errors.Is(err, ErrTooLong))
-			assert.Equal(t, tt.status == http.StatusUnprocessableEntity, errors.Is(err, ErrUnprocessable))
+			require.NotErrorIs(t, err, ErrUnauthorized)
 			require.NotErrorIs(t, err, ErrOverloaded)
 			assert.Equal(t, int32(1), calls.Load(), "not retried")
 		})
@@ -440,6 +440,17 @@ func TestAskRedactsEchoedKey(t *testing.T) {
 	assert.NotContains(t, err.Error(), testKey)
 }
 
+// requireUnprocessable asserts err is a plain 422 StatusError, matching no sentinel.
+func requireUnprocessable(t *testing.T, err error) {
+	t.Helper()
+	var serr *StatusError
+	require.ErrorAs(t, err, &serr)
+	assert.Equal(t, http.StatusUnprocessableEntity, serr.Status)
+	for _, s := range []error{ErrUnauthorized, ErrTooLong, ErrOverloaded, ErrMalformed} {
+		assert.NotErrorIs(t, err, s)
+	}
+}
+
 func TestAskRedactsEchoedState(t *testing.T) {
 	req := testRequest()
 	req.State = map[string]any{"prompt": "fix the \"secret\" bug\nnow", "files": []string{"token=abc"}}
@@ -449,7 +460,7 @@ func TestAskRedactsEchoedState(t *testing.T) {
 		_, _ = io.WriteString(w, `{"detail":[{"loc":["body","state"],"input":`+string(body)+`}]}`)
 	}
 	_, err := newTestClient(t, echo).Ask(t.Context(), req)
-	require.ErrorIs(t, err, ErrUnprocessable)
+	requireUnprocessable(t, err)
 	assert.NotContains(t, err.Error(), "secret")
 	assert.NotContains(t, err.Error(), "token=abc")
 	assert.Contains(t, err.Error(), `"loc":["body","state"]`)
@@ -462,7 +473,7 @@ func TestAskRedactsStateExcerpts(t *testing.T) {
 	// a validation error quoting only a prefix and a truncated middle of the inputs
 	body := `{"detail":"input too long: 'rotate the staging cred...' and 'word = hunter2-corr'"}`
 	_, err := newTestClient(t, reply(http.StatusUnprocessableEntity, body)).Ask(t.Context(), req)
-	require.ErrorIs(t, err, ErrUnprocessable)
+	requireUnprocessable(t, err)
 	assert.NotContains(t, err.Error(), "staging")
 	assert.NotContains(t, err.Error(), "hunter2")
 	assert.Contains(t, err.Error(), `{"detail":"input too long: '<redacted>...' and '<redacted>'"}`)
@@ -474,7 +485,7 @@ func TestAskRedactsStateEchoedWithoutHTMLEscaping(t *testing.T) {
 	// a server that escapes the newlines and tab but writes <, > and & as is
 	body := `{"detail":[{"input":"if a < b && c > d {\n\treturn\n}"}]}`
 	_, err := newTestClient(t, reply(http.StatusUnprocessableEntity, body)).Ask(t.Context(), req)
-	require.ErrorIs(t, err, ErrUnprocessable)
+	requireUnprocessable(t, err)
 	assert.Contains(t, err.Error(), `{"detail":[{"input":"<redacted>"}]}`)
 }
 
@@ -483,7 +494,7 @@ func TestAskRedactsMultilineExcerpt(t *testing.T) {
 	req.State = map[string]any{"prompt": "line one of the plan\nline two of the plan"}
 	body := `{"detail":"too long: 'line one of the plan\nline two...'"}`
 	_, err := newTestClient(t, reply(http.StatusUnprocessableEntity, body)).Ask(t.Context(), req)
-	require.ErrorIs(t, err, ErrUnprocessable)
+	requireUnprocessable(t, err)
 	assert.NotContains(t, err.Error(), "line one")
 	assert.NotContains(t, err.Error(), "line two")
 }

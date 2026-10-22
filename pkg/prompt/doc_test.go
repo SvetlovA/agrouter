@@ -104,33 +104,3 @@ func TestDocChunkStateJSON(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"doc":{"index":2,"of":5,"text":"a\n"}}`, string(data), "the doc index stays out of the state")
 }
-
-func TestHalveDoc(t *testing.T) {
-	t.Run("lines", func(t *testing.T) {
-		text := strings.Repeat("line of text\n", 100)
-		pieces := HalveDoc(DocChunk{Doc: 2, Index: 5, Of: 9, Text: text})
-		require.GreaterOrEqual(t, len(pieces), 2)
-		var joined strings.Builder
-		for _, p := range pieces {
-			assert.Equal(t, 2, p.Doc)
-			assert.Zero(t, p.Index, "numbering is the caller's")
-			assert.LessOrEqual(t, jsonLen(p.Text), (jsonLen(text)+1)/2)
-			joined.WriteString(p.Text)
-		}
-		assert.Equal(t, text, joined.String())
-	})
-	t.Run("tiny and empty", func(t *testing.T) {
-		assert.Equal(t, []DocChunk{{Doc: 1, Text: "\x01"}}, HalveDoc(DocChunk{Doc: 1, Text: "\x01"}))
-		assert.Equal(t, []DocChunk{{}}, HalveDoc(DocChunk{}))
-	})
-	t.Run("every halved piece is at most half its chunk and still fits the doc budget", func(t *testing.T) {
-		r := &Result{Docs: []string{lines("d", 400, 120)}}
-		for _, c := range r.DocChunks(2000) {
-			for _, p := range HalveDoc(c) {
-				assert.LessOrEqual(t, jsonLen(p.Text), (jsonLen(c.Text)+1)/2)
-				wide := DocChunkState{Doc: DocChunk{Index: math.MaxInt, Of: math.MaxInt, Text: p.Text}}
-				assert.LessOrEqual(t, Tokens(mustLen(wide)), 2000)
-			}
-		}
-	})
-}

@@ -74,7 +74,7 @@ func pairBudget(a, b int) int {
 }
 
 // indexDigits is the decimal width reserved for a chunk's index and for its count: the widest int,
-// so any number of chunks, renumbered after any re-split, fits the envelope.
+// so any number of chunks fits the envelope.
 var indexDigits = len(strconv.Itoa(math.MaxInt))
 
 // chunkRoom is the escaped chunk text, in bytes, that fits in a chunk state beside an anchor of

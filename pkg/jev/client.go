@@ -58,8 +58,6 @@ var (
 	ErrNoKey = errors.New("no Jev API key")
 	// ErrUnauthorized is a 401: the key was rejected.
 	ErrUnauthorized = errors.New("unauthorized")
-	// ErrUnprocessable is a 422, possibly an oversized request; the router may re-split once.
-	ErrUnprocessable = errors.New("request rejected as invalid")
 	// ErrTooLong is a 400 whose error type says the request is longer than the context length.
 	// Other 400s do not match it.
 	ErrTooLong = errors.New("request over the context length")
@@ -107,16 +105,14 @@ func (e *StatusError) Error() string {
 	return msg
 }
 
-// Is matches the sentinel for the status: ErrUnauthorized, ErrUnprocessable, ErrOverloaded, or
-// ErrTooLong for a 400 of the too-long error type.
+// Is matches the sentinel for the status: ErrUnauthorized, ErrOverloaded, or ErrTooLong for a 400
+// of the too-long error type. Any other status is a plain StatusError.
 func (e *StatusError) Is(target error) bool {
 	switch e.Status {
 	case http.StatusBadRequest:
 		return target == ErrTooLong && e.ErrorType == errorTypeTooLong
 	case http.StatusUnauthorized:
 		return target == ErrUnauthorized
-	case http.StatusUnprocessableEntity:
-		return target == ErrUnprocessable
 	case http.StatusTooManyRequests, statusOverloaded:
 		return target == ErrOverloaded
 	default:
