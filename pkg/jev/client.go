@@ -19,6 +19,28 @@ import (
 // DefaultURL is the Jev endpoint.
 const DefaultURL = "https://api.typesafe.ai/v1/systemone"
 
+// The provider's input limits in tokens, per question and per request, and the header that switches
+// them to the long-context mode.
+const (
+	questionLimit     = 32_000
+	requestLimit      = 64_000
+	longContextLimit  = 262_000
+	longContextHeader = "TypeSafe-Danger-Zone-Long-Context"
+	// errorTypeTooLong is the detail.error_type of a 400 for a request over the context length.
+	errorTypeTooLong = "max_tokens_exceeded"
+	// maxErrorType bounds a parsed error type; a longer one is not a code and is left empty.
+	maxErrorType = 64
+)
+
+// Limits returns the most tokens the provider takes in one question and in one whole request.
+// longContext selects its long-context mode, which Client.LongContext turns on in the request.
+func Limits(longContext bool) (perQuestion, perRequest int) {
+	if longContext {
+		return longContextLimit, longContextLimit
+	}
+	return questionLimit, requestLimit
+}
+
 // Limits on what is read back, so a misbehaving server cannot exhaust memory.
 const (
 	maxResponseBytes = 4 << 20
@@ -38,6 +60,9 @@ var (
 	ErrUnauthorized = errors.New("unauthorized")
 	// ErrUnprocessable is a 422, possibly an oversized request; the router may re-split once.
 	ErrUnprocessable = errors.New("request rejected as invalid")
+	// ErrTooLong is a 400 whose error type says the request is longer than the context length.
+	// Other 400s do not match it.
+	ErrTooLong = errors.New("request over the context length")
 	// ErrOverloaded is a 429 or 529 that retries could not get past within the deadline.
 	ErrOverloaded = errors.New("rate limited or overloaded")
 	// ErrMalformed is a 200 whose body is not a valid set of answers to the questions sent; every
@@ -70,6 +95,8 @@ func (e *transportError) Is(target error) bool { return target == ErrTransport }
 type StatusError struct {
 	Status int
 	Body   string
+	// ErrorType is detail.error_type of the raw body; empty when the body has none or is not JSON.
+	ErrorType string
 }
 
 func (e *StatusError) Error() string {
@@ -80,9 +107,12 @@ func (e *StatusError) Error() string {
 	return msg
 }
 
-// Is matches the sentinel for the status: ErrUnauthorized, ErrUnprocessable or ErrOverloaded.
+// Is matches the sentinel for the status: ErrUnauthorized, ErrUnprocessable, ErrOverloaded, or
+// ErrTooLong for a 400 of the too-long error type.
 func (e *StatusError) Is(target error) bool {
 	switch e.Status {
+	case http.StatusBadRequest:
+		return target == ErrTooLong && e.ErrorType == errorTypeTooLong
 	case http.StatusUnauthorized:
 		return target == ErrUnauthorized
 	case http.StatusUnprocessableEntity:
@@ -104,6 +134,8 @@ type Client struct {
 	// MinBackoff and MaxBackoff bound the wait between retries of a 429 or 529.
 	MinBackoff time.Duration
 	MaxBackoff time.Duration
+	// LongContext asks for the provider's long-context mode, which raises its input limits (Limits).
+	LongContext bool
 
 	key string
 }
@@ -119,16 +151,17 @@ func New(key string) *Client {
 	}
 }
 
-// Ask sends req and returns the validated answer to every question, keyed as in req.Questions.
+// Ask sends req and returns the validated answer to every question, keyed as in req.Questions, and
+// the input tokens the provider counted when it reports them.
 // ctx carries the routing deadline; 429 and 529 are retried with backoff until it would pass.
 // Every error has the key redacted.
-func (c *Client) Ask(ctx context.Context, req Request) (map[string]Answer, error) {
+func (c *Client) Ask(ctx context.Context, req Request) (Response, error) {
 	if c.key == "" {
-		return nil, ErrNoKey
+		return Response{}, ErrNoKey
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
-		return nil, fmt.Errorf("jev: encode request: %w", err)
+		return Response{}, fmt.Errorf("jev: encode request: %w", err)
 	}
 	var last *StatusError
 	for attempt := 0; ; attempt++ {
@@ -136,23 +169,37 @@ func (c *Client) Ask(ctx context.Context, req Request) (map[string]Answer, error
 		if postErr != nil {
 			// a retry cut off by the deadline is still the overload that forced it
 			if last != nil && ctx.Err() != nil {
-				return nil, last
+				return Response{}, last
 			}
-			return nil, c.redact(&transportError{fmt.Errorf("jev: %w", postErr)})
+			return Response{}, c.redact(&transportError{fmt.Errorf("jev: %w", postErr)})
 		}
 		if status == http.StatusOK {
-			answers, decodeErr := decode(data, req.Questions)
-			return answers, c.redact(decodeErr)
+			resp, decodeErr := decode(data, req.Questions)
+			return resp, c.redact(decodeErr)
 		}
-		serr := &StatusError{Status: status, Body: c.errorBody(data, req.State)}
+		serr := &StatusError{Status: status, Body: c.errorBody(data, req.State), ErrorType: errorType(data)}
 		if !errors.Is(serr, ErrOverloaded) {
-			return nil, serr
+			return Response{}, serr
 		}
 		if !c.wait(ctx, c.delay(attempt, header)) {
-			return nil, serr
+			return Response{}, serr
 		}
 		last = serr
 	}
+}
+
+// errorType is detail.error_type of an error body, or "" when the body is not JSON of that shape or
+// the type is not a short code.
+func errorType(data []byte) string {
+	var body struct {
+		Detail struct {
+			ErrorType string `json:"error_type"`
+		} `json:"detail"`
+	}
+	if json.Unmarshal(data, &body) != nil || len(body.Detail.ErrorType) > maxErrorType {
+		return ""
+	}
+	return body.Detail.ErrorType
 }
 
 func (c *Client) post(ctx context.Context, body []byte) (int, []byte, http.Header, error) {
@@ -163,6 +210,9 @@ func (c *Client) post(ctx context.Context, body []byte) (int, []byte, http.Heade
 	req.Header.Set("Authorization", "Bearer "+c.key)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	if c.LongContext {
+		req.Header.Set(longContextHeader, "true")
+	}
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return 0, nil, nil, fmt.Errorf("request: %w", err)
@@ -386,24 +436,41 @@ func (e *redactedError) Error() string { return e.msg }
 func (e *redactedError) Unwrap() error { return e.err }
 
 // decode parses a 200 body and validates one answer per question sent.
-func decode(data []byte, questions map[string]Question) (map[string]Answer, error) {
+func decode(data []byte, questions map[string]Question) (Response, error) {
 	var resp response
 	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, fmt.Errorf("jev: %w: %w", ErrInvalidAnswer, err)
+		return Response{}, fmt.Errorf("jev: %w: %w", ErrInvalidAnswer, err)
 	}
 	answers := make(map[string]Answer, len(questions))
 	for id, q := range questions {
 		w, ok := resp.Answers[id]
 		if !ok || w == nil || empty(q, *w) && (w.Type == "" || w.Type == q.Type) {
-			return nil, fmt.Errorf("jev: %w: %q", ErrEmptyAnswer, id)
+			return Response{}, fmt.Errorf("jev: %w: %q", ErrEmptyAnswer, id)
 		}
 		a, err := validate(q, *w)
 		if err != nil {
-			return nil, fmt.Errorf("jev: %w: %q: %w", ErrInvalidAnswer, id, err)
+			return Response{}, fmt.Errorf("jev: %w: %q: %w", ErrInvalidAnswer, id, err)
 		}
 		answers[id] = a
 	}
-	return answers, nil
+	return Response{Answers: answers, InputTokens: inputTokens(resp.Usage)}, nil
+}
+
+// inputTokens is usage.input_tokens, or nil when it is missing, null, not a non-negative integer, or
+// the usage is not an object: the count is metadata and never fails a valid answer.
+func inputTokens(usage json.RawMessage) *int {
+	var u struct {
+		InputTokens json.RawMessage `json:"input_tokens"`
+	}
+	if json.Unmarshal(usage, &u) != nil {
+		return nil
+	}
+	n, err := strconv.ParseInt(string(u.InputTokens), 10, 0)
+	if err != nil || n < 0 {
+		return nil
+	}
+	tokens := int(n)
+	return &tokens
 }
 
 // empty reports whether w lacks the value q asks for: the choice, the score or the noul.

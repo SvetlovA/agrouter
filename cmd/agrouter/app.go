@@ -35,7 +35,7 @@ type app struct {
 	getenv         func(string) string
 	workDir        string
 	embedded       []byte
-	newJev         func(key string) router.JevClient
+	newJev         func(key string, longContext bool) router.JevClient
 	runner         CommandRunner
 	checker        ReadinessChecker // exec only
 	now            func() time.Time // nil means time.Now
@@ -52,9 +52,13 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer) *app {
 		getenv:   os.Getenv,
 		workDir:  wd,
 		embedded: defaults.Config,
-		newJev:   func(key string) router.JevClient { return jev.New(key) },
-		runner:   runner.Runner{},
-		checker:  readiness.Checker{Dir: wd},
+		newJev: func(key string, longContext bool) router.JevClient {
+			c := jev.New(key)
+			c.LongContext = longContext
+			return c
+		},
+		runner:  runner.Runner{},
+		checker: readiness.Checker{Dir: wd},
 	}
 }
 
@@ -213,7 +217,7 @@ func (a *app) setup(req *args.Request) (*config.Config, *catalog.Catalog, *route
 	}
 	key, source := config.ResolveAPIKey(req.APIKey.Value, req.APIKey.Set, a.getenv(config.EnvAPIKey), cfg.Agrouter)
 	a.debug.apiKey(key, source)
-	rt, err := router.New(cfg, cat, a.newJev(key))
+	rt, err := router.New(cfg, cat, a.newJev(key, cfg.Agrouter.LongContext))
 	if err != nil {
 		return nil, nil, nil, err
 	}

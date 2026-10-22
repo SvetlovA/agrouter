@@ -56,13 +56,13 @@ func chunkAnswers(route jev.Answer, relevance float64) map[string]jev.Answer {
 // chunked is a mock answering chunk requests with fn; a single request fails.
 func chunked(t *testing.T, fn func(jev.Request, prompt.ChunkState) (map[string]jev.Answer, error)) *mocks.JevClientMock {
 	t.Helper()
-	return &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
 		st, ok := req.State.(prompt.ChunkState)
 		if !ok {
 			return nil, fmt.Errorf("unexpected state %T", req.State)
 		}
 		return fn(req, st)
-	}}
+	})}
 }
 
 // byMarker answers the chunks containing "HARD" as relevant and favoring the strong option, and the
@@ -382,7 +382,7 @@ func TestRouteChunkGoldenRequest(t *testing.T) {
 // rejecting answers chunk requests like byMarker, but rejects with a 422 those reject picks.
 func rejecting(t *testing.T, reject func(prompt.ChunkState) bool) *mocks.JevClientMock {
 	t.Helper()
-	return &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
 		st, ok := req.State.(prompt.ChunkState)
 		if !ok {
 			return nil, &jev.StatusError{Status: 422} // the single request
@@ -391,7 +391,7 @@ func rejecting(t *testing.T, reject func(prompt.ChunkState) bool) *mocks.JevClie
 			return nil, &jev.StatusError{Status: 422}
 		}
 		return byMarker(req, st)
-	}}
+	})}
 }
 
 func TestRouteSingleRequest422Resplits(t *testing.T) {
@@ -555,9 +555,9 @@ func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			client := &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+			client := &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
 				return tc.ask(req)
-			}}
+			})}
 			r := newRouter(t, cfg, cat, client)
 			d, err := r.Route(context.Background(), el, req, tc.captured)
 			require.NoError(t, err)
@@ -596,13 +596,13 @@ func testRouteChunkedStopsOnDeadline(t *testing.T) {
 	el := Eligible(cat, req)
 	var mu sync.Mutex
 	started := 0
-	client := &mocks.JevClientMock{AskFunc: func(ctx context.Context, _ jev.Request) (map[string]jev.Answer, error) {
+	client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, _ jev.Request) (map[string]jev.Answer, error) {
 		mu.Lock()
 		started++
 		mu.Unlock()
 		<-ctx.Done()
 		return nil, ctx.Err()
-	}}
+	})}
 	r := newRouter(t, cfg, cat, client)
 	c := captured(filler(1_000_000))
 	split, err := c.Split(r.budget)
@@ -625,10 +625,10 @@ func testRouteChunkedAnsweredAtDeadlineStands(t *testing.T) {
 	cfg, cat := embedded(t)
 	req := &args.Request{CLI: "claude"}
 	el := Eligible(cat, req)
-	client := &mocks.JevClientMock{AskFunc: func(ctx context.Context, req jev.Request) (map[string]jev.Answer, error) {
+	client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, req jev.Request) (map[string]jev.Answer, error) {
 		<-ctx.Done() // every chunk answers just as the deadline passes
 		return stageAnswers(req, "claude-sonnet-5-5@low", 0.9, 0.5), nil
-	}}
+	})}
 	r := newRouter(t, cfg, cat, client)
 	c := captured(filler(150_000))
 	split, err := c.Split(r.budget)

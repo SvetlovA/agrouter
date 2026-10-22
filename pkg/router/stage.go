@@ -191,11 +191,11 @@ func (r *Router) ask(ctx context.Context, el *Eligibility, lv level, gs []group,
 		State:     state,
 		Questions: map[string]jev.Question{lv.name: stageQuestion(r.cfg, lv, wholeGuide, gs, el.effort)},
 	}
-	answers, err := r.jev.Ask(ctx, req)
+	resp, err := r.jev.Ask(ctx, req)
 	if err != nil {
 		return 0, nil, fmt.Errorf("route request: %w", err)
 	}
-	answer, ok := answers[lv.name]
+	answer, ok := resp.Answers[lv.name]
 	if !ok {
 		return 0, nil, fmt.Errorf("%w: %q", jev.ErrEmptyAnswer, lv.name)
 	}

@@ -86,6 +86,7 @@ type fakeJev struct {
 	failHang   bool
 	failDrop   bool
 	states     []string
+	longCtx    []string // the long-context header each request carried, "" when absent
 	stages     []string // the routing stage each Choice request asked, in order
 	srv        *httptest.Server
 }
@@ -117,6 +118,7 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	f.states = append(f.states, string(req.State))
+	f.longCtx = append(f.longCtx, r.Header.Get("TypeSafe-Danger-Zone-Long-Context"))
 	pick, level, failDocs, failStage := f.pick, f.level, f.failDocs, f.failStage
 	f.mu.Unlock()
 	if failDocs && strings.HasPrefix(string(req.State), `{"doc`) {
@@ -251,6 +253,13 @@ func (f *fakeJev) requests() []string {
 	return slices.Clone(f.states)
 }
 
+// longContextHeaders lists the long-context header of every request, one entry per request.
+func (f *fakeJev) longContextHeaders() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.longCtx)
+}
+
 // asked lists the routing stages asked, one entry per Choice request.
 func (f *fakeJev) asked() []string {
 	f.mu.Lock()
@@ -330,9 +339,10 @@ func (e *env) runWithRunner(argv []string, stdin io.Reader, child CommandRunner)
 		getenv:   os.Getenv,
 		workDir:  e.workDir,
 		embedded: defaults.Config,
-		newJev: func(key string) router.JevClient {
+		newJev: func(key string, longContext bool) router.JevClient {
 			c := jev.New(key)
 			c.URL = e.jev.srv.URL
+			c.LongContext = longContext
 			return c
 		},
 		runner:  child,
@@ -556,6 +566,32 @@ func TestApp_Decision(t *testing.T) {
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Contains(t, r.stdout, `"a <b> & c"`)
 	})
+}
+
+func TestApp_LongContext(t *testing.T) {
+	tests := []struct {
+		name   string
+		config string
+		header string
+	}{
+		{name: "off by default"},
+		{name: "off when set to false", config: "[agrouter]\nlong_context = false\n"},
+		{name: "on when set", config: "[agrouter]\nlong_context = true\n", header: "true"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.jev.pick = "claude-sonnet-5-5@low"
+			if tt.config != "" {
+				e.globalConfig(tt.config)
+			}
+			r := e.run([]string{"fix the typo in README"}, nil)
+
+			require.Equal(t, 0, r.code, r.stderr)
+			headers := e.jev.longContextHeaders()
+			assert.Equal(t, repeated(tt.header, 3), headers, "every cli, model and effort request alike")
+		})
+	}
 }
 
 func TestApp_VerboseOutput(t *testing.T) {

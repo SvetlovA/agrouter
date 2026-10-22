@@ -15,7 +15,7 @@ import (
 //
 //		// make and configure a mocked router.JevClient
 //		mockedJevClient := &JevClientMock{
-//			AskFunc: func(ctx context.Context, req jev.Request) (map[string]jev.Answer, error) {
+//			AskFunc: func(ctx context.Context, req jev.Request) (jev.Response, error) {
 //				panic("mock out the Ask method")
 //			},
 //		}
@@ -26,7 +26,7 @@ import (
 //	}
 type JevClientMock struct {
 	// AskFunc mocks the Ask method.
-	AskFunc func(ctx context.Context, req jev.Request) (map[string]jev.Answer, error)
+	AskFunc func(ctx context.Context, req jev.Request) (jev.Response, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -42,7 +42,7 @@ type JevClientMock struct {
 }
 
 // Ask calls AskFunc.
-func (mock *JevClientMock) Ask(ctx context.Context, req jev.Request) (map[string]jev.Answer, error) {
+func (mock *JevClientMock) Ask(ctx context.Context, req jev.Request) (jev.Response, error) {
 	if mock.AskFunc == nil {
 		panic("JevClientMock.AskFunc: method is nil but JevClient.Ask was just called")
 	}

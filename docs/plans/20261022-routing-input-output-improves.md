@@ -225,13 +225,13 @@ type Budget struct {
 - Modify: `pkg/router/router_test.go`, `pool_test.go`, `stage_test.go`, `complexity_test.go`, `project_test.go`, `evalcase_load_test.go`
 - Modify: `cmd/agrouter/app.go` (`newJev`), `cmd/agrouter/app_test.go`
 
-- [ ] add `jev.Limits(longContext)` and `Client.LongContext`; `post` sends `TypeSafe-Danger-Zone-Long-Context: true` only when set; `newJev(key, longContext)` passes `cfg.Agrouter.LongContext`
-- [ ] parse `detail.error_type` from the bounded raw error body into `StatusError.ErrorType` before redaction; add `ErrTooLong`, matched only by 400 + `max_tokens_exceeded`; keep `ErrUnprocessable` until task 3
-- [ ] parse `usage.input_tokens` permissively; `Ask` returns `Response{Answers, InputTokens}`; update `JevClient`, run `make generate`, update router call sites to use `Answers` (reported tokens are ignored until task 6); wrap test closures with `answersOnly`
-- [ ] write tests: `Limits` for both modes; header present only with `LongContext`; `ErrTooLong` for the structured 400, not for another 400, a 422, a 400 with a malformed or truncated body
-- [ ] write tests: usage present, absent, null, non-integer and negative (answers still valid, tokens unknown); existing redaction tests still pass
-- [ ] write an `app_test.go` case: the fake provider sees the long-context header with `long_context = true` and no header by default
-- [ ] run tests - must pass before next task
+- [x] add `jev.Limits(longContext)` and `Client.LongContext`; `post` sends `TypeSafe-Danger-Zone-Long-Context: true` only when set; `newJev(key, longContext)` passes `cfg.Agrouter.LongContext`
+- [x] parse `detail.error_type` from the bounded raw error body into `StatusError.ErrorType` before redaction; add `ErrTooLong`, matched only by 400 + `max_tokens_exceeded`; keep `ErrUnprocessable` until task 3
+- [x] parse `usage.input_tokens` permissively; `Ask` returns `Response{Answers, InputTokens}`; update `JevClient`, run `make generate`, update router call sites to use `Answers` (reported tokens are ignored until task 6); wrap test closures with `answersOnly`
+- [x] write tests: `Limits` for both modes; header present only with `LongContext`; `ErrTooLong` for the structured 400, not for another 400, a 422, a 400 with a malformed or truncated body
+- [x] write tests: usage present, absent, null, non-integer and negative (answers still valid, tokens unknown); existing redaction tests still pass
+- [x] write an `app_test.go` case: the fake provider sees the long-context header with `long_context = true` and no header by default
+- [x] run tests - must pass before next task
 
 ### Task 3: Remove re-split recovery
 

@@ -62,9 +62,9 @@ func newRouter(t *testing.T, cfg *config.Config, cat *catalog.Catalog, client Je
 }
 
 func failing(err error) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: func(context.Context, jev.Request) (map[string]jev.Answer, error) {
+	return &mocks.JevClientMock{AskFunc: answersOnly(func(context.Context, jev.Request) (map[string]jev.Answer, error) {
 		return nil, err
-	}}
+	})}
 }
 
 func captured(text string) *prompt.Result {
@@ -321,9 +321,9 @@ func TestRouteMalformedAnswers(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			client := &mocks.JevClientMock{AskFunc: func(context.Context, jev.Request) (map[string]jev.Answer, error) {
+			client := &mocks.JevClientMock{AskFunc: answersOnly(func(context.Context, jev.Request) (map[string]jev.Answer, error) {
 				return tc.answers, nil
-			}}
+			})}
 			r := newRouter(t, cfg, cat, client)
 			req := &args.Request{CLI: "claude"}
 			d, err := r.Route(context.Background(), Eligible(cat, req), req, captured("x"))
@@ -394,12 +394,12 @@ func TestRouteAfterExcludeSkipsJevForOneOption(t *testing.T) {
 func TestRouteKeepsAskedModelOnLaterFailure(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	failEffort := func(fail error) *mocks.JevClientMock {
-		return &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+		return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
 			if _, ok := req.Questions[LevelEffort]; ok {
 				return nil, fail
 			}
 			return certain(req, "strong@high"), nil
-		}}
+		})}
 	}
 	tests := []struct {
 		name      string

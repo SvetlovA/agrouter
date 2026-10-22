@@ -21,13 +21,13 @@ import (
 
 // staged answers doc requests with docs and every routing request (single or chunk) with route.
 func staged(docs func() (map[string]jev.Answer, error), route func(req jev.Request) (map[string]jev.Answer, error)) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
 		switch req.State.(type) {
 		case prompt.DocsState, prompt.DocChunkState:
 			return docs()
 		}
 		return route(req)
-	}}
+	})}
 }
 
 // scored answers every doc request with an expected complexity of 6.9 and full evidence.

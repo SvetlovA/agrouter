@@ -17,7 +17,7 @@ import (
 
 // JevClient asks Jev typed questions about a state; *jev.Client implements it.
 type JevClient interface {
-	Ask(ctx context.Context, req jev.Request) (map[string]jev.Answer, error)
+	Ask(ctx context.Context, req jev.Request) (jev.Response, error)
 }
 
 // ErrCannotDecide means Jev could not decide and more than one CLI is still eligible, so there is

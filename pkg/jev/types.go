@@ -90,6 +90,13 @@ func (c Criteria) MarshalJSON() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// Response is what Ask returns: the validated answers keyed as in the request, and the input tokens
+// the provider counted for it; nil when it did not report a valid count.
+type Response struct {
+	Answers     map[string]Answer
+	InputTokens *int
+}
+
 // Answer is a validated answer: Choice or Score with probabilities and confidence, or Noul.
 type Answer struct {
 	Type          string
@@ -105,6 +112,7 @@ type Answer struct {
 type response struct {
 	Model   string                 `json:"model"`
 	Answers map[string]*wireAnswer `json:"answers"` // nil: a null answer
+	Usage   json.RawMessage        `json:"usage"`   // read permissively by inputTokens
 }
 
 type wireAnswer struct {

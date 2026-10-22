@@ -80,10 +80,11 @@ func (r *Router) docFanout(questions map[string]jev.Question) fanout[prompt.DocC
 
 // askDocs sends one doc request and scores its validated answers.
 func (r *Router) askDocs(ctx context.Context, state any, questions map[string]jev.Question) (DocScore, error) {
-	answers, err := r.jev.Ask(ctx, jev.Request{Model: r.cfg.Agrouter.JevModel, State: state, Questions: questions})
+	resp, err := r.jev.Ask(ctx, jev.Request{Model: r.cfg.Agrouter.JevModel, State: state, Questions: questions})
 	if err != nil {
 		return DocScore{}, fmt.Errorf("doc request: %w", err)
 	}
+	answers := resp.Answers
 	level, ok := answers[questionComplexity]
 	if !ok {
 		return DocScore{}, fmt.Errorf("%w: %q", jev.ErrEmptyAnswer, questionComplexity)

@@ -54,7 +54,7 @@ func complexityAnswer(rating float64) jev.Answer {
 
 // docMock answers every doc request with fn, given the doc chunk (zero for the whole-docs state).
 func docMock(fn func(c prompt.DocChunk, whole bool) (map[string]jev.Answer, error)) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
 		switch st := req.State.(type) {
 		case prompt.DocsState:
 			return fn(prompt.DocChunk{}, true)
@@ -62,7 +62,7 @@ func docMock(fn func(c prompt.DocChunk, whole bool) (map[string]jev.Answer, erro
 			return fn(st.Doc, false)
 		}
 		return nil, fmt.Errorf("unexpected state %T", req.State)
-	}}
+	})}
 }
 
 func docChunkStates(client *mocks.JevClientMock) []prompt.DocChunk {
@@ -442,13 +442,13 @@ func testComplexityStopsOnDeadline(t *testing.T) {
 	cfg, cat := embedded(t)
 	var mu sync.Mutex
 	started := 0
-	client := &mocks.JevClientMock{AskFunc: func(ctx context.Context, _ jev.Request) (map[string]jev.Answer, error) {
+	client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, _ jev.Request) (map[string]jev.Answer, error) {
 		mu.Lock()
 		started++
 		mu.Unlock()
 		<-ctx.Done()
 		return nil, ctx.Err()
-	}}
+	})}
 	r := newRouter(t, cfg, cat, client)
 	captured := &prompt.Result{Docs: []string{docsOf("BIG", 4*r.budget.Doc)}}
 	chunks := captured.SplitDocs(r.budget)
@@ -466,10 +466,10 @@ func testComplexityStopsOnDeadline(t *testing.T) {
 func TestComplexitySingleRequestDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cfg, cat := embedded(t)
-		client := &mocks.JevClientMock{AskFunc: func(ctx context.Context, _ jev.Request) (map[string]jev.Answer, error) {
+		client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, _ jev.Request) (map[string]jev.Answer, error) {
 			<-ctx.Done()
 			return nil, ctx.Err()
-		}}
+		})}
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 		defer cancel()
 		_, err := newRouter(t, cfg, cat, client).complexity(ctx, &prompt.Result{Docs: []string{"a CLI"}})
