@@ -68,6 +68,10 @@ type Stage struct {
 	Skipped bool        // one group: Jev not asked
 	Answer  *jev.Answer // the whole-state answer; nil when skipped or pooled
 	Pooled  *Pooled     // the split-state answers; nil otherwise
+	// Estimated and Reported are the tokens of the whole-state request: agrouter's estimate and the
+	// provider's input-token count, nil when it gave none. Both are unset for a skipped or pooled stage.
+	Estimated int
+	Reported  *int
 }
 
 // group is the options sharing one level's key.
@@ -159,11 +163,7 @@ func (r *Router) decide(ctx context.Context, el *Eligibility, captured *prompt.R
 // request; a split state is pooled over its chunks. A request the provider rejects is never resent.
 func (r *Router) stage(ctx context.Context, el *Eligibility, lv level, gs []group, st *routeState) (int, Stage, error) {
 	if st.split == nil {
-		i, answer, err := r.ask(ctx, el, lv, gs, st.captured.State())
-		if err != nil {
-			return 0, Stage{}, err
-		}
-		return i, Stage{Level: lv.name, Choice: gs[i].label, Answer: answer}, nil
+		return r.ask(ctx, el, lv, gs, st.captured.State())
 	}
 	i, p, err := r.pooled(ctx, el, lv, gs, st.split)
 	if err != nil {
@@ -172,22 +172,24 @@ func (r *Router) stage(ctx context.Context, el *Eligibility, lv level, gs []grou
 	return i, Stage{Level: lv.name, Choice: gs[i].label, Pooled: p}, nil
 }
 
-// ask sends state in one Choice request over gs and returns the chosen group's index.
-func (r *Router) ask(ctx context.Context, el *Eligibility, lv level, gs []group, state prompt.State) (int, *jev.Answer, error) {
+// ask sends state in one Choice request over gs and returns the chosen group's index and the stage it decided.
+func (r *Router) ask(ctx context.Context, el *Eligibility, lv level, gs []group, state prompt.State) (int, Stage, error) {
 	questions := map[string]jev.Question{lv.name: stageQuestion(r.cfg, lv, wholeGuide, gs, el.effort)}
 	resp, err := r.jev.Ask(ctx, jev.Request{Model: r.cfg.Agrouter.JevModel, State: state, Questions: questions})
 	if err != nil {
-		return 0, nil, fmt.Errorf("route request: %w", r.sized(err, state, questions))
+		return 0, Stage{}, fmt.Errorf("route request: %w", r.sized(err, state, questions))
 	}
 	answer, ok := resp.Answers[lv.name]
 	if !ok {
-		return 0, nil, fmt.Errorf("%w: %q", jev.ErrEmptyAnswer, lv.name)
+		return 0, Stage{}, fmt.Errorf("%w: %q", jev.ErrEmptyAnswer, lv.name)
 	}
 	names := groupLabels(gs)
 	if _, err := scoresOf(answer, names); err != nil {
-		return 0, nil, err
+		return 0, Stage{}, err
 	}
-	return slices.Index(names, answer.Choice), &answer, nil
+	i := slices.Index(names, answer.Choice)
+	return i, Stage{Level: lv.name, Choice: gs[i].label, Answer: &answer,
+		Estimated: r.estimate(state, questions), Reported: resp.InputTokens}, nil
 }
 
 // estimate is the tokens agrouter counts in a request carrying state and questions, both serialized.

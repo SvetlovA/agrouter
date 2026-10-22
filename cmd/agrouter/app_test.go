@@ -87,10 +87,12 @@ type fakeJev struct {
 	failAnswer string
 	failHang   bool
 	failDrop   bool
-	states     []string
-	longCtx    []string // the long-context header each request carried, "" when absent
-	stages     []string // the routing stage each Choice request asked, in order
-	srv        *httptest.Server
+	// usage is the raw JSON the response carries as usage.input_tokens; empty leaves usage out
+	usage   string
+	states  []string
+	longCtx []string // the long-context header each request carried, "" when absent
+	stages  []string // the routing stage each Choice request asked, in order
+	srv     *httptest.Server
 }
 
 func newFakeJev(t *testing.T) *fakeJev {
@@ -121,7 +123,7 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.states = append(f.states, string(req.State))
 	f.longCtx = append(f.longCtx, r.Header.Get("TypeSafe-Danger-Zone-Long-Context"))
-	pick, level, failDocs, failStage := f.pick, f.level, f.failDocs, f.failStage
+	pick, level, failDocs, failStage, usage := f.pick, f.level, f.failDocs, f.failStage, f.usage
 	f.mu.Unlock()
 	if failDocs && strings.HasPrefix(string(req.State), `{"doc`) {
 		http.Error(w, "doc rejected", http.StatusBadRequest)
@@ -173,7 +175,11 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 		f.stages = append(f.stages, id)
 		f.mu.Unlock()
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"model": req.Model, "answers": answers})
+	body := map[string]any{"model": req.Model, "answers": answers}
+	if usage != "" {
+		body["usage"] = map[string]any{"input_tokens": json.RawMessage(usage)}
+	}
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // fail fails a request asking stage as the fail fields say.

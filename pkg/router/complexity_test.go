@@ -155,9 +155,13 @@ func TestComplexitySingleRequest(t *testing.T) {
 
 	got, err := r.complexity(context.Background(), docs)
 	require.NoError(t, err)
-	assert.Equal(t, &ComplexityResult{Chunks: []DocScore{{Index: 1, Of: 1, Score: 6, Evidence: 0.9, Confidence: 0.8}}, Complexity: 6}, got)
-
 	calls := client.AskCalls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, &ComplexityResult{Chunks: []DocScore{{Index: 1, Of: 1, Score: 6, Evidence: 0.9, Confidence: 0.8,
+		Estimated: r.estimate(calls[0].Req.State, calls[0].Req.Questions)}}, Complexity: 6}, got,
+		"the provider reported no tokens: unknown, never zero")
+	assert.Positive(t, got.Chunks[0].Estimated)
+
 	require.Len(t, calls, 1)
 	assert.Equal(t, prompt.DocsState{Docs: []string{"# Shop\n\nThree services.\n", "Use gofmt.\n"}}, calls[0].Req.State)
 	assert.Equal(t, complexityQuestions(cfg.Agrouter), calls[0].Req.Questions)

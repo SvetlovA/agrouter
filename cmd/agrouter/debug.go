@@ -123,7 +123,8 @@ func (l *debugLog) decision(d router.Decision) {
 	}
 	if cx := d.Complexity; cx != nil {
 		for _, c := range cx.Chunks {
-			l.printf("doc %d/%d: score %.3f, evidence %.3f, confidence %.3f", c.Index, c.Of, c.Score, c.Evidence, c.Confidence)
+			l.printf("doc %d/%d: score %.3f, evidence %.3f, confidence %.3f, %s", c.Index, c.Of, c.Score, c.Evidence, c.Confidence,
+				tokens(c.Estimated, c.Reported))
 		}
 		l.printf("project complexity: %.1f", cx.Complexity)
 	}
@@ -134,13 +135,13 @@ func (l *debugLog) decision(d router.Decision) {
 			l.printf("stage %s: skipped (%s)", st.Level, st.Choice)
 		case st.Answer != nil:
 			asked = true
-			l.printf("stage %s: choice %s, confidence %.3f, top %s", st.Level, st.Answer.Choice, st.Answer.Confidence,
-				topProbabilities(st.Answer.Probabilities))
+			l.printf("stage %s: choice %s, confidence %.3f, top %s, %s", st.Level, st.Answer.Choice, st.Answer.Confidence,
+				topProbabilities(st.Answer.Probabilities), tokens(st.Estimated, st.Reported))
 		case st.Pooled != nil:
 			asked = true
 			for _, c := range st.Pooled.Chunks {
-				l.printf("stage %s chunk %s %d/%d: relevance %.3f, confidence %.3f, top %s", st.Level, c.Field, c.Index, c.Of,
-					c.Relevance, c.Confidence, scores(c.Top))
+				l.printf("stage %s chunk %s %d/%d: relevance %.3f, confidence %.3f, top %s, %s", st.Level, c.Field, c.Index, c.Of,
+					c.Relevance, c.Confidence, scores(c.Top), tokens(c.Estimated, c.Reported))
 			}
 			confidence := "none"
 			if c := stageConfidence(st); c != nil {
@@ -155,6 +156,15 @@ func (l *debugLog) decision(d router.Decision) {
 	case !asked && d.OptionID != "":
 		l.printf("one option, jev not asked: %s", d.OptionID)
 	}
+}
+
+// tokens is one request's token counts: agrouter's estimate beside the provider's count, which is
+// unknown when the provider reported none. The pair is what the user compares to tune bytes_per_token.
+func tokens(estimated int, reported *int) string {
+	if reported == nil {
+		return fmt.Sprintf("tokens: estimated %d, provider reported unknown", estimated)
+	}
+	return fmt.Sprintf("tokens: estimated %d, provider reported %d", estimated, *reported)
 }
 
 // failed prints the reason routing stopped, for a failure that exits without a decision.

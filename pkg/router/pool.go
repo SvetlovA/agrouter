@@ -28,6 +28,8 @@ type ChunkResult struct {
 	Choice        string
 	Probabilities map[string]float64 // every criterion, retained for verbose reporting
 	Top           []Score
+	Estimated     int  // agrouter's token estimate of this chunk's request
+	Reported      *int // the provider's input-token count for it; nil when it gave none
 }
 
 // Pooled is how a split state decided one level: every chunk's answers in sequence order and the pooled
@@ -98,7 +100,8 @@ func (r *Router) askChunk(ctx context.Context, id string, names []string, anchor
 	}
 	return routeAnswer{probs: route.Probabilities, result: ChunkResult{Field: c.Field, Index: c.Index, Of: c.Of,
 		Relevance: relevance.Noul, Confidence: route.Confidence, Choice: route.Choice,
-		Probabilities: route.Probabilities, Top: ranked(names, scores)}}, nil
+		Probabilities: route.Probabilities, Top: ranked(names, scores),
+		Estimated: r.estimate(state, questions), Reported: resp.InputTokens}}, nil
 }
 
 // pool combines the chunks' probabilities over the ordered criterion names: each chunk weighs its

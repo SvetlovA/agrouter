@@ -284,11 +284,11 @@ type Budget struct {
 - Modify: `pkg/router/stage_test.go`, `pkg/router/pool_test.go`, `pkg/router/complexity_test.go`
 - Modify: `cmd/agrouter/debug_test.go`
 
-- [ ] record `Estimated` (full request: state plus questions) and `Reported` (`InputTokens`) on `Stage`, `ChunkResult` and `DocScore`, per call
-- [ ] append `tokens: estimated N, provider reported M|unknown` to the stage, chunk and doc debug lines (`debug.go:125-158`)
-- [ ] write tests that estimates and reported counts land on the right stage/chunk under concurrent fan-out, and that unknown usage prints `unknown`
-- [ ] write tests that debug output still never includes `--doc` text, the prompt or the key
-- [ ] run tests - must pass before next task
+- [x] record `Estimated` (full request: state plus questions) and `Reported` (`InputTokens`) on `Stage`, `ChunkResult` and `DocScore`, per call
+- [x] append `tokens: estimated N, provider reported M|unknown` to the stage, chunk and doc debug lines (`debug.go:125-158`)
+- [x] write tests that estimates and reported counts land on the right stage/chunk under concurrent fan-out, and that unknown usage prints `unknown`
+- [x] write tests that debug output still never includes `--doc` text, the prompt or the key
+- [x] run tests - must pass before next task
 
 ### Task 7: Print routing-skipped and run-skipped lines on readiness blocks
 

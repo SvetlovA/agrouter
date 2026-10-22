@@ -18,6 +18,16 @@ func answersOnly(fn func(context.Context, jev.Request) (map[string]jev.Answer, e
 	}
 }
 
+// reporting adapts a test closure like answersOnly, with the input tokens the provider reports for
+// each request: tokens returns nil for a request it reports none for.
+func reporting(fn func(context.Context, jev.Request) (map[string]jev.Answer, error),
+	tokens func(jev.Request) *int) func(context.Context, jev.Request) (jev.Response, error) {
+	return func(ctx context.Context, req jev.Request) (jev.Response, error) {
+		answers, err := fn(ctx, req)
+		return jev.Response{Answers: answers, InputTokens: tokens(req)}, err
+	}
+}
+
 // rejection is a provider rejection a request can fail with, and what the router must make of it.
 type rejection struct {
 	name    string

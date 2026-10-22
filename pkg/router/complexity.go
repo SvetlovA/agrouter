@@ -17,6 +17,8 @@ type DocScore struct {
 	Score      float64 // Jev's Score normalized from its level range to 0 to 10
 	Confidence float64 // recorded only; never part of the reduce weight
 	Evidence   float64 // the Noul as answered: the request's weight in the reduce
+	Estimated  int     // agrouter's token estimate of the request
+	Reported   *int    // the provider's input-token count for it; nil when it gave none
 }
 
 // ComplexityResult is how the docs were scored: every doc request's answers in order and the
@@ -90,7 +92,8 @@ func (r *Router) askDocs(ctx context.Context, state any, questions map[string]je
 	if math.IsNaN(level.Score) || math.IsInf(level.Score, 0) || level.Score < 0 || level.Score > maxLevel {
 		return DocScore{}, fmt.Errorf("%w: complexity score outside the level range", jev.ErrInvalidAnswer)
 	}
-	return DocScore{Score: level.Score * 10 / maxLevel, Confidence: level.Confidence, Evidence: evidence.Noul}, nil
+	return DocScore{Score: level.Score * 10 / maxLevel, Confidence: level.Confidence, Evidence: evidence.Noul,
+		Estimated: r.estimate(state, questions), Reported: resp.InputTokens}, nil
 }
 
 // reduce combines the doc scores into the project complexity: the mean weighted by evidence (a
