@@ -305,8 +305,9 @@ func has(obj jev.Criteria, name string) bool {
 	return false
 }
 
-// budget derives the state budgets from the questions over the whole catalog, the largest they can
-// be, so eligibility only ever shrinks them. Questions leaving too little room are a config error.
+// budget derives the state budgets from request_tokens and the questions over the whole catalog, the
+// largest they can be, so eligibility only ever shrinks them. Questions leaving too little room are
+// a config error.
 func budget(cfg *config.Config, cat *catalog.Catalog) (prompt.Budget, error) {
 	sizes := prompt.Questions{
 		Route:      largestStage(cfg, cat, wholeGuide),
@@ -315,7 +316,8 @@ func budget(cfg *config.Config, cat *catalog.Catalog) (prompt.Budget, error) {
 		Complexity: questionLen(questionComplexity, complexityQuestion(cfg.Agrouter.ComplexityPolicy)),
 		Evidence:   questionLen(questionEvidence, evidenceQuestion()),
 	}
-	b, err := prompt.NewBudget(sizes)
+	policy := prompt.Policy{BytesPerToken: cfg.Agrouter.BytesPerToken, RequestTokens: cfg.Agrouter.RequestTokens}
+	b, err := prompt.NewBudget(policy, sizes)
 	if err != nil {
 		return b, fmt.Errorf("config: [agrouter]: %w", err)
 	}

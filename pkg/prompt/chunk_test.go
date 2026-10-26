@@ -13,67 +13,190 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTokens(t *testing.T) {
-	for n, want := range map[int]int{0: 0, 1: 1, 3: 1, 4: 2, 3000: 1000} {
-		assert.Equal(t, want, Tokens(n), "bytes %d", n)
+// testPolicy is the default estimator at the default allowance; tests of other ratios set their own.
+var testPolicy = Policy{BytesPerToken: 3, RequestTokens: 30_000}
+
+func TestPolicyTokens(t *testing.T) {
+	tests := []struct {
+		name  string
+		ratio float64
+		n     int
+		want  int
+	}{
+		{"zero bytes", 3, 0, 0},
+		{"one byte", 3, 1, 1},
+		{"exact multiple", 3, 3000, 1000},
+		{"rounds up", 3, 4, 2},
+		{"fractional ratio rounds up", 2.5, 6, 3},
+		{"fractional ratio exact", 2.5, 5, 2},
+		{"ratio below one", 0.5, 3, 6},
+		{"negative bytes", 3, -7, 0},
+		{"very large ratio", 1e300, 1, 1},
+		{"very small ratio saturates", 1e-300, 1, math.MaxInt},
+		{"widest count saturates", 1, math.MaxInt, math.MaxInt},
+		{"zero ratio saturates", 0, 1, math.MaxInt},
+		{"NaN ratio saturates", math.NaN(), 1, math.MaxInt},
+		{"negative ratio is zero", -1, 5, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, Policy{BytesPerToken: tc.ratio}.Tokens(tc.n))
+		})
+	}
+}
+
+func TestPolicyBytes(t *testing.T) {
+	tests := []struct {
+		name   string
+		ratio  float64
+		tokens int
+		want   int
+	}{
+		{"zero tokens", 3, 0, 0},
+		{"one token", 3, 1, 3},
+		{"many tokens", 3, 1000, 3000},
+		{"fractional ratio rounds down", 2.5, 3, 7},
+		{"ratio below one rounds down", 0.5, 3, 1},
+		{"negative tokens", 3, -7, 0},
+		{"very large ratio saturates", 1e300, 1, math.MaxInt},
+		{"very small ratio", 1e-300, 1, 0},
+		{"widest count saturates", 1, math.MaxInt, math.MaxInt},
+		{"NaN ratio saturates", math.NaN(), 1, math.MaxInt},
+		{"negative ratio is zero", -1, 5, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, Policy{BytesPerToken: tc.ratio}.Bytes(tc.tokens))
+		})
+	}
+}
+
+func TestPolicyRoundTrip(t *testing.T) {
+	// the estimate never shrinks a size: the bytes of the tokens estimated for n are at least n
+	for _, ratio := range []float64{1, 2, 2.5, 3, 4, 8} {
+		p := Policy{BytesPerToken: ratio}
+		for _, n := range []int{0, 1, 2, 3, 7, 100, 4096, 123_457} {
+			assert.GreaterOrEqual(t, p.Bytes(p.Tokens(n)), n, "ratio %g, bytes %d", ratio, n)
+		}
 	}
 }
 
 func TestNewBudget(t *testing.T) {
-	t.Run("from the questions", func(t *testing.T) {
-		b, err := NewBudget(Questions{Route: 3000, ChunkRoute: 6000, Relevance: 300, Complexity: 1500, Evidence: 900})
+	policy := func(ratio float64, requestTokens int) Policy {
+		return Policy{BytesPerToken: ratio, RequestTokens: requestTokens}
+	}
+	q := Questions{Route: 3000, ChunkRoute: 6000, Relevance: 300, Complexity: 1500, Evidence: 900}
+
+	t.Run("each state gets the allowance less its own questions", func(t *testing.T) {
+		b, err := NewBudget(policy(3, 30_000), q)
 		require.NoError(t, err)
-		assert.Equal(t, Budget{State: 29_000, Chunk: 28_000, Doc: 29_500}, b)
+		assert.Equal(t, Budget{Policy: policy(3, 30_000), State: 29_000, Chunk: 27_900, Doc: 29_200}, b)
 	})
-	t.Run("longest doc question sets the doc budget", func(t *testing.T) {
-		b, err := NewBudget(Questions{Complexity: 300, Evidence: 9000})
+	t.Run("a larger allowance grows every state", func(t *testing.T) {
+		b, err := NewBudget(policy(3, 130_000), q)
 		require.NoError(t, err)
-		assert.Equal(t, 27_000, b.Doc)
+		assert.Equal(t, Budget{Policy: policy(3, 130_000), State: 129_000, Chunk: 127_900, Doc: 129_200}, b)
 	})
-	t.Run("doc state plus both doc questions within 64k", func(t *testing.T) {
-		b, err := NewBudget(Questions{Complexity: 60_000, Evidence: 60_000})
+	t.Run("a smaller ratio estimates the questions larger", func(t *testing.T) {
+		b, err := NewBudget(policy(1.5, 30_000), q)
 		require.NoError(t, err)
-		assert.LessOrEqual(t, b.Doc+20_000+20_000, totalLimit)
-		assert.LessOrEqual(t, b.Doc+20_000, stateLimit)
+		assert.Equal(t, Budget{Policy: policy(1.5, 30_000), State: 28_000, Chunk: 25_800, Doc: 28_400}, b)
 	})
-	t.Run("doc questions over budget", func(t *testing.T) {
-		_, err := NewBudget(Questions{Complexity: 84_003})
+	t.Run("a fractional ratio rounds each question up", func(t *testing.T) {
+		b, err := NewBudget(policy(2.5, 30_000), Questions{Route: 3001, ChunkRoute: 6001, Relevance: 301, Complexity: 1501, Evidence: 901})
+		require.NoError(t, err)
+		assert.Equal(t, 30_000-1201, b.State)
+		assert.Equal(t, 30_000-2401-121, b.Chunk)
+		assert.Equal(t, 30_000-601-361, b.Doc)
+	})
+	t.Run("single state over budget", func(t *testing.T) {
+		_, err := NewBudget(policy(3, 30_000), Questions{Route: 84_003})
 		require.ErrorIs(t, err, ErrQuestionsOverBudget)
-		assert.Contains(t, err.Error(), "complexity_policy leaves 1999 tokens for the doc state")
-		_, err = NewBudget(Questions{Complexity: 84_000})
+		assert.Contains(t, err.Error(), "request_tokens 30000 less the routing_policy question leaves 1999 tokens for the state, need 2000")
+		_, err = NewBudget(policy(3, 30_000), Questions{Route: 84_000})
 		require.NoError(t, err)
 	})
-	t.Run("longest chunk question sets the chunk budget", func(t *testing.T) {
-		b, err := NewBudget(Questions{ChunkRoute: 300, Relevance: 9000})
-		require.NoError(t, err)
-		assert.Equal(t, 27_000, b.Chunk)
-	})
-	t.Run("state plus both questions within 64k", func(t *testing.T) {
-		b, err := NewBudget(Questions{ChunkRoute: 60_000, Relevance: 60_000})
-		require.NoError(t, err)
-		assert.LessOrEqual(t, b.Chunk+20_000+20_000, totalLimit)
-		assert.LessOrEqual(t, b.Chunk+20_000, stateLimit)
-	})
-	t.Run("question over budget", func(t *testing.T) {
-		_, err := NewBudget(Questions{Route: 84_003})
+	t.Run("chunk state over budget beside a maximal anchor", func(t *testing.T) {
+		_, err := NewBudget(policy(3, 30_000), Questions{ChunkRoute: 36_000, Relevance: 36_003})
 		require.ErrorIs(t, err, ErrQuestionsOverBudget)
-		assert.Contains(t, err.Error(), "routing_policy leaves 1999 tokens for the state")
-	})
-	t.Run("chunk questions over budget beside a maximal anchor", func(t *testing.T) {
-		_, err := NewBudget(Questions{ChunkRoute: 72_003})
-		require.ErrorIs(t, err, ErrQuestionsOverBudget)
-		assert.Contains(t, err.Error(), "routing_policy leaves 1999 tokens beside the anchor")
-		_, err = NewBudget(Questions{ChunkRoute: 72_000})
+		assert.Contains(t, err.Error(), "request_tokens 30000 less the routing_policy chunk questions leaves 1999 tokens beside the anchor")
+		_, err = NewBudget(policy(3, 30_000), Questions{ChunkRoute: 36_000, Relevance: 36_000})
 		require.NoError(t, err)
+	})
+	t.Run("both chunk questions count, not only the longer", func(t *testing.T) {
+		b, err := NewBudget(policy(3, 30_000), Questions{ChunkRoute: 9000, Relevance: 9000})
+		require.NoError(t, err)
+		assert.Equal(t, 30_000-3000-3000, b.Chunk)
+	})
+	t.Run("doc state over budget", func(t *testing.T) {
+		_, err := NewBudget(policy(3, 30_000), Questions{Complexity: 42_000, Evidence: 42_003})
+		require.ErrorIs(t, err, ErrQuestionsOverBudget)
+		assert.Contains(t, err.Error(), "request_tokens 30000 less the complexity_policy questions leaves 1999 tokens for the doc state")
+		_, err = NewBudget(policy(3, 30_000), Questions{Complexity: 42_000, Evidence: 42_000})
+		require.NoError(t, err)
+	})
+	t.Run("every state over budget is reported", func(t *testing.T) {
+		_, err := NewBudget(policy(3, 2500), q)
+		require.ErrorIs(t, err, ErrQuestionsOverBudget)
+		for _, want := range []string{"for the state", "beside the anchor", "for the doc state"} {
+			assert.Contains(t, err.Error(), want)
+		}
+	})
+	t.Run("an allowance below the questions is negative, not wrapped", func(t *testing.T) {
+		b, err := NewBudget(policy(3, 100), Questions{Route: 3000, ChunkRoute: 3000, Relevance: 3000, Complexity: 3000, Evidence: 3000})
+		require.ErrorIs(t, err, ErrQuestionsOverBudget)
+		assert.Equal(t, 100-1000, b.State)
+		assert.Equal(t, 100-2000, b.Chunk)
+		assert.Equal(t, 100-2000, b.Doc)
+	})
+	t.Run("an allowance of zero leaves nothing", func(t *testing.T) {
+		_, err := NewBudget(policy(3, 0), q)
+		require.ErrorIs(t, err, ErrQuestionsOverBudget)
 	})
 }
+
+func TestNewBudgetExtremeRatios(t *testing.T) {
+	q := Questions{Route: 3000, ChunkRoute: 6000, Relevance: 300, Complexity: 1500, Evidence: 900}
+
+	t.Run("very small ratio saturates the estimates without wrapping", func(t *testing.T) {
+		for _, ratio := range []float64{1e-300, 5e-324} {
+			b, err := NewBudget(Policy{BytesPerToken: ratio, RequestTokens: 30_000}, q)
+			require.ErrorIs(t, err, ErrQuestionsOverBudget, "ratio %g", ratio)
+			assert.Negative(t, b.State, "ratio %g", ratio)
+			assert.Negative(t, b.Chunk, "ratio %g", ratio)
+			assert.Negative(t, b.Doc, "ratio %g", ratio)
+		}
+	})
+	t.Run("widest questions at ratio one never wrap around", func(t *testing.T) {
+		widest := Questions{Route: math.MaxInt, ChunkRoute: math.MaxInt, Relevance: math.MaxInt, Complexity: math.MaxInt, Evidence: math.MaxInt}
+		b, err := NewBudget(Policy{BytesPerToken: 1, RequestTokens: 30_000}, widest)
+		require.ErrorIs(t, err, ErrQuestionsOverBudget)
+		assert.Negative(t, b.State)
+		assert.Negative(t, b.Chunk)
+		assert.Negative(t, b.Doc)
+	})
+	t.Run("very large ratio estimates every question at one token", func(t *testing.T) {
+		b, err := NewBudget(Policy{BytesPerToken: 1e300, RequestTokens: 30_000}, q)
+		require.NoError(t, err)
+		assert.Equal(t, Budget{BytesPerToken: 1e300, RequestTokens: 30_000,
+			State: 29_999, Chunk: 29_998, Doc: 29_998}, b)
+	})
+	t.Run("a very large ratio does not overflow the room", func(t *testing.T) {
+		b := Budget{BytesPerToken: 1e300, RequestTokens: 30_000, State: 29_999, Chunk: 29_998, Doc: 29_998}
+		assert.Positive(t, chunkRoom(b, 12_000))
+		assert.Positive(t, docRoom(b.Policy, b.Doc))
+	})
+}
+
 
 func TestChunkRoom(t *testing.T) {
 	maxIndex := strconv.Itoa(math.MaxInt)
 	assert.Len(t, maxIndex, indexDigits)
-	b := Budget{State: 29_000, Chunk: 28_000}
 	envelope := len(`{"anchor":,"chunk":{"field":"prompt","index":` + maxIndex + `,"of":` + maxIndex + `,"text":""}}`)
-	assert.Equal(t, 28_000*3-12_000-envelope, chunkRoom(b, 12_000))
+	for _, ratio := range []float64{2, 2.5, 3, 4} {
+		b := Budget{BytesPerToken: ratio, RequestTokens: 30_000, State: 29_000, Chunk: 28_000}
+		assert.Equal(t, int(28_000*ratio)-12_000-envelope, chunkRoom(b, 12_000), "ratio %g", ratio)
+	}
 }
 
 func TestJSONLen(t *testing.T) {
@@ -119,8 +242,43 @@ func TestState(t *testing.T) {
 	assert.Contains(t, string(data), `"project":{"complexity":0}`, "a zero complexity is still sent")
 }
 
+func TestSplitFollowsRatio(t *testing.T) {
+	r := &Result{Prompt: lines("p", 3000, 80), Files: []string{lines("f", 3000, 80)}}
+	for _, ratio := range []float64{1.5, 2, 2.5, 3, 4, 8} {
+		t.Run(strconv.FormatFloat(ratio, 'g', -1, 64), func(t *testing.T) {
+			b := Budget{BytesPerToken: ratio, RequestTokens: 30_000, State: 5_000, Chunk: 20_000}
+			s, err := r.Split(b)
+			require.NoError(t, err)
+			checkSplit(t, r, b, s)
+		})
+	}
+}
+
+func TestFitsFollowsRatio(t *testing.T) {
+	r := &Result{Prompt: strings.Repeat("x", 60_000)}
+	// 60 KB is 30k tokens at 2 bytes per token and 7.5k at 8
+	assert.False(t, r.Fits(Budget{BytesPerToken: 2, RequestTokens: 30_000, State: 10_000}))
+	assert.True(t, r.Fits(Budget{BytesPerToken: 8, RequestTokens: 30_000, State: 10_000}))
+	assert.Greater(t, r.StateTokens(Policy{BytesPerToken: 2}), r.StateTokens(Policy{BytesPerToken: 8}))
+}
+
+func TestAnchorFollowsRatio(t *testing.T) {
+	r := &Result{Prompt: lines("p", 4000, 80)}
+	var last int
+	for _, ratio := range []float64{2, 3, 4} {
+		b := Budget{BytesPerToken: ratio, RequestTokens: 30_000, State: 1_000, Chunk: AnchorTokens + 10_000}
+		s, err := r.Split(b)
+		require.NoError(t, err)
+		checkSplit(t, r, b, s)
+		size := mustLen(s.Anchor)
+		assert.LessOrEqual(t, size, int(AnchorTokens*ratio), "ratio %g: the anchor limit is AnchorTokens × ratio bytes", ratio)
+		assert.Greater(t, size, last, "a larger ratio gives a larger anchor in bytes")
+		last = size
+	}
+}
+
 func TestSplitWithProject(t *testing.T) {
-	b := Budget{State: 1_000, Chunk: 4_000 + MinStateTokens}
+	b := Budget{Policy: testPolicy, State: 1_000, Chunk: 4_000 + MinStateTokens}
 	r := &Result{Prompt: lines("p", 10, 80), Files: []string{lines("f", 400, 80)}, Project: &Project{Complexity: 6.9}}
 	s, err := r.Split(b)
 	require.NoError(t, err)
@@ -159,8 +317,8 @@ func checkSplit(t *testing.T, r *Result, b Budget, s *Split) {
 	t.Helper()
 	require.NotNil(t, s)
 	require.NotEmpty(t, s.Chunks)
-	assert.LessOrEqual(t, Tokens(mustLen(s.Anchor)), AnchorTokens)
-	assert.LessOrEqual(t, Tokens(mustLen(s.Anchor.Attachments)), attachmentShare)
+	assert.LessOrEqual(t, b.Tokens(mustLen(s.Anchor)), AnchorTokens)
+	assert.LessOrEqual(t, b.Tokens(mustLen(s.Anchor.Attachments)), attachmentShare)
 
 	prompt, files := "", []string(nil)
 	if r.Files != nil {
@@ -171,10 +329,10 @@ func checkSplit(t *testing.T, r *Result, b Budget, s *Split) {
 		assert.Equal(t, i+1, c.Index)
 		assert.Equal(t, len(s.Chunks), c.Of)
 		assert.True(t, utf8.ValidString(c.Text), "chunk %d cut inside a character", c.Index)
-		assert.LessOrEqual(t, Tokens(mustLen(ChunkState{Anchor: s.Anchor, Chunk: c})), b.Chunk, "chunk %d over budget", c.Index)
+		assert.LessOrEqual(t, b.Tokens(mustLen(ChunkState{Anchor: s.Anchor, Chunk: c})), b.Chunk, "chunk %d over budget", c.Index)
 		widest := c
 		widest.Index, widest.Of = math.MaxInt, math.MaxInt
-		assert.LessOrEqual(t, Tokens(mustLen(ChunkState{Anchor: s.Anchor, Chunk: widest})), b.Chunk,
+		assert.LessOrEqual(t, b.Tokens(mustLen(ChunkState{Anchor: s.Anchor, Chunk: widest})), b.Chunk,
 			"chunk %d over budget once renumbered to the widest index", c.Index)
 		switch c.Field {
 		case FieldPrompt:
@@ -198,7 +356,7 @@ func checkSplit(t *testing.T, r *Result, b Budget, s *Split) {
 }
 
 func TestSplit(t *testing.T) {
-	b := Budget{State: 29_000, Chunk: 28_000}
+	b := Budget{Policy: testPolicy, State: 29_000, Chunk: 28_000}
 
 	t.Run("a state under budget is not split", func(t *testing.T) {
 		r := &Result{Prompt: lines("p", 100, 80), Files: []string{lines("f", 100, 80)}}
@@ -285,8 +443,8 @@ func TestSplit(t *testing.T) {
 		}
 		atts = append(atts, Attachment{Source: SourceStdin, Type: "image/png", Bytes: 5})
 		r := &Result{Prompt: "describe these", Attachments: atts}
-		require.False(t, r.Fits(Budget{State: 3000}))
-		s, err := r.Split(Budget{State: 3000, Chunk: b.Chunk})
+		require.False(t, r.Fits(Budget{Policy: testPolicy, State: 3000}))
+		s, err := r.Split(Budget{Policy: testPolicy, State: 3000, Chunk: b.Chunk})
 		require.NoError(t, err)
 		checkSplit(t, r, b, s)
 		assert.Equal(t, []Attachment{
@@ -305,7 +463,7 @@ func TestSplit(t *testing.T) {
 			atts = append(atts, Attachment{Source: SourceStdin, Type: "image/png", Bytes: int64(i)})
 		}
 		r := &Result{Attachments: atts}
-		s, err := r.Split(Budget{State: 1000, Chunk: b.Chunk})
+		s, err := r.Split(Budget{Policy: testPolicy, State: 1000, Chunk: b.Chunk})
 		require.NoError(t, err)
 		assert.Equal(t, []Chunk{{Field: FieldPrompt, Index: 1, Of: 1}}, s.Chunks)
 	})
@@ -316,7 +474,7 @@ func TestSplit(t *testing.T) {
 			atts = append(atts, Attachment{Source: SourceMentioned, Type: fmt.Sprintf("application/x-kind-%d", i), Bytes: 1})
 		}
 		r := &Result{Prompt: "p", Attachments: atts}
-		_, err := r.Split(Budget{State: 1000, Chunk: b.Chunk})
+		_, err := r.Split(Budget{Policy: testPolicy, State: 1000, Chunk: b.Chunk})
 		require.ErrorIs(t, err, ErrAttachmentsOverAnchor)
 	})
 
@@ -330,7 +488,7 @@ func TestSplit(t *testing.T) {
 
 	t.Run("no room for chunk text", func(t *testing.T) {
 		r := &Result{Prompt: lines("p", 4000, 100)}
-		_, err := r.Split(Budget{State: 1000, Chunk: 4000})
+		_, err := r.Split(Budget{Policy: testPolicy, State: 1000, Chunk: 4000})
 		require.ErrorIs(t, err, ErrQuestionsOverBudget)
 	})
 
@@ -376,35 +534,4 @@ func TestHeadTail(t *testing.T) {
 	head, tail = headTail("✓✓✓✓", 5)
 	assert.Empty(t, head)
 	assert.Equal(t, "✓", tail)
-}
-
-func TestHalve(t *testing.T) {
-	t.Run("lines", func(t *testing.T) {
-		text := strings.Repeat("line of text\n", 100)
-		pieces := Halve(Chunk{Field: FieldFiles, File: 2, Index: 5, Of: 9, Text: text})
-		require.GreaterOrEqual(t, len(pieces), 2)
-		var joined strings.Builder
-		for _, p := range pieces {
-			assert.Equal(t, FieldFiles, p.Field)
-			assert.Equal(t, 2, p.File)
-			assert.Zero(t, p.Index, "numbering is the caller's")
-			assert.LessOrEqual(t, jsonLen(p.Text), (jsonLen(text)+1)/2)
-			assert.True(t, strings.HasSuffix(p.Text, "\n"), "cut on a line boundary")
-			joined.WriteString(p.Text)
-		}
-		assert.Equal(t, text, joined.String())
-	})
-	t.Run("multibyte without newlines", func(t *testing.T) {
-		text := strings.Repeat("é€", 50)
-		pieces := Halve(Chunk{Field: FieldPrompt, Text: text})
-		require.Len(t, pieces, 2)
-		for _, p := range pieces {
-			assert.True(t, utf8.ValidString(p.Text))
-		}
-		assert.Equal(t, text, pieces[0].Text+pieces[1].Text)
-	})
-	t.Run("tiny and empty", func(t *testing.T) {
-		assert.Equal(t, []Chunk{{Field: FieldPrompt, Text: "\x01"}}, Halve(Chunk{Field: FieldPrompt, Text: "\x01"}))
-		assert.Equal(t, []Chunk{{Field: FieldPrompt}}, Halve(Chunk{Field: FieldPrompt}))
-	})
 }

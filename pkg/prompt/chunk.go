@@ -87,12 +87,12 @@ type ChunkState struct {
 
 // Fits reports whether the whole state fits in one request.
 func (r *Result) Fits(b Budget) bool {
-	return r.StateTokens() <= b.State
+	return r.StateTokens(b.Policy) <= b.State
 }
 
-// StateTokens is the estimated size in tokens of the whole state.
-func (r *Result) StateTokens() int {
-	return Tokens(mustLen(r.State()))
+// StateTokens is the estimated size in tokens of the whole state under p.
+func (r *Result) StateTokens(p Policy) int {
+	return p.Tokens(mustLen(r.State()))
 }
 
 // Split returns nil when the state fits in one request, and otherwise the anchor and the chunks
@@ -103,7 +103,7 @@ func (r *Result) Split(b Budget) (*Split, error) {
 	if r.Fits(b) {
 		return nil, nil //nolint:nilnil // nil split: send the state whole
 	}
-	anchor, promptWhole, err := r.anchor()
+	anchor, promptWhole, err := r.anchor(b.Policy)
 	if err != nil {
 		return nil, err
 	}
@@ -137,41 +137,18 @@ func (r *Result) Split(b Budget) (*Split, error) {
 	return &Split{Anchor: anchor, Chunks: chunks}, nil
 }
 
-// Halve cuts c into pieces of at most half its escaped text, on the same line and UTF-8 boundaries
-// as Split, for a chunk Jev rejected with a 422. The pieces keep c's field and file; numbering them
-// is the caller's, since the whole sequence changes.
-func Halve(c Chunk) []Chunk {
-	pieces := halveText(c.Text)
-	out := make([]Chunk, len(pieces))
-	for i, text := range pieces {
-		out[i] = Chunk{Field: c.Field, File: c.File, Text: text}
-	}
-	return out
-}
-
-// halveText cuts text into pieces of at most half its escaped length, on line and UTF-8 boundaries;
-// empty text is one empty piece.
-func halveText(text string) []string {
-	room := max((jsonLen(text)+1)/2, len(`\u0000`)) // at least the widest escaped rune, so cut advances
-	pieces := cut(text, room)
-	if len(pieces) == 0 {
-		pieces = []string{""}
-	}
-	return pieces
-}
-
 // anchor builds the anchor within AnchorTokens: attachments (summarized when over their share),
 // then the prompt, whole or head and tail, then head and tail of the files while room lasts. It
 // reports whether the prompt is whole in it.
-func (r *Result) anchor() (Anchor, bool, error) {
-	limit := AnchorTokens * bytesPerToken
+func (r *Result) anchor(p Policy) (Anchor, bool, error) {
+	limit := p.Bytes(AnchorTokens)
 	a := Anchor{Project: r.Project}
 	if len(r.Attachments) > 0 {
 		a.Attachments = r.Attachments
-		if Tokens(mustLen(a.Attachments)) > attachmentShare {
+		if p.Tokens(mustLen(a.Attachments)) > attachmentShare {
 			a.Attachments = summarize(r.Attachments)
 		}
-		if n := Tokens(mustLen(a.Attachments)); n > attachmentShare {
+		if n := p.Tokens(mustLen(a.Attachments)); n > attachmentShare {
 			return Anchor{}, false, fmt.Errorf("%w: %d tokens summarized, share is %d", ErrAttachmentsOverAnchor, n, attachmentShare)
 		}
 	}

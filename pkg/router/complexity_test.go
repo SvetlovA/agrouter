@@ -2,7 +2,6 @@ package router
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -54,7 +53,7 @@ func complexityAnswer(rating float64) jev.Answer {
 
 // docMock answers every doc request with fn, given the doc chunk (zero for the whole-docs state).
 func docMock(fn func(c prompt.DocChunk, whole bool) (map[string]jev.Answer, error)) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
 		switch st := req.State.(type) {
 		case prompt.DocsState:
 			return fn(prompt.DocChunk{}, true)
@@ -62,25 +61,13 @@ func docMock(fn func(c prompt.DocChunk, whole bool) (map[string]jev.Answer, erro
 			return fn(st.Doc, false)
 		}
 		return nil, fmt.Errorf("unexpected state %T", req.State)
-	}}
-}
-
-func docChunkStates(client *mocks.JevClientMock) []prompt.DocChunk {
-	var out []prompt.DocChunk
-	for _, c := range client.AskCalls() {
-		if st, ok := c.Req.State.(prompt.DocChunkState); ok {
-			out = append(out, st.Doc)
-		}
-	}
-	return out
+	})}
 }
 
 // docsOf is a doc of about n state tokens, marked at its start so a mock can tell the docs apart.
 func docsOf(mark string, tokens int) string {
 	return mark + "\n" + filler(tokens*3) // 3 bytes per token
 }
-
-func unprocessable() error { return &jev.StatusError{Status: 422} }
 
 func TestAskDocsExpectedValue(t *testing.T) {
 	cfg, cat := embedded(t)
@@ -168,9 +155,13 @@ func TestComplexitySingleRequest(t *testing.T) {
 
 	got, err := r.complexity(context.Background(), docs)
 	require.NoError(t, err)
-	assert.Equal(t, &ComplexityResult{Chunks: []DocScore{{Index: 1, Of: 1, Score: 6, Evidence: 0.9, Confidence: 0.8}}, Complexity: 6}, got)
-
 	calls := client.AskCalls()
+	require.Len(t, calls, 1)
+	assert.Equal(t, &ComplexityResult{Chunks: []DocScore{{Index: 1, Of: 1, Score: 6, Evidence: 0.9, Confidence: 0.8,
+		Estimated: r.estimate(calls[0].Req.State, calls[0].Req.Questions)}}, Complexity: 6}, got,
+		"the provider reported no tokens: unknown, never zero")
+	assert.Positive(t, got.Chunks[0].Estimated)
+
 	require.Len(t, calls, 1)
 	assert.Equal(t, prompt.DocsState{Docs: []string{"# Shop\n\nThree services.\n", "Use gofmt.\n"}}, calls[0].Req.State)
 	assert.Equal(t, complexityQuestions(cfg.Agrouter), calls[0].Req.Questions)
@@ -234,7 +225,6 @@ func TestComplexityFailures(t *testing.T) {
 	b := newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget
 	small := &prompt.Result{Docs: []string{"a small CLI"}}
 	big := &prompt.Result{Docs: []string{docsOf("START", 3*b.Doc)}}
-	tail := &prompt.Result{Docs: []string{docsOf("A", b.Doc), "short tail doc"}}
 
 	tests := []struct {
 		name     string
@@ -276,27 +266,12 @@ func TestComplexityFailures(t *testing.T) {
 				}
 				return docAnswers(3, 1), nil
 			}},
-		{name: "whole-docs 422 under the minimum state size", captured: small, want: errUnsplittable,
-			ask: func(prompt.DocChunk, bool) (map[string]jev.Answer, error) { return nil, unprocessable() }},
-		{name: "422 on a doc chunk under the minimum state size", captured: tail, want: errUnsplittable,
-			ask: func(c prompt.DocChunk, _ bool) (map[string]jev.Answer, error) {
-				if c.Doc == 1 {
-					return nil, unprocessable()
-				}
-				return docAnswers(3, 1), nil
-			}},
-		{name: "second 422 on a halved doc chunk", captured: big, want: errUnsplittable,
+		{name: "whole-docs overflow", captured: small, want: jev.ErrTooLong,
+			ask: func(prompt.DocChunk, bool) (map[string]jev.Answer, error) { return nil, tooLong() }},
+		{name: "overflow on a doc chunk", captured: big, want: jev.ErrTooLong,
 			ask: func(c prompt.DocChunk, _ bool) (map[string]jev.Answer, error) {
 				if strings.HasPrefix(c.Text, "START") {
-					return nil, unprocessable()
-				}
-				return docAnswers(3, 1), nil
-			}},
-		{name: "422 on a chunk after the whole-docs retry", want: errUnsplittable,
-			captured: &prompt.Result{Docs: []string{docsOf("START", b.Doc/2)}},
-			ask: func(c prompt.DocChunk, whole bool) (map[string]jev.Answer, error) {
-				if whole || strings.HasPrefix(c.Text, "START") {
-					return nil, unprocessable()
+					return nil, tooLong()
 				}
 				return docAnswers(3, 1), nil
 			}},
@@ -310,128 +285,65 @@ func TestComplexityFailures(t *testing.T) {
 	}
 }
 
-func TestComplexityWholeDocs422SplitsAtHalfBudget(t *testing.T) {
-	cfg, cat := embedded(t)
-	client := docMock(func(_ prompt.DocChunk, whole bool) (map[string]jev.Answer, error) {
-		if whole {
-			return nil, unprocessable()
-		}
-		return docAnswers(4, 0.5), nil
-	})
-	r := newRouter(t, cfg, cat, client)
-	b := r.budget
-	docs := []string{docsOf("ARCH", b.Doc*2/3), "Use gofmt.\n", docsOf("DEPS", b.Doc/4)}
-	captured := &prompt.Result{Docs: docs}
-	require.True(t, captured.DocsFit(b), "%d > %d", captured.DocsTokens(), b.Doc)
-
-	got, err := r.complexity(context.Background(), captured)
-	require.NoError(t, err)
-	assert.InDelta(t, 4, got.Complexity, 1e-9)
-
-	calls := client.AskCalls()
-	_, whole := calls[0].Req.State.(prompt.DocsState)
-	assert.True(t, whole, "the whole docs first")
-	states := docChunkStates(client)
-	require.Len(t, states, len(calls)-1)
-	require.Greater(t, len(states), len(docs))
-	assert.Len(t, got.Chunks, len(states))
-	for _, c := range states {
-		assert.LessOrEqual(t, docStateTokens(t, c), b.Doc/2, "split at half the doc budget")
-	}
-	assert.Equal(t, docs, joinDocs(states, len(docs)), "every doc byte kept")
-}
-
-func TestComplexityWholeDocs422HalvesOneSmallDoc(t *testing.T) {
-	cfg, cat := embedded(t)
-	client := docMock(func(_ prompt.DocChunk, whole bool) (map[string]jev.Answer, error) {
-		if whole {
-			return nil, unprocessable()
-		}
-		return docAnswers(4, 0.5), nil
-	})
-	r := newRouter(t, cfg, cat, client)
-	b := r.budget
-	// one doc under half the doc budget: cutting at half the budget would resend it whole
-	doc := docsOf("ONE", b.Doc/4)
-	captured := &prompt.Result{Docs: []string{doc}}
-	require.GreaterOrEqual(t, captured.DocsTokens(), prompt.MinStateTokens)
-
-	_, err := r.complexity(context.Background(), captured)
-	require.NoError(t, err)
-
-	states := docChunkStates(client)
-	require.Greater(t, len(states), 1, "the rejected doc is cut in two or more")
-	for _, c := range states {
-		assert.LessOrEqual(t, docStateTokens(t, c), (captured.DocsTokens()+1)/2, "each piece about half the docs")
-	}
-	assert.Equal(t, []string{doc}, joinDocs(states, 1), "every doc byte kept")
-}
-
-func TestComplexityDocChunk422ResplitsOnce(t *testing.T) {
+func TestComplexityRejectedRequestsAreNotResent(t *testing.T) {
 	cfg, cat := embedded(t)
 	b := newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget
-	docs := []string{docsOf("FIRST", 2*b.Doc), docsOf("SECOND", 2*b.Doc)}
-	captured := &prompt.Result{Docs: docs}
-	chunks := captured.SplitDocs(b)
-	n := len(chunks)
+	small := &prompt.Result{Docs: []string{"a small CLI"}}
+	big := &prompt.Result{Docs: []string{docsOf("START", 3*b.Doc)}}
+	n := len(big.SplitDocs(b))
+	require.Greater(t, n, 2)
 
-	var mu sync.Mutex
-	asked := map[prompt.DocChunk]int{} // by doc and text: the docs' filler repeats
-	client := docMock(func(c prompt.DocChunk, _ bool) (map[string]jev.Answer, error) {
-		mu.Lock()
-		asked[prompt.DocChunk{Doc: c.Doc, Text: c.Text}]++
-		mu.Unlock()
-		if c.Index == 1 && c.Of == n { // the first chunk, before the re-split
-			return nil, unprocessable()
-		}
-		return docAnswers(5, 1), nil
-	})
-	r := newRouter(t, cfg, cat, client)
-
-	seq, err := r.docFanout(complexityQuestions(cfg.Agrouter)).run(context.Background(), chunks, false)
-	require.NoError(t, err)
-	pieces := prompt.HalveDoc(chunks[0])
-	require.Greater(t, len(pieces), 1)
-	assert.Len(t, client.AskCalls(), n+len(pieces))
-	require.Len(t, seq, n-1+len(pieces))
-	final := make([]prompt.DocChunk, len(seq))
-	for i, p := range seq {
-		final[i] = p.chunk
-		assert.Equal(t, i+1, p.chunk.Index, "renumbered in sequence order")
-		assert.Equal(t, len(seq), p.chunk.Of)
-		assert.LessOrEqual(t, docStateTokens(t, p.chunk), b.Doc, "renumbered doc chunk within the doc budget")
+	for _, rj := range rejections {
+		t.Run(rj.name+"/whole docs", func(t *testing.T) {
+			client := docMock(func(prompt.DocChunk, bool) (map[string]jev.Answer, error) { return nil, rj.err })
+			got, err := newRouter(t, cfg, cat, client).complexity(context.Background(), small)
+			assert.Nil(t, got)
+			requireRejected(t, err, rj)
+			assert.Len(t, client.AskCalls(), 1, "the rejected request is not sent again")
+		})
+		t.Run(rj.name+"/doc chunk", func(t *testing.T) {
+			g := newGate(n)
+			client := docMock(func(c prompt.DocChunk, whole bool) (map[string]jev.Answer, error) {
+				if whole {
+					return nil, errors.New("docs over budget sent whole")
+				}
+				if !g.wait() {
+					return nil, fmt.Errorf("not every one of %d doc chunks in flight", n)
+				}
+				if c.Index == 1 {
+					return nil, rj.err
+				}
+				return docAnswers(3, 1), nil
+			})
+			got, err := newRouter(t, cfg, cat, client).complexity(context.Background(), big)
+			assert.Nil(t, got)
+			requireRejected(t, err, rj)
+			assert.Contains(t, err.Error(), fmt.Sprintf("doc chunk 1 of %d", n))
+			// the doc chunks, each once at its original size
+			var indexes []int
+			for _, call := range client.AskCalls() {
+				st, ok := call.Req.State.(prompt.DocChunkState)
+				require.True(t, ok)
+				assert.Equal(t, n, st.Doc.Of, "not re-split")
+				indexes = append(indexes, st.Doc.Index)
+			}
+			slices.Sort(indexes)
+			assert.Len(t, indexes, n)
+			assert.Equal(t, 1, indexes[0])
+			assert.Equal(t, n, indexes[n-1])
+			assert.Len(t, slices.Compact(indexes), n, "no chunk asked twice")
+		})
 	}
-	for _, c := range chunks[1:] {
-		assert.Equal(t, 1, asked[prompt.DocChunk{Doc: c.Doc, Text: c.Text}], "a completed doc chunk is not asked again")
-	}
-	assert.Equal(t, docs, joinDocs(final, len(docs)), "every doc byte kept across the re-split")
-	for _, c := range docChunkStates(client) {
-		assert.LessOrEqual(t, docStateTokens(t, c), b.Doc, "doc chunk %d of %d over budget", c.Index, c.Of)
-	}
-
-	// through the stage: the pieces take the rejected chunk's place
-	got, err := r.complexity(context.Background(), captured)
-	require.NoError(t, err)
-	require.Len(t, got.Chunks, n-1+len(pieces))
-	assert.InDelta(t, 5, got.Complexity, 1e-9)
 }
 
-func docStateTokens(t *testing.T, c prompt.DocChunk) int {
+// requireRejected asserts err is the rejection rj: a StatusError with its status, matching
+// jev.ErrTooLong only for the overflow.
+func requireRejected(t *testing.T, err error, rj rejection) {
 	t.Helper()
-	data, err := json.Marshal(prompt.DocChunkState{Doc: c})
-	require.NoError(t, err)
-	return prompt.Tokens(len(data))
-}
-
-// joinDocs rebuilds n docs from doc chunks in sequence order; empty docs stay empty.
-func joinDocs(chunks []prompt.DocChunk, n int) []string {
-	chunks = slices.Clone(chunks)
-	slices.SortStableFunc(chunks, func(a, b prompt.DocChunk) int { return a.Index - b.Index })
-	out := make([]string, n)
-	for _, c := range chunks {
-		out[c.Doc] += c.Text
-	}
-	return out
+	var serr *jev.StatusError
+	require.ErrorAs(t, err, &serr)
+	assert.Equal(t, rj.status, serr.Status)
+	assert.Equal(t, rj.tooLong, errors.Is(err, jev.ErrTooLong))
 }
 
 func TestComplexityStopsOnDeadline(t *testing.T) {
@@ -442,13 +354,13 @@ func testComplexityStopsOnDeadline(t *testing.T) {
 	cfg, cat := embedded(t)
 	var mu sync.Mutex
 	started := 0
-	client := &mocks.JevClientMock{AskFunc: func(ctx context.Context, _ jev.Request) (map[string]jev.Answer, error) {
+	client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, _ jev.Request) (map[string]jev.Answer, error) {
 		mu.Lock()
 		started++
 		mu.Unlock()
 		<-ctx.Done()
 		return nil, ctx.Err()
-	}}
+	})}
 	r := newRouter(t, cfg, cat, client)
 	captured := &prompt.Result{Docs: []string{docsOf("BIG", 4*r.budget.Doc)}}
 	chunks := captured.SplitDocs(r.budget)
@@ -466,10 +378,10 @@ func testComplexityStopsOnDeadline(t *testing.T) {
 func TestComplexitySingleRequestDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cfg, cat := embedded(t)
-		client := &mocks.JevClientMock{AskFunc: func(ctx context.Context, _ jev.Request) (map[string]jev.Answer, error) {
+		client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, _ jev.Request) (map[string]jev.Answer, error) {
 			<-ctx.Done()
 			return nil, ctx.Err()
-		}}
+		})}
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 		defer cancel()
 		_, err := newRouter(t, cfg, cat, client).complexity(ctx, &prompt.Result{Docs: []string{"a CLI"}})

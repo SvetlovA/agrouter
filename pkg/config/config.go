@@ -31,6 +31,16 @@ type Agrouter struct {
 	RoutingPolicy string
 	// ComplexityPolicy is how the complexity stage judges the codebase the --doc text describes.
 	ComplexityPolicy string
+	// LongContext opts into the routing provider's long-input mode. It changes only the provider's own
+	// limits; RequestTokens is not raised with it.
+	LongContext bool
+	// RequestTokens is the token allowance of one routing request: its state plus all its questions.
+	RequestTokens int
+	// BytesPerToken is the ratio that turns bytes into estimated tokens when sizing requests.
+	BytesPerToken float64
+	// LogDir is where the console log is kept, as configured: a relative path is resolved against the
+	// work directory by the caller.
+	LogDir string
 }
 
 // CLI is a [cli.<name>] section: the command and the fixed invocation descriptors agrouter builds the

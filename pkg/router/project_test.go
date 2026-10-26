@@ -21,13 +21,13 @@ import (
 
 // staged answers doc requests with docs and every routing request (single or chunk) with route.
 func staged(docs func() (map[string]jev.Answer, error), route func(req jev.Request) (map[string]jev.Answer, error)) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
 		switch req.State.(type) {
 		case prompt.DocsState, prompt.DocChunkState:
 			return docs()
 		}
 		return route(req)
-	}}
+	})}
 }
 
 // scored answers every doc request with an expected complexity of 6.9 and full evidence.
@@ -109,7 +109,7 @@ func TestRouteProjectChunkGoldenRequest(t *testing.T) {
 	})
 	r := newRouter(t, cfg, cat, client)
 	// force a small state into chunks, keeping the doc budget whole
-	r.budget = prompt.Budget{State: 1, Chunk: 150, Doc: r.budget.Doc}
+	r.budget = prompt.Budget{Policy: r.budget.Policy, State: 1, Chunk: 150, Doc: r.budget.Doc}
 
 	d, err := r.Route(context.Background(), el, req, projectCapture())
 	require.NoError(t, err)
@@ -124,7 +124,7 @@ func TestRouteProjectChunkGoldenRequest(t *testing.T) {
 		st, ok := rq.State.(prompt.ChunkState)
 		require.True(t, ok)
 		assert.Equal(t, &prompt.Project{Complexity: 6.9}, st.Anchor.Project, "every chunk's anchor")
-		assert.LessOrEqual(t, prompt.Tokens(mustJSONLen(t, st)), r.budget.Chunk, "the anchor size includes the project")
+		assert.LessOrEqual(t, r.budget.Tokens(mustJSONLen(t, st)), r.budget.Chunk, "the anchor size includes the project")
 		if st.Chunk.Index == 1 {
 			first = rq
 		}

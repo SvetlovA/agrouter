@@ -57,6 +57,8 @@ func TestDebug_Redaction(t *testing.T) {
 	}, lines[1:10], "the exec CLI restricts routing like --cli")
 	assert.True(t, strings.HasPrefix(lines[10], "stage model: choice fast, confidence 0.900, top [fast 1.000"), lines[10])
 	assert.True(t, strings.HasPrefix(lines[11], "stage effort: choice low, confidence 0.900, top [low 1.000"), lines[11])
+	assert.Regexp(t, `, tokens: estimated \d+, provider reported unknown$`, lines[10])
+	assert.Regexp(t, `, tokens: estimated \d+, provider reported unknown$`, lines[11])
 	// the redacted argv Go-quotes a token with backslashes, as the helper path has on Windows
 	command := helperCommand(t)
 	if strings.ContainsAny(command, " \\") {
@@ -134,9 +136,56 @@ func TestDebug_Docs(t *testing.T) {
 	require.Equal(t, 0, r.code, r.stderr)
 
 	lines := debugLines(r.stderr)
-	assert.Contains(t, lines, "doc 1/1: score 7.000, evidence 0.500, confidence 0.900")
+	var doc string
+	for _, l := range lines {
+		if strings.HasPrefix(l, "doc ") {
+			doc = l
+		}
+	}
+	assert.Regexp(t, `^doc 1/1: score 7\.000, evidence 0\.500, confidence 0\.900, tokens: estimated \d+, provider reported unknown$`, doc)
 	assert.Contains(t, lines, "project complexity: 7.0")
 	assert.NotContains(t, r.stderr, "SECRET DOC TEXT")
+}
+
+func TestDebug_ReportedTokens(t *testing.T) {
+	const (
+		secretPrompt = "the secret prompt text"
+		secretDoc    = "SECRET DOC TEXT"
+	)
+	run := func(t *testing.T, usage string) []string {
+		t.Helper()
+		e := newSyntheticEnv(t)
+		t.Setenv(envDebug, "1")
+		require.NoError(t, os.WriteFile(filepath.Join(e.workDir, "project.md"), []byte(secretDoc+"\n"), 0o600))
+		e.jev.pick = "fast@low"
+		e.jev.usage = usage
+		r := e.run([]string{"--cli=alpha", "--doc", "project.md", "--jev-api-key=" + testKey, secretPrompt}, nil)
+		require.Equal(t, 0, r.code, r.stderr)
+		assert.NotContains(t, r.stderr, secretPrompt)
+		assert.NotContains(t, r.stderr, secretDoc)
+		assert.NotContains(t, r.stderr, testKey)
+		var lines []string
+		for _, l := range debugLines(r.stderr) {
+			if strings.HasPrefix(l, "doc ") || strings.HasPrefix(l, "stage ") && !strings.Contains(l, "skipped") {
+				lines = append(lines, l)
+			}
+		}
+		require.Len(t, lines, 3, r.stderr) // the doc request, the model stage and the effort stage
+		return lines
+	}
+
+	t.Run("the provider's count beside the estimate on every request line", func(t *testing.T) {
+		for _, l := range run(t, "4321") {
+			assert.Regexp(t, `, tokens: estimated [1-9]\d*, provider reported 4321$`, l)
+		}
+	})
+	t.Run("a missing, null, malformed or negative count is unknown", func(t *testing.T) {
+		for _, usage := range []string{"", "null", `"many"`, "1.5", "-7"} {
+			for _, l := range run(t, usage) {
+				assert.Regexp(t, `, tokens: estimated [1-9]\d*, provider reported unknown$`, l, "usage %q", usage)
+			}
+		}
+	})
 }
 
 func TestDebug_StagesBeforeAFailureWithTwoCLIs(t *testing.T) {
@@ -154,7 +203,8 @@ func TestDebug_StagesBeforeAFailureWithTwoCLIs(t *testing.T) {
 	lines := debugLines(r.stderr)
 	require.Len(t, lines, 4, r.stderr)
 	assert.Equal(t, "eligible: 6 option(s) on alpha, beta", lines[1])
-	assert.Equal(t, "stage cli: choice alpha, confidence 0.900, top [alpha 1.000, beta 0.000]", lines[2])
+	assert.Regexp(t, `^stage cli: choice alpha, confidence 0\.900, top \[alpha 1\.000, beta 0\.000\], tokens: estimated \d+, provider reported unknown$`,
+		lines[2])
 	assert.True(t, strings.HasPrefix(lines[3], "no decision: jev cannot decide between alpha, beta: model stage: "), lines[3])
 	assert.Contains(t, lines[3], "model stage rejected")
 	assert.True(t, strings.HasSuffix(r.stderr, "\nagrouter: "+strings.TrimPrefix(lines[3], "no decision: ")+"\n"),
@@ -204,7 +254,9 @@ func TestDebugLog(t *testing.T) {
 			{Level: "cli", Choice: "made-up", Skipped: true},
 			{Level: "model", Choice: "b", Pooled: &router.Pooled{
 				Chunks: []router.ChunkResult{{Field: "prompt", Index: 1, Of: 2, Relevance: 0.8, Confidence: 0.6,
-					Top: []router.Score{{ID: "b", Score: 0.6}, {ID: "a", Score: 0.4}}}},
+					Top: []router.Score{{ID: "b", Score: 0.6}, {ID: "a", Score: 0.4}}, Estimated: 28000, Reported: new(31500)},
+					{Field: "prompt", Index: 2, Of: 2, Relevance: 0.1, Confidence: 0.5,
+						Top: []router.Score{{ID: "a", Score: 0.5}}, Estimated: 900}},
 				Top: []router.Score{{ID: "b", Score: 0.55}},
 			}},
 		}})
@@ -212,8 +264,9 @@ func TestDebugLog(t *testing.T) {
 agrouter debug: model: passed through
 agrouter debug: effort: passed through
 agrouter debug: stage cli: skipped (made-up)
-agrouter debug: stage model chunk prompt 1/2: relevance 0.800, confidence 0.600, top [b 0.600, a 0.400]
-agrouter debug: stage model: pooled choice b, confidence 0.600, top [b 0.550]
+agrouter debug: stage model chunk prompt 1/2: relevance 0.800, confidence 0.600, top [b 0.600, a 0.400], tokens: estimated 28000, provider reported 31500
+agrouter debug: stage model chunk prompt 2/2: relevance 0.100, confidence 0.500, top [a 0.500], tokens: estimated 900, provider reported unknown
+agrouter debug: stage model: pooled choice b, confidence 0.550, top [b 0.550]
 `, buf.String())
 	})
 
@@ -221,10 +274,11 @@ agrouter debug: stage model: pooled choice b, confidence 0.600, top [b 0.550]
 		var buf bytes.Buffer
 		newDebugLog("1", &buf).decision(router.Decision{CLI: "made-up", Undecided: errors.New("boom"),
 			Complexity: &router.ComplexityResult{Complexity: 6.9, Chunks: []router.DocScore{
-				{Index: 1, Of: 2, Score: 8.25, Evidence: 0.9, Confidence: 0.8}, {Index: 2, Of: 2, Score: 1, Evidence: 0.1, Confidence: 0.2},
+				{Index: 1, Of: 2, Score: 8.25, Evidence: 0.9, Confidence: 0.8, Estimated: 4000, Reported: new(4100)},
+				{Index: 2, Of: 2, Score: 1, Evidence: 0.1, Confidence: 0.2, Estimated: 50},
 			}}})
-		assert.Equal(t, `agrouter debug: doc 1/2: score 8.250, evidence 0.900, confidence 0.800
-agrouter debug: doc 2/2: score 1.000, evidence 0.100, confidence 0.200
+		assert.Equal(t, `agrouter debug: doc 1/2: score 8.250, evidence 0.900, confidence 0.800, tokens: estimated 4000, provider reported 4100
+agrouter debug: doc 2/2: score 1.000, evidence 0.100, confidence 0.200, tokens: estimated 50, provider reported unknown
 agrouter debug: project complexity: 6.9
 agrouter debug: jev failed: boom; running made-up with the caller's fixed values
 `, buf.String())
@@ -250,8 +304,10 @@ agrouter debug: stage model: pooled choice b, confidence none, top []
 	t.Run("answer", func(t *testing.T) {
 		var buf bytes.Buffer
 		newDebugLog("1", &buf).decision(router.Decision{OptionID: "a", Stages: []router.Stage{{Level: "cli",
-			Choice: "a", Answer: &jev.Answer{Choice: "a", Confidence: 0.5, Probabilities: map[string]float64{"a": 0.5, "b": 0.5}}}}})
-		assert.Equal(t, "agrouter debug: stage cli: choice a, confidence 0.500, top [a 0.500, b 0.500]\n", buf.String())
+			Choice: "a", Answer: &jev.Answer{Choice: "a", Confidence: 0.5, Probabilities: map[string]float64{"a": 0.5, "b": 0.5}},
+			Estimated: 12, Reported: new(0)}}})
+		assert.Equal(t, "agrouter debug: stage cli: choice a, confidence 0.500, top [a 0.500, b 0.500], tokens: estimated 12, provider reported 0\n",
+			buf.String(), "a reported zero is a count, not unknown")
 	})
 }
 

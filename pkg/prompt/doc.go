@@ -34,14 +34,14 @@ func (r *Result) DocsState() DocsState {
 	return DocsState{Docs: docs}
 }
 
-// DocsTokens is the size of the whole-docs state in tokens.
-func (r *Result) DocsTokens() int {
-	return Tokens(mustLen(r.DocsState()))
+// DocsTokens is the estimated size in tokens of the whole-docs state under p.
+func (r *Result) DocsTokens(p Policy) int {
+	return p.Tokens(mustLen(r.DocsState()))
 }
 
 // DocsFit reports whether every doc fits in one doc request.
 func (r *Result) DocsFit(b Budget) bool {
-	return r.DocsTokens() <= b.Doc
+	return r.DocsTokens(b.Policy) <= b.Doc
 }
 
 // SplitDocs returns nil when every doc fits in one doc request, and otherwise the doc chunks that
@@ -50,13 +50,13 @@ func (r *Result) SplitDocs(b Budget) []DocChunk {
 	if r.DocsFit(b) {
 		return nil
 	}
-	return r.DocChunks(b.Doc)
+	return r.DocChunks(b, b.Doc)
 }
 
-// DocChunks cuts every doc with text into doc chunks whose states are within tokens, on line and
-// UTF-8 boundaries, and numbers them. A doc never shares a chunk with another.
-func (r *Result) DocChunks(tokens int) []DocChunk {
-	room := max(docRoom(tokens), len(`\u0000`)) // at least the widest escaped rune, so cut advances
+// DocChunks cuts every doc with text into doc chunks whose states are within tokens under b's
+// policy, on line and UTF-8 boundaries, and numbers them. A doc never shares a chunk with another.
+func (r *Result) DocChunks(b Budget, tokens int) []DocChunk {
+	room := max(docRoom(b.Policy, tokens), len(`\u0000`)) // at least the widest escaped rune, so cut advances
 	var chunks []DocChunk
 	for i, d := range r.Docs {
 		for _, text := range cut(d, room) {
@@ -67,15 +67,4 @@ func (r *Result) DocChunks(tokens int) []DocChunk {
 		chunks[i].Index, chunks[i].Of = i+1, len(chunks)
 	}
 	return chunks
-}
-
-// HalveDoc cuts c into pieces of at most half its escaped text, like Halve, for a doc chunk Jev
-// rejected with a 422. The pieces keep c's doc; numbering them is the caller's.
-func HalveDoc(c DocChunk) []DocChunk {
-	pieces := halveText(c.Text)
-	out := make([]DocChunk, len(pieces))
-	for i, text := range pieces {
-		out[i] = DocChunk{Doc: c.Doc, Text: text}
-	}
-	return out
 }

@@ -81,14 +81,37 @@ func unknownPolicy(cli config.CLI) string {
 	return cli.Availability.Unknown
 }
 
-// preflightError stops exec before any Jev request: line is the whole stderr line, printed as is, and
-// code the exit code.
+// Why a preflight block stopped exec, as the skipped line says it: fixed text per verdict, never the
+// probe's own wording.
+const (
+	skipQuota       = "subscription quota exhausted"
+	skipExecutable  = "executable missing"
+	skipAuth        = "authentication failed"
+	skipModel       = "model not supported"
+	skipUnverified  = "availability unverified"
+	skipUnavailable = "unavailable"
+)
+
+// preflightError stops exec before the child starts: line is the whole stderr line, printed as is, and
+// code the exit code. cli and reason say who was blocked and why in the skipped line printed before it.
 type preflightError struct {
-	line string
-	code int
+	line   string
+	code   int
+	cli    string
+	reason string
 }
 
 func (e *preflightError) Error() string { return e.line }
+
+// routingSkipped is the line for a block found before routing: the routing provider was never asked.
+func (e *preflightError) routingSkipped() string {
+	return fmt.Sprintf("agrouter: routing skipped: %s %s; routing provider was not called; child CLI was not started", e.cli, e.reason)
+}
+
+// runSkipped is the line for a block found after routing chose: only the child was not started.
+func (e *preflightError) runSkipped() string {
+	return fmt.Sprintf("agrouter: run skipped: %s %s; child CLI was not started", e.cli, e.reason)
+}
 
 // preflightBlock is the error for the verdict that left cli nothing to run: a strict unknown block is
 // a usage-class exit, a known missing executable, failed auth or exhausted quota is the exit of a
@@ -96,11 +119,28 @@ func (e *preflightError) Error() string { return e.line }
 func preflightBlock(cli config.CLI, v readiness.Verdict) *preflightError {
 	switch {
 	case v.Status != readiness.StatusUnavailable:
-		return &preflightError{line: fmt.Sprintf("agrouter: %s availability unverified: %s", cli.Name, v.Reason), code: exitUsage}
+		return &preflightError{line: fmt.Sprintf("agrouter: %s availability unverified: %s", cli.Name, v.Reason),
+			code: exitUsage, cli: cli.Name, reason: skipUnverified}
 	case v.Dimension == readiness.DimensionQuota:
-		return &preflightError{line: quotaLine(cli, v), code: runner.ExitStartFailure}
+		return &preflightError{line: quotaLine(cli, v), code: runner.ExitStartFailure, cli: cli.Name, reason: skipQuota}
 	}
-	return &preflightError{line: fmt.Sprintf("agrouter: %s unavailable: %s", cli.Name, v.Reason), code: runner.ExitStartFailure}
+	return &preflightError{line: fmt.Sprintf("agrouter: %s unavailable: %s", cli.Name, v.Reason),
+		code: runner.ExitStartFailure, cli: cli.Name, reason: unavailableText(v.Dimension)}
+}
+
+// unavailableText is the skipped line's reason for a known block outside the quota.
+func unavailableText(d readiness.Dimension) string {
+	switch d {
+	case readiness.DimensionExecutable:
+		return skipExecutable
+	case readiness.DimensionAuth:
+		return skipAuth
+	case readiness.DimensionCapability:
+		return skipModel
+	case readiness.DimensionQuota: // preflightBlock words a quota block itself; listed for the exhaustive check
+		return skipQuota
+	}
+	return skipUnavailable
 }
 
 // windowNames are the quota windows as the quota line names them.

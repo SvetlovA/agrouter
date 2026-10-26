@@ -21,13 +21,15 @@ type Score struct {
 // ChunkResult is one chunk request's answers, for recording and debug output.
 type ChunkResult struct {
 	Field         string
-	Index         int // as sent; a re-split renumbers the chunks after it
+	Index         int // 1-based position in the chunk sequence
 	Of            int
 	Relevance     float64 // the Noul as answered: the chunk's weight in the pool
 	Confidence    float64 // Jev's Choice confidence, recorded only; never part of the pool weight
 	Choice        string
 	Probabilities map[string]float64 // every criterion, retained for verbose reporting
 	Top           []Score
+	Estimated     int  // agrouter's token estimate of this chunk's request
+	Reported      *int // the provider's input-token count for it; nil when it gave none
 }
 
 // Pooled is how a split state decided one level: every chunk's answers in sequence order and the pooled
@@ -48,10 +50,8 @@ type routeAnswer struct {
 type slot = piece[prompt.Chunk, routeAnswer]
 
 // pooled asks lv's question of every chunk, all at once, and pools the answers over gs, returning
-// the winning group's index. A 422 on a chunk re-splits it once at half size; any other failure, a
-// second 422, or a 422 on a chunk under the minimum state size means Jev cannot decide.
-func (r *Router) pooled(ctx context.Context, el *Eligibility, lv level, gs []group, split *prompt.Split,
-	resplit bool) (int, *Pooled, error) {
+// the winning group's index. Any chunk failure means Jev cannot decide; a rejected chunk is never resent.
+func (r *Router) pooled(ctx context.Context, el *Eligibility, lv level, gs []group, split *prompt.Split) (int, *Pooled, error) {
 	questions := map[string]jev.Question{
 		lv.name:           stageQuestion(r.cfg, lv, chunkGuide, gs, el.effort),
 		questionRelevance: relevanceQuestion(),
@@ -62,14 +62,8 @@ func (r *Router) pooled(ctx context.Context, el *Eligibility, lv level, gs []gro
 		ask: func(ctx context.Context, c prompt.Chunk) (routeAnswer, error) {
 			return r.askChunk(ctx, lv.name, names, split.Anchor, questions, c)
 		},
-		halve: prompt.Halve,
-		text:  func(c prompt.Chunk) string { return c.Text },
-		number: func(c prompt.Chunk, index, of int) prompt.Chunk {
-			c.Index, c.Of = index, of
-			return c
-		},
 	}
-	seq, err := f.run(ctx, split.Chunks, resplit)
+	seq, err := f.run(ctx, split.Chunks)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -86,14 +80,12 @@ func (r *Router) pooled(ctx context.Context, el *Eligibility, lv level, gs []gro
 // question id for every criterion in names.
 func (r *Router) askChunk(ctx context.Context, id string, names []string, anchor prompt.Anchor,
 	questions map[string]jev.Question, c prompt.Chunk) (routeAnswer, error) {
-	answers, err := r.jev.Ask(ctx, jev.Request{
-		Model:     r.cfg.Agrouter.JevModel,
-		State:     prompt.ChunkState{Anchor: anchor, Chunk: c},
-		Questions: questions,
-	})
+	state := prompt.ChunkState{Anchor: anchor, Chunk: c}
+	resp, err := r.jev.Ask(ctx, jev.Request{Model: r.cfg.Agrouter.JevModel, State: state, Questions: questions})
 	if err != nil {
-		return routeAnswer{}, fmt.Errorf("chunk request: %w", err)
+		return routeAnswer{}, fmt.Errorf("chunk request: %w", r.sized(err, state, questions))
 	}
+	answers := resp.Answers
 	route, ok := answers[id]
 	if !ok {
 		return routeAnswer{}, fmt.Errorf("%w: %q", jev.ErrEmptyAnswer, id)
@@ -108,7 +100,8 @@ func (r *Router) askChunk(ctx context.Context, id string, names []string, anchor
 	}
 	return routeAnswer{probs: route.Probabilities, result: ChunkResult{Field: c.Field, Index: c.Index, Of: c.Of,
 		Relevance: relevance.Noul, Confidence: route.Confidence, Choice: route.Choice,
-		Probabilities: route.Probabilities, Top: ranked(names, scores)}}, nil
+		Probabilities: route.Probabilities, Top: ranked(names, scores),
+		Estimated: r.estimate(state, questions), Reported: resp.InputTokens}}, nil
 }
 
 // pool combines the chunks' probabilities over the ordered criterion names: each chunk weighs its

@@ -3,6 +3,7 @@ package router
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -67,6 +68,10 @@ type Stage struct {
 	Skipped bool        // one group: Jev not asked
 	Answer  *jev.Answer // the whole-state answer; nil when skipped or pooled
 	Pooled  *Pooled     // the split-state answers; nil otherwise
+	// Estimated and Reported are the tokens of the whole-state request: agrouter's estimate and the
+	// provider's input-token count, nil when it gave none. Both are unset for a skipped or pooled stage.
+	Estimated int
+	Reported  *int
 }
 
 // group is the options sharing one level's key.
@@ -124,7 +129,6 @@ func skippedStages(el *Eligibility, o catalog.Option) []Stage {
 type routeState struct {
 	captured *prompt.Result
 	split    *prompt.Split // nil: sent whole
-	resplit  bool          // the chunks come from re-splitting a whole state Jev rejected
 }
 
 // decide asks the levels in order over a private copy of el's options. A level with one group is
@@ -156,54 +160,59 @@ func (r *Router) decide(ctx context.Context, el *Eligibility, captured *prompt.R
 }
 
 // stage asks one level over gs and returns the winning group's index. A whole state goes in one
-// request; a 422 on it re-splits it at half the chunk budget, once, and the chunks are pooled for
-// this level and every later one.
+// request; a split state is pooled over its chunks. A request the provider rejects is never resent.
 func (r *Router) stage(ctx context.Context, el *Eligibility, lv level, gs []group, st *routeState) (int, Stage, error) {
 	if st.split == nil {
-		i, answer, err := r.ask(ctx, el, lv, gs, st.captured.State())
-		if err == nil {
-			return i, Stage{Level: lv.name, Choice: gs[i].label, Answer: answer}, nil
-		}
-		if !errors.Is(err, jev.ErrUnprocessable) {
-			return 0, Stage{}, err
-		}
-		if st.captured.StateTokens() < prompt.MinStateTokens {
-			return 0, Stage{}, fmt.Errorf("%w: %w", errUnsplittable, err)
-		}
-		// State 0 forces the split even though the state fit the full budget
-		split, splitErr := st.captured.Split(prompt.Budget{Chunk: r.budget.Chunk / 2})
-		if splitErr != nil {
-			return 0, Stage{}, fmt.Errorf("re-split after %w: %w", err, splitErr)
-		}
-		st.split, st.resplit = split, true
+		return r.ask(ctx, el, lv, gs, st.captured.State())
 	}
-	i, p, err := r.pooled(ctx, el, lv, gs, st.split, st.resplit)
+	i, p, err := r.pooled(ctx, el, lv, gs, st.split)
 	if err != nil {
 		return 0, Stage{}, err
 	}
 	return i, Stage{Level: lv.name, Choice: gs[i].label, Pooled: p}, nil
 }
 
-// ask sends state in one Choice request over gs and returns the chosen group's index.
-func (r *Router) ask(ctx context.Context, el *Eligibility, lv level, gs []group, state prompt.State) (int, *jev.Answer, error) {
-	req := jev.Request{
-		Model:     r.cfg.Agrouter.JevModel,
-		State:     state,
-		Questions: map[string]jev.Question{lv.name: stageQuestion(r.cfg, lv, wholeGuide, gs, el.effort)},
-	}
-	answers, err := r.jev.Ask(ctx, req)
+// ask sends state in one Choice request over gs and returns the chosen group's index and the stage it decided.
+func (r *Router) ask(ctx context.Context, el *Eligibility, lv level, gs []group, state prompt.State) (int, Stage, error) {
+	questions := map[string]jev.Question{lv.name: stageQuestion(r.cfg, lv, wholeGuide, gs, el.effort)}
+	resp, err := r.jev.Ask(ctx, jev.Request{Model: r.cfg.Agrouter.JevModel, State: state, Questions: questions})
 	if err != nil {
-		return 0, nil, fmt.Errorf("route request: %w", err)
+		return 0, Stage{}, fmt.Errorf("route request: %w", r.sized(err, state, questions))
 	}
-	answer, ok := answers[lv.name]
+	answer, ok := resp.Answers[lv.name]
 	if !ok {
-		return 0, nil, fmt.Errorf("%w: %q", jev.ErrEmptyAnswer, lv.name)
+		return 0, Stage{}, fmt.Errorf("%w: %q", jev.ErrEmptyAnswer, lv.name)
 	}
 	names := groupLabels(gs)
 	if _, err := scoresOf(answer, names); err != nil {
-		return 0, nil, err
+		return 0, Stage{}, err
 	}
-	return slices.Index(names, answer.Choice), &answer, nil
+	i := slices.Index(names, answer.Choice)
+	return i, Stage{Level: lv.name, Choice: gs[i].label, Answer: &answer,
+		Estimated: r.estimate(state, questions), Reported: resp.InputTokens}, nil
+}
+
+// estimate is the tokens agrouter counts in a request carrying state and questions, both serialized.
+func (r *Router) estimate(state any, questions map[string]jev.Question) int {
+	return r.budget.Tokens(encodedLen(state) + encodedLen(questions))
+}
+
+// encodedLen is the length of v encoded as JSON, 0 if it cannot be: an estimate for messages only.
+func encodedLen(v any) int {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return 0
+	}
+	return len(data)
+}
+
+// sized adds to an over-length error from the provider what the user needs to size requests: the
+// estimate of the whole request against request_tokens. Other errors pass through.
+func (r *Router) sized(err error, state any, questions map[string]jev.Question) error {
+	if !errors.Is(err, jev.ErrTooLong) {
+		return err
+	}
+	return fmt.Errorf("estimated %d tokens, request_tokens is %d: %w", r.estimate(state, questions), r.budget.RequestTokens, err)
 }
 
 // scoresOf returns answer's probability for every name, in order. A missing probability, or a

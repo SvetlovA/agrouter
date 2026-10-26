@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,14 +33,17 @@ const (
 type app struct {
 	stdin          io.Reader // nil: no stdin
 	stdout, stderr io.Writer
-	getenv         func(string) string
-	workDir        string
-	embedded       []byte
-	newJev         func(key string) router.JevClient
-	runner         CommandRunner
-	checker        ReadinessChecker // exec only
-	now            func() time.Time // nil means time.Now
-	debug          *debugLog        // nil unless AGROUTER_DEBUG=1
+	// childStderr is the child's stderr: the console as given, never the mirror log's copy. run sets
+	// it, and swaps stderr for the copy, for its duration.
+	childStderr io.Writer
+	getenv      func(string) string
+	workDir     string
+	embedded    []byte
+	newJev      func(key string, longContext bool) router.JevClient
+	runner      CommandRunner
+	checker     ReadinessChecker // exec only
+	now         func() time.Time // nil means time.Now
+	debug       *debugLog        // nil unless AGROUTER_DEBUG=1
 }
 
 // newApp returns an app wired to the real process environment.
@@ -52,10 +56,17 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer) *app {
 		getenv:   os.Getenv,
 		workDir:  wd,
 		embedded: defaults.Config,
-		newJev:   func(key string) router.JevClient { return jev.New(key) },
+		newJev:   func(key string, longContext bool) router.JevClient { return newJevClient(key, longContext) },
 		runner:   runner.Runner{},
 		checker:  readiness.Checker{Dir: wd},
 	}
+}
+
+// newJevClient is the Jev client for key, sending the long-context header when longContext is set.
+func newJevClient(key string, longContext bool) *jev.Client {
+	c := jev.New(key)
+	c.LongContext = longContext
+	return c
 }
 
 func (a *app) clock() time.Time {
@@ -109,6 +120,15 @@ type decisionJSON struct {
 // run executes the pipeline: parse, config, catalog, then under the routing deadline capture, route
 // and build the argv; then print the decision or run the child. It returns the exit code.
 func (a *app) run(argv []string) int {
+	// agrouter's own lines pass through the log copy, which waits for log_dir; the child keeps the console
+	console := a.stderr
+	mirror := newConsoleLog(console, a.clock)
+	a.stderr, a.childStderr = mirror, console
+	defer func() {
+		mirror.close()
+		a.stderr, a.childStderr = console, nil
+	}()
+
 	cmd, err := parseArgs(argv)
 	if err != nil {
 		return a.fail(err)
@@ -132,6 +152,7 @@ func (a *app) run(argv []string) int {
 	if err != nil {
 		return a.fail(err)
 	}
+	a.startLog(mirror, cfg.Agrouter.LogDir)
 	if req.Mode == args.ModeExec {
 		// a CLI without catalog options would fall back to routing across every CLI
 		if len(catalog.ByCLI(cat.Options, req.CLI)) == 0 {
@@ -145,6 +166,8 @@ func (a *app) run(argv []string) int {
 		a.debug.decision(d.Decision)
 		a.debug.failed(err)
 		if blocked, ok := errors.AsType[*preflightError](err); ok {
+			// the block came before any routing request, so say why routing never ran
+			fmt.Fprintln(a.stderr, blocked.routingSkipped())
 			fmt.Fprintln(a.stderr, blocked.line)
 			return blocked.code
 		}
@@ -168,6 +191,9 @@ func (a *app) run(argv []string) int {
 	// --verbose is agrouter's decision detail; the exec selection line stays concise
 	s, blocked := a.execSelection(cli, req, d)
 	if blocked != nil {
+		// routing chose before the block, so its selection is logged; the skipped line does not claim a run
+		a.logSelection(s)
+		fmt.Fprintln(a.stderr, blocked.runSkipped())
 		fmt.Fprintln(a.stderr, blocked.line)
 		return blocked.code
 	}
@@ -193,6 +219,28 @@ func (a *app) logSelection(s selectionJSON) {
 	_, _ = a.stderr.Write(line.Bytes())
 }
 
+// startLog starts copying agrouter's console lines to agrouter.log in logDir: a relative path is
+// resolved against the work directory. The default directory is kept out of git first; any other is
+// the user's to manage. A failure ends the copy with one warning and changes nothing else.
+func (a *app) startLog(mirror *consoleLog, logDir string) {
+	dir := logDir
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(a.workDir, dir)
+	}
+	dir = filepath.Clean(dir)
+	if local := config.LocalDir(a.workDir); dir == filepath.Join(local, defaultLogSubdir) {
+		if err := ensureLogIgnored(local); err != nil {
+			mirror.abandon(err)
+			return
+		}
+		if err := notSymlink(dir); err != nil {
+			mirror.abandon(err)
+			return
+		}
+	}
+	mirror.start(filepath.Join(dir, logFileName))
+}
+
 // setup loads and validates the config, derives the catalog and builds the router with the resolved
 // Jev key. Every error is a config error.
 func (a *app) setup(req *args.Request) (*config.Config, *catalog.Catalog, *router.Router, error) {
@@ -213,7 +261,7 @@ func (a *app) setup(req *args.Request) (*config.Config, *catalog.Catalog, *route
 	}
 	key, source := config.ResolveAPIKey(req.APIKey.Value, req.APIKey.Set, a.getenv(config.EnvAPIKey), cfg.Agrouter)
 	a.debug.apiKey(key, source)
-	rt, err := router.New(cfg, cat, a.newJev(key))
+	rt, err := router.New(cfg, cat, a.newJev(key, cfg.Agrouter.LongContext))
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -402,7 +450,7 @@ func (a *app) exec(res args.Result, captured *prompt.Result) int {
 		stdin = captured.Stdin.Reader()
 	}
 	code, err := a.runner.Run(context.Background(), runner.Command{
-		Argv: res.Argv, Stdin: stdin, Stdout: a.stdout, Stderr: a.stderr,
+		Argv: res.Argv, Stdin: stdin, Stdout: a.stdout, Stderr: a.childStderr,
 	})
 	if err != nil {
 		a.printErr(err)

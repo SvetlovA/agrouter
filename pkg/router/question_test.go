@@ -50,7 +50,7 @@ func TestComplexityGoldenRequest(t *testing.T) {
 	require.True(t, docs.DocsFit(r.budget))
 
 	// force the docs into chunks: the envelope reserves the widest index and count
-	chunks := docs.DocChunks(40)
+	chunks := docs.DocChunks(r.budget, 40)
 	require.Greater(t, len(chunks), 1)
 
 	tests := []struct {

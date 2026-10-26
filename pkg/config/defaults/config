@@ -20,6 +20,10 @@
 #   timeout            total routing budget, a Go duration. required, must be positive
 #   routing_policy     cost/quality preference for choosing the CLI, model and effort. required
 #   complexity_policy  how the --doc stage judges the project. required
+#   long_context       use the routing provider's long-input mode, which raises the provider's own limits. default: false
+#   request_tokens     token allowance of one routing request: its state plus all its questions. default: 30000
+#   bytes_per_token    estimated bytes per token, used to size routing requests. default: 3
+#   log_dir            directory of the console log, relative to the working directory. default: .agrouter/logs
 [agrouter]
 # TypeSafe API key for Jev. Empty = no key. Prefer the env var or the global config;
 # never put it in a local .agrouter/config that may be committed.
@@ -42,6 +46,33 @@ timeout   = 30s
 routing_policy = Choose the option with the lowest cost that can reliably satisfy this task's requirements. Compare the supplied model prices and the effort descriptions, including their effect on token usage. Prefer cheaper options when their capabilities are sufficient. Choose a more expensive model or higher effort when it materially improves the likelihood of completing this specific task correctly. Prefer less time when cost and capability are comparable. The project complexity, when present, rates the codebase the task runs in: use it as context for how hard this specific task is there, not as a substitute for judging the task (a typo fix stays trivial in any codebase).
 # complexity_policy: how the --doc stage judges the project the docs describe before routing.
 complexity_policy = Judge the codebase as a whole: its size, architecture, dependencies and constraints, not any single task in it.
+
+# routing request size. agrouter cannot count tokens, so it estimates them from bytes.
+# request_tokens is the allowance of one routing request: the state plus all its questions. input that
+# does not fit is split into chunks. a request the routing provider still rejects as too long fails
+# routing and is never resent: lower request_tokens, or lower bytes_per_token so that the same text
+# counts as more tokens (log and code text usually needs 2.5 or less).
+# the provider's own limits are checked at startup: request_tokens must stay below them.
+request_tokens  = 30000
+bytes_per_token = 3
+# the routing provider's long-input mode raises the provider's limits. it does not raise request_tokens:
+# raise that yourself, as in the example below.
+long_context    = false
+# long context: the routing provider's experimental long-input mode (for TypeSafe Jev, the
+# "danger zone" header TypeSafe-Danger-Zone-Long-Context: true). Jev's limits rise from 32k per
+# question / 64k per request to 262k each, at the same price, but slower and less accurate.
+# turning it on changes only the provider's limits: raise request_tokens yourself.
+# recommended starting values, uncalibrated; compare AGROUTER_DEBUG=1 "tokens:" lines and tune:
+# long_context    = true
+# request_tokens  = 128000
+# bytes_per_token = 2.5
+# timeout         = 120s
+
+# agrouter copies every line it writes to the console (selection, warnings, errors, AGROUTER_DEBUG
+# output) to agrouter.log in this directory, append-only and never trimmed. the child's own output is
+# never copied. a relative path is resolved against the working directory. the default directory is
+# kept out of git by .agrouter/.gitignore; any other directory is yours to manage.
+log_dir         = .agrouter/logs
 
 # how agrouter invokes each CLI. argv = command + exec_args + native options + model_args
 # + effort_args + any native "--" and its remaining tokens + prompt_args. Only {model}, {effort}

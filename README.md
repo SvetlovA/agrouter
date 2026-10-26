@@ -108,11 +108,35 @@ This stage runs only when `--doc` is given and more than one option is left. If 
 
 Complexity uses Jev's Score question with ten ordered descriptions. Jev returns a numeric score from 0 to 9, which agrouter scales to 0 to 10 before combining document chunks. Evidence remains a separate Noul weight; confidence is recorded only.
 
+### Request size
+
+agrouter cannot count tokens, so it estimates them from bytes and sizes every routing request from these `[agrouter]` keys:
+
+| Key | Meaning | Default |
+|---|---|---|
+| `long_context` | turn on the routing provider's long-input mode; it raises the provider's limits, not `request_tokens` | `false` |
+| `request_tokens` | the allowance of one routing request: its state plus all its questions; input that does not fit is split into chunks | `30000` |
+| `bytes_per_token` | estimated bytes per token; lower it and the same text counts as more tokens, so it is split sooner | `3` |
+
+The routing provider's own limits are checked at startup: `request_tokens` must stay 2000 tokens below them, or agrouter exits `2` and names the value and the limit. A request the provider still rejects as too long is never resent. Routing fails with the reason `request_too_long`, and the error says how many tokens agrouter estimated against `request_tokens`.
+
+**Known limitation:** with the shipped defaults, log or code heavy prompts can still overflow. Those texts hold more tokens per byte than `bytes_per_token = 3` assumes, so a request agrouter thinks fits can be over the provider's limit, and routing fails with `request_too_long` instead of splitting it. To tune, run with `AGROUTER_DEBUG=1` and compare each request's `tokens: estimated N, provider reported M` line, then lower `bytes_per_token` (`2.5` is a suggested starting point) until the estimate is not below the reported count, or lower `request_tokens`. The other way out is the provider's long-input mode, `long_context = true`: it raises the provider's limits, at the same price but slower and less accurate, and does not raise `request_tokens`, so raise that too:
+
+```ini
+[agrouter]
+long_context    = true
+request_tokens  = 128000
+bytes_per_token = 2.5
+timeout         = 120s
+```
+
+These values are a starting point, not calibrated; compare the `tokens:` lines and tune.
+
 ### Long inputs
 
 A prompt with its files that is too large for one request is split into chunks, all sent at once. Each chunk also rates how relevant its text is to the task, and the chunks' answers are averaged with that relevance as weight, so filler with zero relevance has no effect. Low but non-zero relevance still dilutes the result when there is a lot of it. Every routing stage asks all chunks and pools their answers; every chunk then moves on to the same narrowed next stage.
 
-`[agrouter] timeout` covers the whole routing: reading the inputs, the complexity stage and every routing stage. Routing makes up to three sequential Jev round trips (`cli`, `model`, `effort`), plus one for the complexity stage with `--doc`; chunks within a stage run in parallel, but a re-split after a too-large request adds another round trip. The timeout is cooperative: reading stdin and files and every Jev request stop at it, but splitting and encoding a very large input do not. Raise it when routing often runs out of time, typically with very long inputs, many `--doc` files or a slow network.
+`[agrouter] timeout` covers the whole routing: reading the inputs, the complexity stage and every routing stage. Routing makes up to three sequential Jev round trips (`cli`, `model`, `effort`), plus one for the complexity stage with `--doc`; chunks within a stage run in parallel. The timeout is cooperative: reading stdin and files and every Jev request stop at it, but splitting and encoding a very large input do not. Raise it when routing often runs out of time, typically with very long inputs, many `--doc` files or a slow network.
 
 Decision mode:
 
@@ -169,7 +193,7 @@ Verbose output includes all available numeric details, without truncating chunks
 Stage probabilities and pooled scores are separate from Jev's Choice confidence. Verbose JSON retains zero values. The exec selection log remains one prefixed line on stderr and excludes argv and command; the child's output goes to stdout.
 
 
-The child's stdout, stderr and exit code are agrouter's. Set `AGROUTER_DEBUG=1` to see eligibility, each `--doc` chunk's complexity score, evidence and confidence with the project complexity, one line per routing stage (`stage <level>: skipped (<choice>)`, or the choice, confidence and top candidates, per chunk when pooled), Jev's probabilities and the final command on stderr (prompt text and key redacted; doc text is never printed). In exec mode it also prints one `readiness <cli>:` line per piece of availability evidence (dimension, status, reason code, window, model scope, reset, check), the defaults the checks reported, and how many options they excluded; never a probe's raw response.
+The child's stdout, stderr and exit code are agrouter's. Set `AGROUTER_DEBUG=1` to see eligibility, each `--doc` chunk's complexity score, evidence and confidence with the project complexity, one line per routing stage (`stage <level>: skipped (<choice>)`, or the choice, confidence and top candidates, per chunk when pooled; the doc and stage lines end with `tokens: estimated N, provider reported M|unknown`, see [Request size](#request-size)), Jev's probabilities and the final command on stderr (prompt text and key redacted; doc text is never printed). In exec mode it also prints one `readiness <cli>:` line per piece of availability evidence (dimension, status, reason code, window, model scope, reset, check), the defaults the checks reported, and how many options they excluded; never a probe's raw response.
 
 When Jev cannot decide (no key, timeout, API errors, at any stage) and the CLI is known (`--cli`, implied by `--model`, or the only one left), agrouter runs it with only the caller's fixed `--model`/`--effort` and a model Jev already chose before a later stage failed, so the CLI's defaults apply to the rest. With more than one CLI left, decision mode exits `2`: the one-line `agrouter:` error goes to stderr and one decision JSON object with `null` values and the reasons goes to stdout, without `argv`, `command` or stage confidence. `AGROUTER_DEBUG=1` shows the stages that completed.
 
@@ -188,6 +212,7 @@ Decision JSON and the exec selection line explain a failed routing and every `nu
 | `jev_unauthorized` | Jev rejected the key (HTTP 401) |
 | `jev_timeout` | `[agrouter] timeout` passed |
 | `jev_canceled` | routing was canceled |
+| `request_too_long` | the provider rejected the routing request as longer than its context length; it is never resent (see [Request size](#request-size)) |
 | `jev_api_error` | Jev answered with another error status, including rate limits that outlasted the retries |
 | `jev_transport_error` | Jev could not be reached, or the connection failed |
 | `jev_invalid_answer` | Jev answered with an answer that does not fit the question |
@@ -221,7 +246,7 @@ Exec then routes only over the CLI's options that are left. It never switches to
 | nothing is left: subscription quota exhausted | `<error_prefix><error_message>; <windows> subscription quota exhausted[; resets at <RFC 3339>]` | `127` |
 | nothing is left under `unknown = block` | `agrouter: <cli> availability unverified: <reason>` | `2` |
 
-A preflight block prints no selection line, nothing on stdout, and makes no Jev request. (A block on a delegated model's default comes after routing; see [Exec fallback](#exec-fallback).) The reset is the latest reset of the exhausted windows, since a weekly window outlasts a five-hour one, and is left out when any of them is unverified. `error_prefix` (default `agrouter: `) and `error_message` come from the check that found the block, the first one in `checks` order, so the line can match a caller's own limit pattern, for example a severity prefix such as `ERROR: agrouter: `. An unknown availability is never reported as a quota block. Readiness uses agrouter's configured context. Native arguments after `--` never alter or disable probes; native settings, profile and provider overrides apply only to the child.
+A preflight block prints no selection line, nothing on stdout, and makes no Jev request. It does print one explanation line before the lines above: `agrouter: routing skipped: <cli> <reason>; routing provider was not called; child CLI was not started`, where the reason is fixed text (`subscription quota exhausted`, `executable missing`, `authentication failed`, `availability unverified`, `model not supported`, `unavailable`). A block found after routing, such as a delegated model's default, is reported the same way with the Jev call already made: agrouter logs the selection routing produced, then prints `agrouter: run skipped: <cli> <reason>; child CLI was not started` (see [Exec fallback](#exec-fallback)). The reset is the latest reset of the exhausted windows, since a weekly window outlasts a five-hour one, and is left out when any of them is unverified. `error_prefix` (default `agrouter: `) and `error_message` come from the check that found the block, the first one in `checks` order, so the line can match a caller's own limit pattern, for example a severity prefix such as `ERROR: agrouter: `. An unknown availability is never reported as a quota block. Readiness uses agrouter's configured context. Native arguments after `--` never alter or disable probes; native settings, profile and provider overrides apply only to the child.
 
 The `<reason>` in these lines, and the reasons in the selection line's `readiness`, are fixed codes:
 
@@ -272,6 +297,22 @@ Note: the first line is readable without parsing JSON; the second carries the sa
 Values Jev chose before the failure (the model when only the effort stage failed) and values the caller fixed keep their source and are never listed as fallbacks. Top-level `model`/`effort` stay `null` whenever agrouter passes no selection flag, even when `effective` shows a verified default. A catalog default or a model list's recommendation is never reported as verified. An intentional omission (a model without effort levels, the effort of a passed-through `--model`) is no fallback and prints no warning.
 
 A delegated model is checked against model-scoped quota blocks. When the verified default is blocked, exec prints the quota line and exits `127` without starting the child, as a preflight block does. When the default is unknown and some model has its own block, the model is unverified (`delegated_model_unverified`): a warning under `unknown = allow`, exit `2` under `unknown = block`.
+
+### Console log
+
+Every line agrouter itself writes to stderr (warnings, errors, the `agrouter: selection:` line, the skipped lines and `AGROUTER_DEBUG=1` output) is also appended to `<log_dir>/agrouter.log`, so a caller that hides agrouter's stderr, such as Ralphex's Codex executor, still leaves the routing outcome on disk. The log is always on and has no switch. Each line is stamped:
+
+```text
+2026-10-22T15:17:03Z pid=1234 agrouter: selection: {"cli":"codex","model":null,"effort":null}
+```
+
+| Key | Meaning | Default |
+|---|---|---|
+| `log_dir` | directory of `agrouter.log`; a relative path is resolved against the working directory | `.agrouter/logs` |
+
+The console output is unchanged. The child's stdout and stderr and agrouter's own stdout (decision JSON) are never copied. The log is append-only and never rotated or trimmed. Invocations that fail before the config loads (usage and config errors) write nothing, since `log_dir` is not known yet. A log failure prints one `agrouter: warning: log: ...` line and changes neither the output nor the exit code.
+
+With the default directory, agrouter keeps the log out of git the way Ralphex does for its own logs: it makes `.agrouter/.gitignore` end with the rules `.gitignore` and `logs/`, so `.agrouter/config` stays trackable. A custom `log_dir` is yours to manage: agrouter creates the directory but writes no ignore file for it. A symlinked `.agrouter`, `.agrouter/.gitignore`, `.agrouter/logs` or log file is refused with a warning, so a cloned repository cannot redirect these writes.
 
 ## Configuration
 
