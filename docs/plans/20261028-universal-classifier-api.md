@@ -28,7 +28,8 @@ reason jev_*                             reason classifier_*
   - `cmd/agrouter/{app,flags,reason,fallback,debug,confidence,readiness,main}.go`: wiring, `--jev-api-key`, `jev_*` codes, "Jev routing failed" warning, help text
   - `pkg/runner/runner.go:118`: `childEnv` strips the API key env var from the child
   - comments only: `pkg/catalog/catalog.go`, `pkg/prompt/{capture,chunk,mentions}.go`, `pkg/args/request.go`
-  - `Makefile`, `WMakefile` (`eval-routing` needs `TYPESAFE_API_KEY`), `README.md` (53 mentions), `CLAUDE.md`, `AGENTS.md`, `.agrouter/config`
+  - `Makefile`, `WMakefile` (`eval-routing` needs `TYPESAFE_API_KEY`), `README.md` (53 mentions), `CLAUDE.md`, `AGENTS.md`
+  - `.agrouter/config` is **not** changed by this plan: the ralphex session runs the installed `agrouter` (`~/go/bin/agrouter`, old keys) against it, so it keeps the old `[agrouter] jev_model`/`api_key` keys. Only the embedded `pkg/config/defaults/config` moves to `[classifier]`. A branch build run in this worktree rejects that local file; tests never read it
 - related patterns found:
   - unknown config keys are config errors that never echo the value (`pkg/config/load.go:475`, `:524`)
   - `cmd/agrouter/guard_test.go` scans production Go code for forbidden names
@@ -169,7 +170,6 @@ Reason codes: `classifier_no_key`, `classifier_unauthorized`, `classifier_timeou
 - Modify: `pkg/config/load.go`
 - Modify: `pkg/config/validate.go`
 - Modify: `pkg/config/defaults/config`
-- Modify: `.agrouter/config` (tracked local copy: its active `jev_model` at line 35 would fail a branch build from this task on)
 - Modify: `pkg/config/config_test.go`, `pkg/config/validate_test.go`, `pkg/config/install_test.go`, `pkg/config/defaults/defaults_test.go`
 - Modify: `cmd/agrouter/app.go` (`:264` long context), `pkg/router/{stage,pool,complexity}.go` (`cfg.Agrouter.JevModel` -> `cfg.Classifier.Model`), `pkg/router/router.go` (`:48`, `checkLimits` `:60-64`), `pkg/router/question.go` (`:319`, `:322`); only the fields move, no renames yet
 - Modify: every test fixture and assertion on the moved fields: `pkg/router/router_test.go:32,204-220`, `pkg/router/overflow_test.go:53-54,116`, `pkg/router/complexity_test.go:168`, `pkg/router/question_test.go:65`, `pkg/config/config_test.go:211-246`, `cmd/agrouter/app_test.go:595` (keep the test model *value* unchanged until Task 3, so golden files do not move yet)
@@ -180,7 +180,7 @@ Reason codes: `classifier_no_key`, `classifier_unauthorized`, `classifier_timeou
 - [x] validate `url` and `model` as required (non-empty), any url value accepted; move the `request_tokens` / `bytes_per_token` checks (`validate.go:51-55`) to `[classifier]` with the section name in their messages
 - [x] `checkLimits` takes `config.Classifier`; the `[agrouter]` prefix in its error (`router.go:63`) and in the budget error (`question.go:322`) becomes `[classifier]`
 - [x] `ResolveAPIKey` reads `Classifier`. `EnvAPIKey` keeps its current name until Task 4, so `pkg/runner`'s `TestChildEnv` (`runner_test.go:251-257`) stays green and the key is still stripped from children
-- [x] update `.agrouter/config` to the new `[classifier]` section
+- [x] leave `.agrouter/config` on the old keys (rolled back: the ralphex session's installed `agrouter` reads it)
 - [x] write the `[classifier]` block with the moved sizing keys and their comments, the Jev-only `long_context` note and the commented OpenAI Luna example in `defaults/config`; drop the moved keys from the `[agrouter]` block and its key reference (`install.go` needs no change: it comments out the embedded config generically, `pkg/config/install.go:28-33`)
 - [x] move the field at the call sites in `cmd/agrouter/app.go` and `pkg/router`, and in all their tests, so the tree compiles and tests pass (no renames there yet)
 - [x] write tests: `[classifier]` loading and layering for all six keys, key precedence (flag > env > local > global > embedded)
@@ -256,6 +256,9 @@ Reason codes: `classifier_no_key`, `classifier_unauthorized`, `classifier_timeou
 - [ ] verify coverage stays 80%+ per package
 
 ### Task 7: [Final] Update documentation
+
+Leave `.agrouter/config` as it is (see Context).
+
 - [ ] README: `[classifier]` section with the sizing keys, OpenAI Luna example, new flag/env, `classifier_*` reason codes (no migration notes)
 - [ ] CLAUDE.md and AGENTS.md: `pkg/classifier` layout line, `router.Classifier`, `classifier` sentinels, env var, the no-jev guard rule, and the "routing request size is configured" rule naming `[classifier] request_tokens`/`bytes_per_token` instead of `[agrouter]`
 - [ ] move this plan to `docs/plans/completed/`
@@ -264,5 +267,6 @@ Reason codes: `classifier_no_key`, `classifier_unauthorized`, `classifier_timeou
 *Items requiring manual intervention or external systems - no checkboxes, informational only*
 
 **Manual verification:**
+- after installing the new build (`go install ./cmd/agrouter`), move `.agrouter/config` to the `[classifier]` section (copy the block from `pkg/config/defaults/config`), so ralphex keeps working with the new binary
 - run `make eval-routing` against Jev with `AGROUTER_CLASSIFIER_API_KEY` to confirm nothing changed on the wire
 - try the OpenAI Luna example against the live endpoint. Public reports say OpenAI's Decisions API takes `input` and a `questions` *array*, while agrouter sends `state` and a `questions` *map*. If they differ, Luna needs a request adapter, which would be a separate plan
