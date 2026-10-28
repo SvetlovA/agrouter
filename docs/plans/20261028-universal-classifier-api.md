@@ -195,15 +195,15 @@ Reason codes: `classifier_no_key`, `classifier_unauthorized`, `classifier_timeou
 - Modify: every `pkg/jev` import: `cmd/agrouter/{app,reason}.go` (`reason.go:7`) and cmd tests, `pkg/router/*.go` and tests, `pkg/router/mocks/jev_client.go:8` (import path only; the mock is renamed in Task 3), `pkg/router/eval_test.go:26` (constructor)
 - Modify: `pkg/catalog/catalog.go` (comment and error text only, `:13`, `:53`), `pkg/catalog/catalog_test.go` (`:144` asserts the old text)
 
-- [ ] `git mv pkg/jev pkg/classifier`, package `classifier`; update every import listed above so the tree stays green
-- [ ] remove `DefaultURL`; `New(url, key string)` sets `Client.URL`
-- [ ] in `cmd/agrouter/app.go` rename `newJev`/`newJevClient` (`:42`, `:59`, `:65-66`) to `newClassifier`/`newClassifierClient` and thread the url through the injected factory: `func(url, key string, longContext bool)`; the call at `:264` passes `cfg.Classifier.URL`
-- [ ] neutral sentinel texts (`ErrNoKey`: "no classifier API key") and godoc; comment the long-context header and `Limits` with TypeSafe wording (they are TypeSafe's), and state that the startup limit check applies to every endpoint
-- [ ] neutralize the `jev:` error prefixes in the client (`client.go:101,160,170,438,444,448`) and their assertions (`client_test.go:533-534`)
-- [ ] `catalog.MaxOptions` comment and error text say "the classifier's limit"; update `catalog_test.go:144`
-- [ ] update tests: client uses the configured URL (`httptest` server), the factory receives the configured url, sentinel matching unchanged
-- [ ] `go vet -tags eval ./pkg/router` passes (`eval_test.go` is not compiled by `make test`)
-- [ ] run tests - must pass before next task
+- [x] `git mv pkg/jev pkg/classifier`, package `classifier`; update every import listed above so the tree stays green
+- [x] remove `DefaultURL`; `New(url, key string)` sets `Client.URL`
+- [x] in `cmd/agrouter/app.go` rename `newJev`/`newJevClient` (`:42`, `:59`, `:65-66`) to `newClassifier`/`newClassifierClient` and thread the url through the injected factory: `func(url, key string, longContext bool)`; the call at `:264` passes `cfg.Classifier.URL`
+- [x] neutral sentinel texts (`ErrNoKey`: "no classifier API key") and godoc; comment the long-context header and `Limits` with TypeSafe wording (they are TypeSafe's), and state that the startup limit check applies to every endpoint
+- [x] neutralize the `jev:` error prefixes in the client (`client.go:101,160,170,438,444,448`) and their assertions (`client_test.go:533-534`)
+- [x] `catalog.MaxOptions` comment and error text say "the classifier's limit"; update `catalog_test.go:144`
+- [x] update tests: client uses the configured URL (`httptest` server), the factory receives the configured url, sentinel matching unchanged
+- [x] `go vet -tags eval ./pkg/router` passes (`eval_test.go` is not compiled by `make test`)
+- [x] run tests - must pass before next task
 
 ### Task 3: Rename the router's client interface
 

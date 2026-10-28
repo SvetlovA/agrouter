@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/config"
-	"github.com/SvetlovA/agrouter/pkg/jev"
 )
 
 // TestEvalRouting routes every case of testdata/routing against the real Jev and reports accuracy,
@@ -23,7 +23,7 @@ func TestEvalRouting(t *testing.T) {
 		t.Skip(config.EnvAPIKey + " is not set")
 	}
 	cfg, cat := embedded(t)
-	r, err := New(cfg, cat, jev.New(key))
+	r, err := New(cfg, cat, classifier.New(cfg.Classifier.URL, key))
 	require.NoError(t, err)
 	cases, err := loadEvalCases(evalDir, cat)
 	require.NoError(t, err)

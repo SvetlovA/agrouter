@@ -27,9 +27,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/SvetlovA/agrouter/cmd/agrouter/mocks"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/config"
 	"github.com/SvetlovA/agrouter/pkg/config/defaults"
-	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/readiness"
 	"github.com/SvetlovA/agrouter/pkg/router"
 	"github.com/SvetlovA/agrouter/pkg/runner"
@@ -140,11 +140,11 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 
 	answers := map[string]any{}
 	for id, q := range req.Questions {
-		if q.Type == jev.TypeNoul {
+		if q.Type == classifier.TypeNoul {
 			answers[id] = map[string]any{"type": q.Type, "noul": 0.5}
 			continue
 		}
-		if q.Type == jev.TypeScore {
+		if q.Type == classifier.TypeScore {
 			answer, err := fakeScoreAnswer(q.Criteria, level)
 			if err != nil {
 				f.t.Errorf("fake jev: %v", err)
@@ -260,7 +260,7 @@ func fakeScoreAnswer(criteria json.RawMessage, level string) (map[string]any, er
 			probs[key] = score - float64(low)
 		}
 	}
-	return map[string]any{"type": jev.TypeScore, "score": score, "legend": legend, "probabilities": probs, "confidence": 0.9}, nil
+	return map[string]any{"type": classifier.TypeScore, "score": score, "legend": legend, "probabilities": probs, "confidence": 0.9}, nil
 }
 
 func (f *fakeJev) requests() []string {
@@ -361,10 +361,8 @@ func (e *env) app(stdin io.Reader, stdout, stderr io.Writer, child CommandRunner
 		getenv:   os.Getenv,
 		workDir:  e.workDir,
 		embedded: defaults.Config,
-		newJev: func(key string, longContext bool) router.JevClient {
-			c := newJevClient(key, longContext)
-			c.URL = e.jev.srv.URL
-			return c
+		newClassifier: func(_, key string, longContext bool) router.JevClient {
+			return newClassifierClient(e.jev.srv.URL, key, longContext)
 		},
 		runner:  child,
 		checker: e.checker,
@@ -590,9 +588,10 @@ func TestApp_Decision(t *testing.T) {
 func TestNewApp_LongContextReachesClient(t *testing.T) {
 	a := newApp(nil, io.Discard, io.Discard)
 	for _, want := range []bool{false, true} {
-		c, ok := a.newJev("key", want).(*jev.Client)
+		c, ok := a.newClassifier("http://classifier.test", "key", want).(*classifier.Client)
 		require.True(t, ok)
 		assert.Equal(t, want, c.LongContext)
+		assert.Equal(t, "http://classifier.test", c.URL)
 	}
 }
 
@@ -660,10 +659,10 @@ func TestApp_ClassifierAPIKeyPrecedence(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			a := e.app(nil, &stdout, &stderr, runner.Runner{})
 			var keys []string
-			factory := a.newJev
-			a.newJev = func(key string, longContext bool) router.JevClient {
+			factory := a.newClassifier
+			a.newClassifier = func(url, key string, longContext bool) router.JevClient {
 				keys = append(keys, key)
-				return factory(key, longContext)
+				return factory(url, key, longContext)
 			}
 
 			code := a.run(append(slices.Clone(tc.argv), "fix the typo in README"))

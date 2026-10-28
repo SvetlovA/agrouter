@@ -14,9 +14,9 @@ import (
 
 	"github.com/SvetlovA/agrouter/pkg/args"
 	"github.com/SvetlovA/agrouter/pkg/catalog"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/config"
 	"github.com/SvetlovA/agrouter/pkg/config/defaults"
-	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 	"github.com/SvetlovA/agrouter/pkg/readiness"
 	"github.com/SvetlovA/agrouter/pkg/router"
@@ -35,15 +35,15 @@ type app struct {
 	stdout, stderr io.Writer
 	// childStderr is the child's stderr: the console as given, never the mirror log's copy. run sets
 	// it, and swaps stderr for the copy, for its duration.
-	childStderr io.Writer
-	getenv      func(string) string
-	workDir     string
-	embedded    []byte
-	newJev      func(key string, longContext bool) router.JevClient
-	runner      CommandRunner
-	checker     ReadinessChecker // exec only
-	now         func() time.Time // nil means time.Now
-	debug       *debugLog        // nil unless AGROUTER_DEBUG=1
+	childStderr   io.Writer
+	getenv        func(string) string
+	workDir       string
+	embedded      []byte
+	newClassifier func(url, key string, longContext bool) router.JevClient
+	runner        CommandRunner
+	checker       ReadinessChecker // exec only
+	now           func() time.Time // nil means time.Now
+	debug         *debugLog        // nil unless AGROUTER_DEBUG=1
 }
 
 // newApp returns an app wired to the real process environment.
@@ -56,15 +56,18 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer) *app {
 		getenv:   os.Getenv,
 		workDir:  wd,
 		embedded: defaults.Config,
-		newJev:   func(key string, longContext bool) router.JevClient { return newJevClient(key, longContext) },
-		runner:   runner.Runner{},
-		checker:  readiness.Checker{Dir: wd},
+		newClassifier: func(url, key string, longContext bool) router.JevClient {
+			return newClassifierClient(url, key, longContext)
+		},
+		runner:  runner.Runner{},
+		checker: readiness.Checker{Dir: wd},
 	}
 }
 
-// newJevClient is the Jev client for key, sending the long-context header when longContext is set.
-func newJevClient(key string, longContext bool) *jev.Client {
-	c := jev.New(key)
+// newClassifierClient is the classifier client for the endpoint at url and key, sending the
+// long-context header when longContext is set.
+func newClassifierClient(url, key string, longContext bool) *classifier.Client {
+	c := classifier.New(url, key)
 	c.LongContext = longContext
 	return c
 }
@@ -261,7 +264,7 @@ func (a *app) setup(req *args.Request) (*config.Config, *catalog.Catalog, *route
 	}
 	key, source := config.ResolveAPIKey(req.APIKey.Value, req.APIKey.Set, a.getenv(config.EnvAPIKey), cfg.Classifier)
 	a.debug.apiKey(key, source)
-	rt, err := router.New(cfg, cat, a.newJev(key, cfg.Classifier.LongContext))
+	rt, err := router.New(cfg, cat, a.newClassifier(cfg.Classifier.URL, key, cfg.Classifier.LongContext))
 	if err != nil {
 		return nil, nil, nil, err
 	}

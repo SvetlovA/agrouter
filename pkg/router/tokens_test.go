@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/SvetlovA/agrouter/pkg/args"
-	"github.com/SvetlovA/agrouter/pkg/jev"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 	"github.com/SvetlovA/agrouter/pkg/router/mocks"
 )
@@ -29,9 +29,9 @@ func TestStageTokensWholeState(t *testing.T) {
 	}
 
 	t.Run("each stage carries its own request's estimate and reported count", func(t *testing.T) {
-		client := &mocks.JevClientMock{AskFunc: reporting(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+		client := &mocks.JevClientMock{AskFunc: reporting(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 			return certain(req, "strong@high"), nil
-		}, func(req jev.Request) *int {
+		}, func(req classifier.Request) *int {
 			id, _, _ := stageAsked(req)
 			return new(reported[id])
 		})}
@@ -80,19 +80,19 @@ func TestStageTokensPooledChunks(t *testing.T) {
 	// the provider reports the chunk's position, and later chunks answer first, so a count that
 	// followed the answer order instead of its own request would land on the wrong chunk
 	var mu sync.Mutex
-	sent := map[string]map[int]jev.Request{}
-	client := &mocks.JevClientMock{AskFunc: reporting(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+	sent := map[string]map[int]classifier.Request{}
+	client := &mocks.JevClientMock{AskFunc: reporting(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 		st := req.State.(prompt.ChunkState)
 		time.Sleep(time.Duration(n-st.Chunk.Index) * 5 * time.Millisecond)
 		id, _, _ := stageAsked(req)
 		mu.Lock()
 		if sent[id] == nil {
-			sent[id] = map[int]jev.Request{}
+			sent[id] = map[int]classifier.Request{}
 		}
 		sent[id][st.Chunk.Index] = req
 		mu.Unlock()
 		return stageAnswers(req, "strong@high", 0.8, 0.5), nil
-	}, func(req jev.Request) *int {
+	}, func(req classifier.Request) *int {
 		id, _, _ := stageAsked(req)
 		if id == LevelEffort {
 			return nil // the provider reported nothing for this stage's requests
@@ -139,15 +139,15 @@ func TestComplexityTokens(t *testing.T) {
 	require.Greater(t, len(chunks), 2)
 
 	var mu sync.Mutex
-	sent := map[int]jev.Request{}
-	client := &mocks.JevClientMock{AskFunc: reporting(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+	sent := map[int]classifier.Request{}
+	client := &mocks.JevClientMock{AskFunc: reporting(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 		st := req.State.(prompt.DocChunkState)
 		time.Sleep(time.Duration(len(chunks)-st.Doc.Index) * 5 * time.Millisecond)
 		mu.Lock()
 		sent[st.Doc.Index] = req
 		mu.Unlock()
 		return docAnswers(5, 0.5), nil
-	}, func(req jev.Request) *int {
+	}, func(req classifier.Request) *int {
 		idx := req.State.(prompt.DocChunkState).Doc.Index
 		if idx == 2 {
 			return nil
@@ -172,9 +172,9 @@ func TestComplexityTokens(t *testing.T) {
 	}
 
 	t.Run("the whole-docs request", func(t *testing.T) {
-		client := &mocks.JevClientMock{AskFunc: reporting(func(context.Context, jev.Request) (map[string]jev.Answer, error) {
+		client := &mocks.JevClientMock{AskFunc: reporting(func(context.Context, classifier.Request) (map[string]classifier.Answer, error) {
 			return docAnswers(6, 0.9), nil
-		}, func(jev.Request) *int { return new(777) })}
+		}, func(classifier.Request) *int { return new(777) })}
 		r := newRouter(t, cfg, cat, client)
 		got, err := r.complexity(context.Background(), &prompt.Result{Docs: []string{"# Shop\n"}})
 		require.NoError(t, err)

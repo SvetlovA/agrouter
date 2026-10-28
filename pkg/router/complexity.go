@@ -6,7 +6,7 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/SvetlovA/agrouter/pkg/jev"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 )
 
@@ -62,35 +62,35 @@ func (r *Router) complexity(ctx context.Context, captured *prompt.Result) (*Comp
 }
 
 // askDocs sends one doc request and scores its validated answers.
-func (r *Router) askDocs(ctx context.Context, state any, questions map[string]jev.Question) (DocScore, error) {
-	resp, err := r.jev.Ask(ctx, jev.Request{Model: r.cfg.Classifier.Model, State: state, Questions: questions})
+func (r *Router) askDocs(ctx context.Context, state any, questions map[string]classifier.Question) (DocScore, error) {
+	resp, err := r.jev.Ask(ctx, classifier.Request{Model: r.cfg.Classifier.Model, State: state, Questions: questions})
 	if err != nil {
 		return DocScore{}, fmt.Errorf("doc request: %w", r.sized(err, state, questions))
 	}
 	answers := resp.Answers
 	level, ok := answers[questionComplexity]
 	if !ok {
-		return DocScore{}, fmt.Errorf("%w: %q", jev.ErrEmptyAnswer, questionComplexity)
+		return DocScore{}, fmt.Errorf("%w: %q", classifier.ErrEmptyAnswer, questionComplexity)
 	}
 	evidence, ok := answers[questionEvidence]
 	if !ok {
-		return DocScore{}, fmt.Errorf("%w: %q", jev.ErrEmptyAnswer, questionEvidence)
+		return DocScore{}, fmt.Errorf("%w: %q", classifier.ErrEmptyAnswer, questionEvidence)
 	}
 	// the client validates Score answers; also check completeness for alternate JevClient implementations
 	var total float64
 	for i := range complexityLevels {
 		p, ok := level.Probabilities[strconv.Itoa(i)]
 		if !ok {
-			return DocScore{}, fmt.Errorf("%w: no probability for complexity %d", jev.ErrInvalidAnswer, i)
+			return DocScore{}, fmt.Errorf("%w: no probability for complexity %d", classifier.ErrInvalidAnswer, i)
 		}
 		total += p
 	}
 	if total <= 0 {
-		return DocScore{}, fmt.Errorf("%w: complexity probabilities sum to %g", jev.ErrInvalidAnswer, total)
+		return DocScore{}, fmt.Errorf("%w: complexity probabilities sum to %g", classifier.ErrInvalidAnswer, total)
 	}
 	maxLevel := float64(len(complexityLevels) - 1)
 	if math.IsNaN(level.Score) || math.IsInf(level.Score, 0) || level.Score < 0 || level.Score > maxLevel {
-		return DocScore{}, fmt.Errorf("%w: complexity score outside the level range", jev.ErrInvalidAnswer)
+		return DocScore{}, fmt.Errorf("%w: complexity score outside the level range", classifier.ErrInvalidAnswer)
 	}
 	return DocScore{Score: level.Score * 10 / maxLevel, Confidence: level.Confidence, Evidence: evidence.Noul,
 		Estimated: r.estimate(state, questions), Reported: resp.InputTokens}, nil

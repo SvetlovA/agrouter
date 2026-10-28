@@ -10,7 +10,7 @@ import (
 	"github.com/SvetlovA/agrouter/pkg/config"
 )
 
-// MaxOptions is Jev's limit on the options of one Choice question.
+// MaxOptions is the classifier's limit on the options of one Choice question.
 const MaxOptions = 255
 
 // idSep separates the model section from the effort in an option id; it is reserved in section names.
@@ -50,7 +50,7 @@ func Build(cfg *config.Config) (*Catalog, error) {
 	case n == 0:
 		return nil, errors.New("config: no enabled options: enable at least one [model.*] section")
 	case n > MaxOptions:
-		return nil, fmt.Errorf("config: %d options, more than Jev's limit of %d: disable models with enabled = false",
+		return nil, fmt.Errorf("config: %d options, more than the classifier's limit of %d: disable models with enabled = false",
 			n, MaxOptions)
 	}
 	return c, nil

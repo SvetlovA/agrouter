@@ -1,4 +1,4 @@
-package jev
+package classifier
 
 import (
 	"bytes"
@@ -42,21 +42,20 @@ func relevanceQuestion() Question {
 
 func testRequest() Request {
 	return Request{
-		Model:     "jev-latest",
+		Model:     "test-classifier",
 		State:     map[string]string{"prompt": "fix it"},
 		Questions: map[string]Question{"route": routeQuestion()},
 	}
 }
 
-const okBody = `{"model":"jev-1.13.0","answers":{"route":{"type":"choice","choice":"a",` +
+const okBody = `{"model":"test-classifier-1","answers":{"route":{"type":"choice","choice":"a",` +
 	`"probabilities":{"a":0.7,"b@high":0.3},"confidence":0.6}},"usage":{"input_tokens":10,"output_tokens":1}}`
 
 func newTestClient(t *testing.T, h http.HandlerFunc) *Client {
 	t.Helper()
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	c := New(testKey)
-	c.URL = srv.URL
+	c := New(srv.URL, testKey)
 	c.MinBackoff = time.Millisecond
 	c.MaxBackoff = 5 * time.Millisecond
 	return c
@@ -104,7 +103,7 @@ func TestAskOK(t *testing.T) {
 	}}, resp.Answers)
 	assert.Equal(t, "Bearer "+testKey, got.auth)
 	assert.Equal(t, "application/json", got.contentType)
-	assert.Equal(t, "jev-latest", got.body["model"])
+	assert.Equal(t, "test-classifier", got.body["model"])
 	assert.Equal(t, map[string]any{"prompt": "fix it"}, got.body["state"])
 	assert.NotContains(t, got.body, "key")
 }
@@ -420,8 +419,7 @@ func TestAskRetryCutByDeadlineReportsOverload(t *testing.T) {
 }
 
 func TestAskNetworkError(t *testing.T) {
-	c := New(testKey)
-	c.URL = "http://127.0.0.1:1/" + testKey
+	c := New("http://127.0.0.1:1/"+testKey, testKey)
 	_, err := c.Ask(t.Context(), testRequest())
 	require.ErrorIs(t, err, ErrTransport)
 	require.NotErrorIs(t, err, ErrMalformed)
@@ -530,8 +528,8 @@ func TestAskTruncatesErrorBody(t *testing.T) {
 	var serr *StatusError
 	require.ErrorAs(t, err, &serr)
 	assert.Len(t, serr.Body, maxErrorBody+3)
-	assert.Equal(t, "jev: HTTP 500: "+serr.Body, serr.Error())
-	assert.Equal(t, "jev: HTTP 502", (&StatusError{Status: 502}).Error())
+	assert.Equal(t, "classifier: HTTP 500: "+serr.Body, serr.Error())
+	assert.Equal(t, "classifier: HTTP 502", (&StatusError{Status: 502}).Error())
 }
 
 func TestAskMalformed(t *testing.T) {
@@ -656,22 +654,21 @@ func TestAskUnsupportedQuestionType(t *testing.T) {
 }
 
 func TestAskEncodeError(t *testing.T) {
-	c := New(testKey)
+	c := New("http://classifier.test", testKey)
 	_, err := c.Ask(t.Context(), Request{State: math.Inf(1)})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "encode request")
 }
 
 func TestAskBadURL(t *testing.T) {
-	c := New(testKey)
-	c.URL = "://bad"
+	c := New("://bad", testKey)
 	_, err := c.Ask(t.Context(), testRequest())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "build request")
 }
 
 func TestDelay(t *testing.T) {
-	c := New(testKey)
+	c := New("http://classifier.test", testKey)
 	c.MinBackoff = 100 * time.Millisecond
 	c.MaxBackoff = time.Second
 	none := http.Header{}
@@ -698,9 +695,24 @@ func TestDelay(t *testing.T) {
 }
 
 func TestWaitCanceled(t *testing.T) {
-	c := New(testKey)
+	c := New("http://classifier.test", testKey)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	assert.False(t, c.wait(ctx, time.Second))
 	assert.True(t, c.wait(t.Context(), time.Millisecond))
+}
+
+func TestNewUsesConfiguredURL(t *testing.T) {
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_, _ = w.Write([]byte(okBody))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL+"/v1/custom", testKey)
+	assert.Equal(t, srv.URL+"/v1/custom", c.URL)
+	_, err := c.Ask(t.Context(), testRequest())
+	require.NoError(t, err)
+	assert.Equal(t, "/v1/custom", path)
 }

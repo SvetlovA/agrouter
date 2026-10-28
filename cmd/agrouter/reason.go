@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/SvetlovA/agrouter/pkg/jev"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/router"
 )
 
@@ -70,24 +70,24 @@ func failureReason(err error) *reasonJSON {
 // transport, since a request cut off by it fails in the transport too.
 func failureCode(err error) string {
 	switch {
-	case errors.Is(err, jev.ErrNoKey):
+	case errors.Is(err, classifier.ErrNoKey):
 		return reasonNoKey
-	case errors.Is(err, jev.ErrUnauthorized):
+	case errors.Is(err, classifier.ErrUnauthorized):
 		return reasonUnauthorized
-	case errors.Is(err, jev.ErrTooLong):
+	case errors.Is(err, classifier.ErrTooLong):
 		return reasonTooLong
 	case errors.Is(err, context.DeadlineExceeded):
 		return reasonTimeout
 	case errors.Is(err, context.Canceled):
 		return reasonCanceled
-	case errors.Is(err, jev.ErrEmptyAnswer):
+	case errors.Is(err, classifier.ErrEmptyAnswer):
 		return reasonEmptyAnswer
-	case errors.Is(err, jev.ErrMalformed):
+	case errors.Is(err, classifier.ErrMalformed):
 		return reasonInvalidAnswer
-	case errors.Is(err, jev.ErrTransport):
+	case errors.Is(err, classifier.ErrTransport):
 		return reasonTransportError
 	}
-	if _, ok := errors.AsType[*jev.StatusError](err); ok {
+	if _, ok := errors.AsType[*classifier.StatusError](err); ok {
 		return reasonAPIError
 	}
 	return reasonNoDecision

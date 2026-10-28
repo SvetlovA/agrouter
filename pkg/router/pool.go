@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/SvetlovA/agrouter/pkg/jev"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 )
 
@@ -52,7 +52,7 @@ type slot = piece[prompt.Chunk, routeAnswer]
 // pooled asks lv's question of every chunk, all at once, and pools the answers over gs, returning
 // the winning group's index. Any chunk failure means Jev cannot decide; a rejected chunk is never resent.
 func (r *Router) pooled(ctx context.Context, el *Eligibility, lv level, gs []group, split *prompt.Split) (int, *Pooled, error) {
-	questions := map[string]jev.Question{
+	questions := map[string]classifier.Question{
 		lv.name:           stageQuestion(r.cfg, lv, chunkGuide, gs, el.effort),
 		questionRelevance: relevanceQuestion(),
 	}
@@ -79,20 +79,20 @@ func (r *Router) pooled(ctx context.Context, el *Eligibility, lv level, gs []gro
 // askChunk sends one chunk request and returns its validated answers, with a probability under
 // question id for every criterion in names.
 func (r *Router) askChunk(ctx context.Context, id string, names []string, anchor prompt.Anchor,
-	questions map[string]jev.Question, c prompt.Chunk) (routeAnswer, error) {
+	questions map[string]classifier.Question, c prompt.Chunk) (routeAnswer, error) {
 	state := prompt.ChunkState{Anchor: anchor, Chunk: c}
-	resp, err := r.jev.Ask(ctx, jev.Request{Model: r.cfg.Classifier.Model, State: state, Questions: questions})
+	resp, err := r.jev.Ask(ctx, classifier.Request{Model: r.cfg.Classifier.Model, State: state, Questions: questions})
 	if err != nil {
 		return routeAnswer{}, fmt.Errorf("chunk request: %w", r.sized(err, state, questions))
 	}
 	answers := resp.Answers
 	route, ok := answers[id]
 	if !ok {
-		return routeAnswer{}, fmt.Errorf("%w: %q", jev.ErrEmptyAnswer, id)
+		return routeAnswer{}, fmt.Errorf("%w: %q", classifier.ErrEmptyAnswer, id)
 	}
 	relevance, ok := answers[questionRelevance]
 	if !ok {
-		return routeAnswer{}, fmt.Errorf("%w: %q", jev.ErrEmptyAnswer, questionRelevance)
+		return routeAnswer{}, fmt.Errorf("%w: %q", classifier.ErrEmptyAnswer, questionRelevance)
 	}
 	scores, err := scoresOf(route, names)
 	if err != nil {

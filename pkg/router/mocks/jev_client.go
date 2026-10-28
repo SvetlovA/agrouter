@@ -5,7 +5,7 @@ package mocks
 
 import (
 	"context"
-	"github.com/SvetlovA/agrouter/pkg/jev"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"sync"
 )
 
@@ -15,7 +15,7 @@ import (
 //
 //		// make and configure a mocked router.JevClient
 //		mockedJevClient := &JevClientMock{
-//			AskFunc: func(ctx context.Context, req jev.Request) (jev.Response, error) {
+//			AskFunc: func(ctx context.Context, req classifier.Request) (classifier.Response, error) {
 //				panic("mock out the Ask method")
 //			},
 //		}
@@ -26,7 +26,7 @@ import (
 //	}
 type JevClientMock struct {
 	// AskFunc mocks the Ask method.
-	AskFunc func(ctx context.Context, req jev.Request) (jev.Response, error)
+	AskFunc func(ctx context.Context, req classifier.Request) (classifier.Response, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -35,20 +35,20 @@ type JevClientMock struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// Req is the req argument value.
-			Req jev.Request
+			Req classifier.Request
 		}
 	}
 	lockAsk sync.RWMutex
 }
 
 // Ask calls AskFunc.
-func (mock *JevClientMock) Ask(ctx context.Context, req jev.Request) (jev.Response, error) {
+func (mock *JevClientMock) Ask(ctx context.Context, req classifier.Request) (classifier.Response, error) {
 	if mock.AskFunc == nil {
 		panic("JevClientMock.AskFunc: method is nil but JevClient.Ask was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		Req jev.Request
+		Req classifier.Request
 	}{
 		Ctx: ctx,
 		Req: req,
@@ -65,11 +65,11 @@ func (mock *JevClientMock) Ask(ctx context.Context, req jev.Request) (jev.Respon
 //	len(mockedJevClient.AskCalls())
 func (mock *JevClientMock) AskCalls() []struct {
 	Ctx context.Context
-	Req jev.Request
+	Req classifier.Request
 } {
 	var calls []struct {
 		Ctx context.Context
-		Req jev.Request
+		Req classifier.Request
 	}
 	mock.lockAsk.RLock()
 	calls = mock.calls.Ask

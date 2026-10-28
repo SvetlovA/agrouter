@@ -8,16 +8,16 @@ import (
 
 	"github.com/SvetlovA/agrouter/pkg/args"
 	"github.com/SvetlovA/agrouter/pkg/catalog"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/config"
-	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 )
 
 //go:generate go tool moq -out mocks/jev_client.go -pkg mocks -skip-ensure . JevClient
 
-// JevClient asks Jev typed questions about a state; *jev.Client implements it.
+// JevClient asks Jev typed questions about a state; *classifier.Client implements it.
 type JevClient interface {
-	Ask(ctx context.Context, req jev.Request) (jev.Response, error)
+	Ask(ctx context.Context, req classifier.Request) (classifier.Response, error)
 }
 
 // ErrCannotDecide means Jev could not decide and more than one CLI is still eligible, so there is
@@ -58,7 +58,7 @@ func New(cfg *config.Config, cat *catalog.Catalog, client JevClient) (*Router, e
 // checkLimits is an error when request_tokens, less providerReserve, would pass the provider's
 // limit for one question or for one whole request in the configured mode.
 func checkLimits(c config.Classifier) error {
-	perQuestion, perRequest := jev.Limits(c.LongContext)
+	perQuestion, perRequest := classifier.Limits(c.LongContext)
 	limit := min(perQuestion, perRequest)
 	if c.RequestTokens > limit-providerReserve {
 		return fmt.Errorf("config: [classifier]: %w: request_tokens = %d, the provider takes %d per request (long_context = %t) less a %d reserve for the estimate, so at most %d",

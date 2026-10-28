@@ -9,7 +9,7 @@ import (
 	"slices"
 
 	"github.com/SvetlovA/agrouter/pkg/catalog"
-	"github.com/SvetlovA/agrouter/pkg/jev"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 )
 
@@ -65,9 +65,9 @@ type Stage struct {
 	// Choice is the criterion name chosen, or the value the options share when the level was skipped:
 	// the CLI, the model section (the model name under passthrough), or the effort, empty without one.
 	Choice  string
-	Skipped bool        // one group: Jev not asked
-	Answer  *jev.Answer // the whole-state answer; nil when skipped or pooled
-	Pooled  *Pooled     // the split-state answers; nil otherwise
+	Skipped bool               // one group: Jev not asked
+	Answer  *classifier.Answer // the whole-state answer; nil when skipped or pooled
+	Pooled  *Pooled            // the split-state answers; nil otherwise
 	// Estimated and Reported are the tokens of the whole-state request: agrouter's estimate and the
 	// provider's input-token count, nil when it gave none. Both are unset for a skipped or pooled stage.
 	Estimated int
@@ -174,14 +174,14 @@ func (r *Router) stage(ctx context.Context, el *Eligibility, lv level, gs []grou
 
 // ask sends state in one Choice request over gs and returns the chosen group's index and the stage it decided.
 func (r *Router) ask(ctx context.Context, el *Eligibility, lv level, gs []group, state prompt.State) (int, Stage, error) {
-	questions := map[string]jev.Question{lv.name: stageQuestion(r.cfg, lv, wholeGuide, gs, el.effort)}
-	resp, err := r.jev.Ask(ctx, jev.Request{Model: r.cfg.Classifier.Model, State: state, Questions: questions})
+	questions := map[string]classifier.Question{lv.name: stageQuestion(r.cfg, lv, wholeGuide, gs, el.effort)}
+	resp, err := r.jev.Ask(ctx, classifier.Request{Model: r.cfg.Classifier.Model, State: state, Questions: questions})
 	if err != nil {
 		return 0, Stage{}, fmt.Errorf("route request: %w", r.sized(err, state, questions))
 	}
 	answer, ok := resp.Answers[lv.name]
 	if !ok {
-		return 0, Stage{}, fmt.Errorf("%w: %q", jev.ErrEmptyAnswer, lv.name)
+		return 0, Stage{}, fmt.Errorf("%w: %q", classifier.ErrEmptyAnswer, lv.name)
 	}
 	names := groupLabels(gs)
 	if _, err := scoresOf(answer, names); err != nil {
@@ -193,7 +193,7 @@ func (r *Router) ask(ctx context.Context, el *Eligibility, lv level, gs []group,
 }
 
 // estimate is the tokens agrouter counts in a request carrying state and questions, both serialized.
-func (r *Router) estimate(state any, questions map[string]jev.Question) int {
+func (r *Router) estimate(state any, questions map[string]classifier.Question) int {
 	return r.budget.Tokens(encodedLen(state) + encodedLen(questions))
 }
 
@@ -208,8 +208,8 @@ func encodedLen(v any) int {
 
 // sized adds to an over-length error from the provider what the user needs to size requests: the
 // estimate of the whole request against request_tokens. Other errors pass through.
-func (r *Router) sized(err error, state any, questions map[string]jev.Question) error {
-	if !errors.Is(err, jev.ErrTooLong) {
+func (r *Router) sized(err error, state any, questions map[string]classifier.Question) error {
+	if !errors.Is(err, classifier.ErrTooLong) {
 		return err
 	}
 	return fmt.Errorf("estimated %d tokens, request_tokens is %d: %w", r.estimate(state, questions), r.budget.RequestTokens, err)
@@ -217,15 +217,15 @@ func (r *Router) sized(err error, state any, questions map[string]jev.Question) 
 
 // scoresOf returns answer's probability for every name, in order. A missing probability, or a
 // choice outside names, is malformed.
-func scoresOf(answer jev.Answer, names []string) ([]float64, error) {
+func scoresOf(answer classifier.Answer, names []string) ([]float64, error) {
 	if !slices.Contains(names, answer.Choice) {
-		return nil, fmt.Errorf("%w: choice %q is not among the criteria sent", jev.ErrInvalidAnswer, answer.Choice)
+		return nil, fmt.Errorf("%w: choice %q is not among the criteria sent", classifier.ErrInvalidAnswer, answer.Choice)
 	}
 	scores := make([]float64, len(names))
 	for i, name := range names {
 		p, ok := answer.Probabilities[name]
 		if !ok {
-			return nil, fmt.Errorf("%w: no probability for %q", jev.ErrInvalidAnswer, name)
+			return nil, fmt.Errorf("%w: no probability for %q", classifier.ErrInvalidAnswer, name)
 		}
 		scores[i] = p
 	}

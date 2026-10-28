@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/SvetlovA/agrouter/pkg/catalog"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/config"
-	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 )
 
@@ -133,15 +133,15 @@ type instructions struct {
 // policy and the options below the criteria, once: by CLI for the cli stage, by model otherwise.
 type stageInstructions struct {
 	instructions
-	CLIs    jev.Criteria `json:"clis,omitempty"`
-	Models  jev.Criteria `json:"models,omitempty"`
-	Efforts jev.Criteria `json:"efforts"`
+	CLIs    classifier.Criteria `json:"clis,omitempty"`
+	Models  classifier.Criteria `json:"models,omitempty"`
+	Efforts classifier.Criteria `json:"efforts"`
 }
 
 // cliEntry describes one CLI of the cli stage and the models it can run.
 type cliEntry struct {
-	Description string       `json:"description"`
-	Models      jev.Criteria `json:"models"`
+	Description string              `json:"description"`
+	Models      classifier.Criteria `json:"models"`
 }
 
 // modelEntry describes one model, under its model stage criterion name, and the effort labels it runs at.
@@ -152,10 +152,10 @@ type modelEntry struct {
 
 // stageQuestion is lv's Choice over gs, whose options must all come from cfg, for a state described
 // by guide. effort is the caller's passed-through effort, used for options without one of their own.
-func stageQuestion(cfg *config.Config, lv level, guide string, gs []group, effort string) jev.Question {
+func stageQuestion(cfg *config.Config, lv level, guide string, gs []group, effort string) classifier.Question {
 	in := stageInstructions{Question: lv.question, State: guide, Policy: cfg.Agrouter.RoutingPolicy,
-		Efforts: jev.Criteria{}}
-	criteria := make(jev.Criteria, 0, len(gs))
+		Efforts: classifier.Criteria{}}
+	criteria := make(classifier.Criteria, 0, len(gs))
 	var opts []catalog.Option
 	for _, g := range gs {
 		o := g.opts[0]
@@ -168,32 +168,32 @@ func stageQuestion(cfg *config.Config, lv level, guide string, gs []group, effor
 		default:
 			c.Effort = optionEffort(o, effort)
 		}
-		criteria = append(criteria, jev.Criterion{Name: g.label, Value: c})
+		criteria = append(criteria, classifier.Criterion{Name: g.label, Value: c})
 		opts = append(opts, g.opts...)
 	}
 	t := newTree(cfg, opts, effort)
 	for _, cli := range t.clis {
 		if lv.name == LevelCLI {
 			c, _ := cfg.CLIByName(cli)
-			in.CLIs = append(in.CLIs, jev.Criterion{Name: cli, Value: cliEntry{Description: c.Description,
+			in.CLIs = append(in.CLIs, classifier.Criterion{Name: cli, Value: cliEntry{Description: c.Description,
 				Models: t.modelCriteria(cli)}})
 		} else {
 			in.Models = append(in.Models, t.modelCriteria(cli)...)
 		}
 		if len(t.efforts[cli]) > 0 {
-			in.Efforts = append(in.Efforts, jev.Criterion{Name: cli, Value: t.efforts[cli]})
+			in.Efforts = append(in.Efforts, classifier.Criterion{Name: cli, Value: t.efforts[cli]})
 		}
 	}
-	return jev.Question{Type: jev.TypeChoice, Instructions: in, Criteria: criteria}
+	return classifier.Question{Type: classifier.TypeChoice, Instructions: in, Criteria: criteria}
 }
 
 // tree is the options below a stage's criteria, in catalog order: each CLI's models with their
 // effort labels, and each CLI's effort descriptions.
 type tree struct {
 	clis    []string
-	models  map[string][]string      // cli -> model stage criterion names (modelLabel)
-	entries map[modelKey]*modelEntry // cli and model stage criterion name -> its entry
-	efforts map[string]jev.Criteria  // cli -> its effort descriptions
+	models  map[string][]string            // cli -> model stage criterion names (modelLabel)
+	entries map[modelKey]*modelEntry       // cli and model stage criterion name -> its entry
+	efforts map[string]classifier.Criteria // cli -> its effort descriptions
 }
 
 // modelKey is a model stage criterion under its CLI; a struct, since names may hold any separator.
@@ -204,7 +204,7 @@ func newTree(cfg *config.Config, opts []catalog.Option, effort string) *tree {
 	for _, m := range cfg.Models {
 		models[m.Name] = m
 	}
-	t := &tree{models: map[string][]string{}, entries: map[modelKey]*modelEntry{}, efforts: map[string]jev.Criteria{}}
+	t := &tree{models: map[string][]string{}, entries: map[modelKey]*modelEntry{}, efforts: map[string]classifier.Criteria{}}
 	for _, o := range opts {
 		if _, ok := t.models[o.CLI]; !ok {
 			t.clis = append(t.clis, o.CLI)
@@ -224,33 +224,33 @@ func newTree(cfg *config.Config, opts []catalog.Option, effort string) *tree {
 		}
 		e.Efforts = append(e.Efforts, label)
 		if !has(t.efforts[o.CLI], label) {
-			t.efforts[o.CLI] = append(t.efforts[o.CLI], jev.Criterion{Name: label, Value: effortDescription(cfg, o.CLI, label)})
+			t.efforts[o.CLI] = append(t.efforts[o.CLI], classifier.Criterion{Name: label, Value: effortDescription(cfg, o.CLI, label)})
 		}
 	}
 	return t
 }
 
 // modelCriteria lists cli's models with their entries.
-func (t *tree) modelCriteria(cli string) jev.Criteria {
-	out := make(jev.Criteria, 0, len(t.models[cli]))
+func (t *tree) modelCriteria(cli string) classifier.Criteria {
+	out := make(classifier.Criteria, 0, len(t.models[cli]))
 	for _, name := range t.models[cli] {
-		out = append(out, jev.Criterion{Name: name, Value: *t.entries[modelKey{cli, name}]})
+		out = append(out, classifier.Criterion{Name: name, Value: *t.entries[modelKey{cli, name}]})
 	}
 	return out
 }
 
 // relevanceQuestion is the Noul asked beside the stage question in a chunk request.
-func relevanceQuestion() jev.Question {
-	return jev.Question{Type: jev.TypeNoul, Instructions: relevanceText, Criteria: jev.Criteria{
+func relevanceQuestion() classifier.Question {
+	return classifier.Question{Type: classifier.TypeNoul, Instructions: relevanceText, Criteria: classifier.Criteria{
 		{Name: "true", Value: relevanceTrue},
 		{Name: "false", Value: relevanceFalse},
 	}}
 }
 
 // complexityQuestion is the Score over the ordered levels asked in every doc request.
-func complexityQuestion(policy string) jev.Question {
-	return jev.Question{
-		Type:         jev.TypeScore,
+func complexityQuestion(policy string) classifier.Question {
+	return classifier.Question{
+		Type:         classifier.TypeScore,
 		Instructions: instructions{Question: complexityText, State: docGuide, Policy: policy},
 		Levels:       append([]string(nil), complexityLevels[:]...),
 	}
@@ -258,16 +258,16 @@ func complexityQuestion(policy string) jev.Question {
 
 // evidenceQuestion is the Noul asked beside the complexity question: whether the doc text says
 // anything about the project, so the reduce weighs chunks by it.
-func evidenceQuestion() jev.Question {
-	return jev.Question{Type: jev.TypeNoul, Instructions: evidenceText, Criteria: jev.Criteria{
+func evidenceQuestion() classifier.Question {
+	return classifier.Question{Type: classifier.TypeNoul, Instructions: evidenceText, Criteria: classifier.Criteria{
 		{Name: "true", Value: evidenceTrue},
 		{Name: "false", Value: evidenceFalse},
 	}}
 }
 
 // complexityQuestions are the questions of every doc request.
-func complexityQuestions(ag config.Agrouter) map[string]jev.Question {
-	return map[string]jev.Question{
+func complexityQuestions(ag config.Agrouter) map[string]classifier.Question {
+	return map[string]classifier.Question{
 		questionComplexity: complexityQuestion(ag.ComplexityPolicy),
 		questionEvidence:   evidenceQuestion(),
 	}
@@ -296,7 +296,7 @@ func effortDescription(cfg *config.Config, cli, effort string) string {
 	return descEffortPassed
 }
 
-func has(obj jev.Criteria, name string) bool {
+func has(obj classifier.Criteria, name string) bool {
 	for _, c := range obj {
 		if c.Name == name {
 			return true
@@ -342,8 +342,8 @@ func largestStage(cfg *config.Config, cat *catalog.Catalog, guide string) int {
 }
 
 // questionLen is the serialized size of one "id": question entry in the questions object.
-func questionLen(id string, q jev.Question) int {
-	data, err := json.Marshal(map[string]jev.Question{id: q})
+func questionLen(id string, q classifier.Question) int {
+	data, err := json.Marshal(map[string]classifier.Question{id: q})
 	if err != nil {
 		panic(fmt.Sprintf("router: encode question %q: %v", id, err)) // plain data, cannot fail
 	}

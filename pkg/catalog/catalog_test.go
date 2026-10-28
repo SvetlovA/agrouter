@@ -145,7 +145,7 @@ func TestOptionLimit(t *testing.T) {
 
 	_, err = build(catalog.MaxOptions + 1)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "256 options, more than Jev's limit of 255")
+	assert.Contains(t, err.Error(), "256 options, more than the classifier's limit of 255")
 
 	// the limit counts options, not models: 52 models × 5 efforts = 260
 	cfg := &config.Config{}
