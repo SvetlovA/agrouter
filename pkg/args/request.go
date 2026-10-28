@@ -23,7 +23,7 @@ type Optional struct {
 type Request struct {
 	Mode       Mode
 	CLI        string   // the exec CLI, or --cli in decision mode; empty routes across every CLI
-	APIKey     Optional // --jev-api-key; Set with an empty Value clears any other key
+	APIKey     Optional // --api-key; Set with an empty Value clears any other key
 	Model      string   // --model constraint, as given (resolved against the catalog later)
 	Effort     string   // --effort constraint, as given
 	PromptFlag Optional // -p, --prompt, --print

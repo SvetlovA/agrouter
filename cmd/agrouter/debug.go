@@ -152,9 +152,9 @@ func (l *debugLog) decision(d router.Decision) {
 	}
 	switch {
 	case d.Undecided != nil:
-		l.printf("jev failed: %v; running %s with the caller's fixed values", d.Undecided, d.CLI)
+		l.printf("classifier failed: %v; running %s with the caller's fixed values", d.Undecided, d.CLI)
 	case !asked && d.OptionID != "":
-		l.printf("one option, jev not asked: %s", d.OptionID)
+		l.printf("one option, classifier not asked: %s", d.OptionID)
 	}
 }
 

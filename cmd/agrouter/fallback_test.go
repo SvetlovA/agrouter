@@ -44,11 +44,11 @@ func chosenBy(source, value string) map[string]any {
 
 func TestApp_ExecFallback(t *testing.T) {
 	both := map[string]any{"action": fallbackAction, "fields": strs("model", "effort"),
-		"message": "Model and effort fall back to the child's defaults, not a Jev selection"}
+		"message": "Model and effort fall back to the child's defaults, not a classifier selection"}
 	effortOnly := map[string]any{"action": fallbackAction, "fields": strs("effort"),
-		"message": "Effort falls back to the child's default, not a Jev selection"}
+		"message": "Effort falls back to the child's default, not a classifier selection"}
 	modelOnly := map[string]any{"action": fallbackAction, "fields": strs("model"),
-		"message": "Model falls back to the child's default, not a Jev selection"}
+		"message": "Model falls back to the child's default, not a classifier selection"}
 	tests := []struct {
 		name           string
 		stage          string
@@ -61,41 +61,41 @@ func TestApp_ExecFallback(t *testing.T) {
 		childHasEffort bool
 	}{
 		{name: "model stage, verified model and unknown effort", stage: "model", model: "m-2",
-			warning: "agrouter: warning: Jev routing failed at the model stage (jev_api_error); model and effort fall back to " +
-				"alpha defaults, not a Jev selection: model m-2 (verified child default), effort unknown (child did not report it)",
+			warning: "agrouter: warning: Classifier routing failed at the model stage (classifier_api_error); model and effort fall back to " +
+				"alpha defaults, not a classifier selection: model m-2 (verified child default), effort unknown (child did not report it)",
 			fallback: both, effective: map[string]any{"model": verified("m-2"), "effort": unknownDefault(defaultNotReported)}},
 		{name: "effort stage keeps Jev's model", stage: "effort", effort: "high",
-			warning: "agrouter: warning: Jev routing failed at the effort stage (jev_api_error); effort falls back to the " +
-				"alpha default, not a Jev selection: effort unknown (child reported it for another model)",
+			warning: "agrouter: warning: Classifier routing failed at the effort stage (classifier_api_error); effort falls back to the " +
+				"alpha default, not a classifier selection: effort unknown (child reported it for another model)",
 			fallback:   effortOnly,
 			effective:  map[string]any{"model": chosenBy(sourceRouter, "fast-1"), "effort": unknownDefault(defaultOtherModel)},
 			childModel: "fast-1"},
 		{name: "effort stage on the child's default model", stage: "effort", model: "fast-1", effort: "high",
-			warning: "agrouter: warning: Jev routing failed at the effort stage (jev_api_error); effort falls back to the " +
-				"alpha default, not a Jev selection: effort high (verified child default)",
+			warning: "agrouter: warning: Classifier routing failed at the effort stage (classifier_api_error); effort falls back to the " +
+				"alpha default, not a classifier selection: effort high (verified child default)",
 			fallback: effortOnly, effective: map[string]any{"model": chosenBy(sourceRouter, "fast-1"), "effort": verified("high")},
 			childModel: "fast-1"},
 		{name: "caller's model is no fallback", stage: "effort", argv: []string{"--model=strong"},
-			warning: "agrouter: warning: Jev routing failed at the effort stage (jev_api_error); effort falls back to the " +
-				"alpha default, not a Jev selection: effort unknown (child did not report it)",
+			warning: "agrouter: warning: Classifier routing failed at the effort stage (classifier_api_error); effort falls back to the " +
+				"alpha default, not a classifier selection: effort unknown (child did not report it)",
 			fallback:   effortOnly,
 			effective:  map[string]any{"model": chosenBy(sourceCaller, "deep-1"), "effort": unknownDefault(defaultNotReported)},
 			childModel: "deep-1"},
 		{name: "the child's default model reported by alias", stage: "effort", argv: []string{"--model=deep-1"},
 			model: "strong", effort: "high",
-			warning: "agrouter: warning: Jev routing failed at the effort stage (jev_api_error); effort falls back to the " +
-				"alpha default, not a Jev selection: effort high (verified child default)",
+			warning: "agrouter: warning: Classifier routing failed at the effort stage (classifier_api_error); effort falls back to the " +
+				"alpha default, not a classifier selection: effort high (verified child default)",
 			fallback:   effortOnly,
 			effective:  map[string]any{"model": chosenBy(sourceCaller, "deep-1"), "effort": verified("high")},
 			childModel: "deep-1"},
 		{name: "caller's effort is no fallback", stage: "model", argv: []string{"--effort=low"}, model: "m-2",
-			warning: "agrouter: warning: Jev routing failed at the model stage (jev_api_error); model falls back to the " +
-				"alpha default, not a Jev selection: model m-2 (verified child default)",
+			warning: "agrouter: warning: Classifier routing failed at the model stage (classifier_api_error); model falls back to the " +
+				"alpha default, not a classifier selection: model m-2 (verified child default)",
 			fallback: modelOnly, effective: map[string]any{"model": verified("m-2"), "effort": chosenBy(sourceCaller, "low")},
 			childHasEffort: true},
 		{name: "complexity stage", stage: "complexity", model: "m-2", effort: "low",
-			warning: "agrouter: warning: Jev routing failed at the complexity stage (jev_api_error); model and effort fall " +
-				"back to alpha defaults, not a Jev selection: model m-2 (verified child default), effort low (verified child default)",
+			warning: "agrouter: warning: Classifier routing failed at the complexity stage (classifier_api_error); model and effort fall " +
+				"back to alpha defaults, not a classifier selection: model m-2 (verified child default), effort low (verified child default)",
 			fallback: both, effective: map[string]any{"model": verified("m-2"), "effort": verified("low")}},
 	}
 	for _, tc := range tests {
@@ -298,8 +298,8 @@ func TestFallbackWarning(t *testing.T) {
 	m2 := "m-2"
 	eff := &effectiveJSON{Model: &effectiveValueJSON{Value: &m2, Source: sourceVerifiedDefault},
 		Effort: &effectiveValueJSON{Source: sourceUnknownDefault, Reason: &codeJSON{defaultNotReported}}}
-	assert.Equal(t, "agrouter: warning: Jev routing failed (jev_timeout); model and effort fall back to tool-a defaults, "+
-		"not a Jev selection: model m-2 (verified child default), effort unknown (child did not report it)",
+	assert.Equal(t, "agrouter: warning: Classifier routing failed (classifier_timeout); model and effort fall back to tool-a defaults, "+
+		"not a classifier selection: model m-2 (verified child default), effort unknown (child did not report it)",
 		fallbackWarning("tool-a", &reasonJSON{Code: reasonTimeout}, []string{"model", "effort"}, eff),
 		"no stage when the capture ran past the deadline")
 	assert.Empty(t, capitalize(""))

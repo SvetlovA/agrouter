@@ -16,7 +16,7 @@ import (
 // TestEvalRouting routes every case of testdata/routing against the real classifier and reports accuracy,
 // latency per case and in total, and the confidence distribution of each routing stage, which is
 // conditional on the stages before it. It reports rather than fails on accuracy: run it with
-// make eval-routing (needs TYPESAFE_API_KEY), never in CI.
+// make eval-routing (needs AGROUTER_CLASSIFIER_API_KEY), never in CI.
 func TestEvalRouting(t *testing.T) {
 	key := os.Getenv(config.EnvAPIKey)
 	if key == "" {

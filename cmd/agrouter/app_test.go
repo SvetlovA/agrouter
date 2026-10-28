@@ -408,7 +408,7 @@ func fallbackLog(t *testing.T, stderr string) (string, map[string]any) {
 	t.Helper()
 	warning, rest, ok := strings.Cut(stderr, "\n")
 	require.True(t, ok, stderr)
-	require.True(t, strings.HasPrefix(warning, "agrouter: warning: Jev routing failed"), stderr)
+	require.True(t, strings.HasPrefix(warning, "agrouter: warning: Classifier routing failed"), stderr)
 	require.Equal(t, 1, strings.Count(rest, "\n"), stderr)
 	return warning, selectionLog(t, rest)
 }
@@ -541,7 +541,7 @@ func TestApp_Decision(t *testing.T) {
 
 	t.Run("cannot decide with the CLI known: null model and effort", func(t *testing.T) {
 		e := newEnv(t)
-		r := e.run([]string{"--verbose", "--cli=claude", "--jev-api-key=", "fix it"}, nil)
+		r := e.run([]string{"--verbose", "--cli=claude", "--api-key=", "fix it"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Empty(t, r.stderr)
@@ -636,9 +636,9 @@ func TestApp_ClassifierAPIKeyPrecedence(t *testing.T) {
 		{name: "global config", global: "global-key", env: "", wantKey: "global-key", wantLine: "api key: from global"},
 		{name: "local over global", global: "global-key", local: "local-key", env: "", wantKey: "local-key", wantLine: "api key: from local"},
 		{name: "env over config", global: "global-key", local: "local-key", env: "env-key", wantKey: "env-key", wantLine: "api key: from env"},
-		{name: "flag over env", local: "local-key", env: "env-key", argv: []string{"--jev-api-key=flag-key"},
+		{name: "flag over env", local: "local-key", env: "env-key", argv: []string{"--api-key=flag-key"},
 			wantKey: "flag-key", wantLine: "api key: from flag"},
-		{name: "empty flag clears the key", local: "local-key", env: "env-key", argv: []string{"--jev-api-key="},
+		{name: "empty flag clears the key", local: "local-key", env: "env-key", argv: []string{"--api-key="},
 			wantKey: "", wantLine: "api key: none (flag)", wantExit: exitUsage},
 		{name: "embedded without a key", env: "", wantKey: "", wantLine: "api key: none (embedded)", wantExit: exitUsage},
 	}
@@ -670,6 +670,39 @@ func TestApp_ClassifierAPIKeyPrecedence(t *testing.T) {
 			require.Equal(t, tc.wantExit, code, stderr.String())
 			assert.Equal(t, []string{tc.wantKey}, keys)
 			assert.Contains(t, stderr.String(), "agrouter debug: "+tc.wantLine+"\n")
+		})
+	}
+}
+
+// TestApp_ClassifierAPIKeyEnvName pins the env var name: the literal name is read, and the name used
+// by previous versions is not.
+func TestApp_ClassifierAPIKeyEnvName(t *testing.T) {
+	tests := []struct {
+		name    string
+		env     string
+		wantKey string
+	}{
+		{name: "classifier env var", env: "AGROUTER_CLASSIFIER_API_KEY", wantKey: "env-key"},
+		{name: "previous env var is not read", env: "TYPESAFE_API_KEY", wantKey: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.jev.pick = "claude-sonnet-5-5@low"
+			t.Setenv(config.EnvAPIKey, "")
+			t.Setenv(tc.env, "env-key")
+			var stdout, stderr bytes.Buffer
+			a := e.app(nil, &stdout, &stderr, runner.Runner{})
+			var keys []string
+			factory := a.newClassifier
+			a.newClassifier = func(url, key string, longContext bool) router.Classifier {
+				keys = append(keys, key)
+				return factory(url, key, longContext)
+			}
+
+			a.run([]string{"fix the typo in README"})
+
+			assert.Equal(t, []string{tc.wantKey}, keys)
 		})
 	}
 }
@@ -797,14 +830,14 @@ func TestApp_Errors(t *testing.T) {
 
 	t.Run("cannot decide with the CLI unknown", func(t *testing.T) {
 		e := newEnv(t)
-		r := e.run([]string{"--jev-api-key=", "fix it"}, nil)
+		r := e.run([]string{"--api-key=", "fix it"}, nil)
 		assert.Equal(t, 2, r.code)
 		assert.Equal(t, 1, strings.Count(r.stderr, "\n"), r.stderr)
 		assert.True(t, strings.HasPrefix(r.stderr, "agrouter: classifier cannot decide between claude, codex"), r.stderr)
 		d := decision(t, r.stdout)
 		assert.Subset(t, d, map[string]any{"cli": nil, "model": nil, "effort": nil})
-		assert.Equal(t, map[string]any{"code": "jev_no_key", "stage": "cli",
-			"message": "Jev CLI selection failed: no Jev API key is set"}, d["reason"])
+		assert.Equal(t, map[string]any{"code": "classifier_no_key", "stage": "cli",
+			"message": "Classifier CLI selection failed: no classifier API key is set"}, d["reason"])
 	})
 
 	t.Run("unknown flag and second positional", func(t *testing.T) {
@@ -1118,8 +1151,8 @@ func TestApp_Docs(t *testing.T) {
 		assert.NotContains(t, r.stdout, "DOC TEXT")
 		d := decision(t, r.stdout)
 		assert.Nil(t, d["cli"])
-		assert.Equal(t, map[string]any{"code": "jev_api_error", "stage": "complexity",
-			"message": "Jev project complexity scoring failed: Jev returned an error status"}, d["reason"])
+		assert.Equal(t, map[string]any{"code": "classifier_api_error", "stage": "complexity",
+			"message": "Classifier project complexity scoring failed: the classifier returned an error status"}, d["reason"])
 	})
 
 	t.Run("exec: the deadline passing while reading a doc runs the known CLI with its defaults", func(t *testing.T) {
@@ -1227,7 +1260,7 @@ func TestApp_ExecSelectionBeforeChild(t *testing.T) {
 		return 7, nil
 	}}
 	r := e.runWithRunner([]string{"exec", "acme", "--model=preferred", "--effort=thorough",
-		"--jev-api-key=private-api-key", "private prompt", "--", "private raw token"}, nil, child)
+		"--api-key=private-api-key", "private prompt", "--", "private raw token"}, nil, child)
 	assert.Equal(t, 7, r.code)
 	assert.JSONEq(t, `{"child":"output"}`, r.stdout)
 	line, rest, ok := strings.Cut(r.stderr, "\n")
@@ -1446,7 +1479,7 @@ func TestApp_HelpHasKeyCautions(t *testing.T) {
 	r := e.run([]string{"--help"}, nil)
 
 	require.Equal(t, 0, r.code)
-	for _, want := range []string{"TYPESAFE_API_KEY", "process", "listings", ".agrouter/config"} {
+	for _, want := range []string{"AGROUTER_CLASSIFIER_API_KEY", "process", "listings", ".agrouter/config"} {
 		assert.Contains(t, r.stdout, want)
 	}
 }
@@ -1556,7 +1589,7 @@ func TestApp_MirrorLog(t *testing.T) {
 			return 3, nil
 		}}
 		r := e.runWithRunner([]string{"exec", "acme", "--model=preferred", "--effort=thorough",
-			"--jev-api-key=" + keyMarker, promptMarker, "--", argvMarker}, nil, child)
+			"--api-key=" + keyMarker, promptMarker, "--", argvMarker}, nil, child)
 		require.Equal(t, 3, r.code, r.stderr)
 		assert.Equal(t, "CHILD-STDOUT\n", r.stdout)
 

@@ -17,7 +17,7 @@ import (
 // Environment variables read by the config package.
 const (
 	EnvConfigDir = "AGROUTER_CONFIG_DIR"
-	EnvAPIKey    = "TYPESAFE_API_KEY" //nolint:gosec // variable name, not a credential
+	EnvAPIKey    = "AGROUTER_CLASSIFIER_API_KEY"
 )
 
 // Sources are the config layers to load, lowest precedence first. An empty path or a missing file
@@ -49,7 +49,7 @@ func DefaultPaths(workDir string) (global, local string, err error) {
 }
 
 // ResolveAPIKey applies the key precedence and returns the key with the layer that decided it:
-// --jev-api-key when given (an explicit empty value clears the key), then a non-empty TYPESAFE_API_KEY,
+// --api-key when given (an explicit empty value clears the key), then a non-empty AGROUTER_CLASSIFIER_API_KEY,
 // then [classifier] api_key from the merged config (local > global > embedded).
 func ResolveAPIKey(flagValue string, flagSet bool, envValue string, cfg Classifier) (key, source string) {
 	switch {

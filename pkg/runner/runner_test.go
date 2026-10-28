@@ -248,13 +248,14 @@ func TestRun_NilEnvInheritsWithoutAPIKey(t *testing.T) {
 }
 
 func TestChildEnv(t *testing.T) {
-	env := []string{"A=1", config.EnvAPIKey + "=k", "typesafe_api_key=k2", "TYPESAFE_API_KEY_OTHER=3", "=C:=C:\\"}
+	require.Equal(t, "AGROUTER_CLASSIFIER_API_KEY", config.EnvAPIKey)
+	env := []string{"A=1", config.EnvAPIKey + "=k", "agrouter_classifier_api_key=k2", "AGROUTER_CLASSIFIER_API_KEY_OTHER=3", "=C:=C:\\"}
 	tests := []struct {
 		goos string
 		want []string
 	}{
-		{goos: "linux", want: []string{"A=1", "typesafe_api_key=k2", "TYPESAFE_API_KEY_OTHER=3", "=C:=C:\\"}},
-		{goos: "windows", want: []string{"A=1", "TYPESAFE_API_KEY_OTHER=3", "=C:=C:\\"}},
+		{goos: "linux", want: []string{"A=1", "agrouter_classifier_api_key=k2", "AGROUTER_CLASSIFIER_API_KEY_OTHER=3", "=C:=C:\\"}},
+		{goos: "windows", want: []string{"A=1", "AGROUTER_CLASSIFIER_API_KEY_OTHER=3", "=C:=C:\\"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.goos, func(t *testing.T) {

@@ -138,17 +138,17 @@ func effective(chosen *string, fixed string, def *string, why string) *effective
 // fallbackMessage is the fallback's fixed message for fields.
 func fallbackMessage(fields []string) string {
 	if len(fields) == 1 {
-		return capitalize(fields[0]) + " falls back to the child's default, not a Jev selection"
+		return capitalize(fields[0]) + " falls back to the child's default, not a classifier selection"
 	}
-	return capitalize(strings.Join(fields, " and ")) + " fall back to the child's defaults, not a Jev selection"
+	return capitalize(strings.Join(fields, " and ")) + " fall back to the child's defaults, not a classifier selection"
 }
 
 // fallbackWarning is the one line saying routing failed and which fields fell back to what:
-// "agrouter: warning: Jev routing failed at the <stage> stage (<code>); <fields> fall back to <cli>
-// defaults, not a Jev selection: <field> <value> (verified child default), <field> unknown (<why>)".
+// "agrouter: warning: Classifier routing failed at the <stage> stage (<code>); <fields> fall back to <cli>
+// defaults, not a classifier selection: <field> <value> (verified child default), <field> unknown (<why>)".
 func fallbackWarning(cli string, reason *reasonJSON, fields []string, eff *effectiveJSON) string {
 	var b strings.Builder
-	b.WriteString("agrouter: warning: Jev routing failed")
+	b.WriteString("agrouter: warning: Classifier routing failed")
 	if reason.Stage != "" {
 		fmt.Fprintf(&b, " at the %s stage", reason.Stage)
 	}
@@ -158,7 +158,7 @@ func fallbackWarning(cli string, reason *reasonJSON, fields []string, eff *effec
 	} else {
 		fmt.Fprintf(&b, "%s fall back to %s defaults", strings.Join(fields, " and "), cli)
 	}
-	b.WriteString(", not a Jev selection: ")
+	b.WriteString(", not a classifier selection: ")
 	values := make([]string, len(fields))
 	for i, f := range fields {
 		v := eff.Model

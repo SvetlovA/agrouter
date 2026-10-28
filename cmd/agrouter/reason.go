@@ -11,15 +11,15 @@ import (
 // Routing failure codes in the reason JSON, from the typed errors only: never from messages or
 // response bodies.
 const (
-	reasonNoKey          = "jev_no_key"
-	reasonUnauthorized   = "jev_unauthorized"
-	reasonTimeout        = "jev_timeout"
-	reasonCanceled       = "jev_canceled"
-	reasonAPIError       = "jev_api_error"
+	reasonNoKey          = "classifier_no_key"
+	reasonUnauthorized   = "classifier_unauthorized"
+	reasonTimeout        = "classifier_timeout"
+	reasonCanceled       = "classifier_canceled"
+	reasonAPIError       = "classifier_api_error"
 	reasonTooLong        = "request_too_long" // provider-neutral: the routing request is over the provider's context length
-	reasonTransportError = "jev_transport_error"
-	reasonInvalidAnswer  = "jev_invalid_answer"
-	reasonEmptyAnswer    = "jev_empty_answer"
+	reasonTransportError = "classifier_transport_error"
+	reasonInvalidAnswer  = "classifier_invalid_answer"
+	reasonEmptyAnswer    = "classifier_empty_answer"
 	reasonNoDecision     = "no_decision"
 )
 
@@ -93,31 +93,31 @@ func failureCode(err error) string {
 	return reasonNoDecision
 }
 
-// stageSubjects name what Jev was doing at each stage.
+// stageSubjects name what the classifier was doing at each stage.
 var stageSubjects = map[string]string{
-	router.LevelCLI:        "Jev CLI selection",
-	router.LevelModel:      "Jev model selection",
-	router.LevelEffort:     "Jev effort selection",
-	router.LevelComplexity: "Jev project complexity scoring",
+	router.LevelCLI:        "Classifier CLI selection",
+	router.LevelModel:      "Classifier model selection",
+	router.LevelEffort:     "Classifier effort selection",
+	router.LevelComplexity: "Classifier project complexity scoring",
 }
 
 // failureDetails complete "<subject> failed: ..." for the codes that are not about time.
 var failureDetails = map[string]string{
-	reasonNoKey:          "no Jev API key is set",
-	reasonUnauthorized:   "the Jev API key was rejected",
-	reasonAPIError:       "Jev returned an error status",
+	reasonNoKey:          "no classifier API key is set",
+	reasonUnauthorized:   "the classifier API key was rejected",
+	reasonAPIError:       "the classifier returned an error status",
 	reasonTooLong:        "routing request over the provider's context length; lower request_tokens or bytes_per_token",
-	reasonTransportError: "Jev could not be reached",
-	reasonInvalidAnswer:  "Jev returned an invalid answer",
-	reasonEmptyAnswer:    "Jev returned no answer",
-	reasonNoDecision:     "Jev could not decide",
+	reasonTransportError: "the classifier could not be reached",
+	reasonInvalidAnswer:  "the classifier returned an invalid answer",
+	reasonEmptyAnswer:    "the classifier returned no answer",
+	reasonNoDecision:     "the classifier could not decide",
 }
 
 // failureMessage is the fixed message for code at stage.
 func failureMessage(code, stage string) string {
 	subject, ok := stageSubjects[stage]
 	if !ok {
-		subject = "Jev routing"
+		subject = "Classifier routing"
 	}
 	switch code {
 	case reasonTimeout:

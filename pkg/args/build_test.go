@@ -124,7 +124,7 @@ func TestBuildOwnFlagsNeverInArgv(t *testing.T) {
 	for _, tok := range res.Argv {
 		assert.NotContains(t, tok, "sk-secret")
 		assert.NotContains(t, tok, "--cli")
-		assert.NotContains(t, tok, "--jev-api-key")
+		assert.NotContains(t, tok, "--api-key")
 		assert.NotContains(t, tok, "AGENTS.md")
 	}
 }

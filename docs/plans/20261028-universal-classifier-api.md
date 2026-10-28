@@ -229,13 +229,13 @@ Reason codes: `classifier_no_key`, `classifier_unauthorized`, `classifier_timeou
 - Modify: `cmd/agrouter/*_test.go`, `pkg/runner/runner_test.go`, `pkg/args/build_test.go`
 - Modify: `pkg/config/load.go` (`EnvAPIKey`), `Makefile`, `WMakefile`
 
-- [ ] rename `EnvAPIKey` to `AGROUTER_CLASSIFIER_API_KEY` and update the godoc precedence text, in the same task as `childEnv` below
-- [ ] `eval-routing` in `Makefile` and `WMakefile` checks `AGROUTER_CLASSIFIER_API_KEY`
-- [ ] `--jev-api-key` -> `--api-key` (`flags.go`, `args.Request.APIKey` comment); its description says it is the routing classifier's key (in exec, a child's own `--api-key` goes after `--`); help text says "a routing classifier" instead of "TypeSafe's Jev"
-- [ ] reason codes `jev_*` -> `classifier_*` in `reason.go`; fallback warning "Jev routing failed" / "not a Jev selection" -> neutral wording; debug output labels
-- [ ] `runner.childEnv` strips `AGROUTER_CLASSIFIER_API_KEY` (case-insensitive on Windows, as today)
-- [ ] write tests: new flag and env precedence end to end, `classifier_*` codes in decision JSON, child env without the key
-- [ ] run tests - must pass before next task
+- [x] rename `EnvAPIKey` to `AGROUTER_CLASSIFIER_API_KEY` and update the godoc precedence text, in the same task as `childEnv` below
+- [x] `eval-routing` in `Makefile` and `WMakefile` checks `AGROUTER_CLASSIFIER_API_KEY`
+- [x] `--jev-api-key` -> `--api-key` (`flags.go`, `args.Request.APIKey` comment); its description says it is the routing classifier's key (in exec, a child's own `--api-key` goes after `--`); help text says "a routing classifier" instead of "TypeSafe's Jev"
+- [x] reason codes `jev_*` -> `classifier_*` in `reason.go`; fallback warning "Jev routing failed" / "not a Jev selection" -> neutral wording; debug output labels
+- [x] `runner.childEnv` strips `AGROUTER_CLASSIFIER_API_KEY` (case-insensitive on Windows, as today)
+- [x] write tests: new flag and env precedence end to end, `classifier_*` codes in decision JSON, child env without the key
+- [x] run tests - must pass before next task
 
 ### Task 5: Guard against jev naming and sweep comments
 
