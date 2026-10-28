@@ -259,9 +259,9 @@ Reason codes: `classifier_no_key`, `classifier_unauthorized`, `classifier_timeou
 
 Leave `.agrouter/config` as it is (see Context).
 
-- [ ] README: `[classifier]` section with the sizing keys, OpenAI Luna example, new flag/env, `classifier_*` reason codes (no migration notes)
-- [ ] CLAUDE.md and AGENTS.md: `pkg/classifier` layout line, `router.Classifier`, `classifier` sentinels, env var, the no-jev guard rule, and the "routing request size is configured" rule naming `[classifier] request_tokens`/`bytes_per_token` instead of `[agrouter]`
-- [ ] move this plan to `docs/plans/completed/`
+- [x] README: `[classifier]` section with the sizing keys, OpenAI Luna example, new flag/env, `classifier_*` reason codes (no migration notes)
+- [x] CLAUDE.md and AGENTS.md: `pkg/classifier` layout line, `router.Classifier`, `classifier` sentinels, env var, the no-jev guard rule, and the "routing request size is configured" rule naming `[classifier] request_tokens`/`bytes_per_token` instead of `[agrouter]`
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 *Items requiring manual intervention or external systems - no checkboxes, informational only*
