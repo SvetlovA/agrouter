@@ -2,7 +2,7 @@
 
 ## Overview
 - agrouter talks to one hard-wired routing provider today: TypeSafe's Jev. Its URL is a Go constant (`pkg/jev/client.go:20`), and its name runs through config (`jev_model`), the flag (`--jev-api-key`), the env var (`TYPESAFE_API_KEY`), reason codes (`jev_*`), the package (`pkg/jev`), help text and docs.
-- Goal: make the routing API universal so other classifier sources (OpenAI Luna and others) can be used. The user configures the classifier with three properties in a new `[classifier]` section: `url`, `api_key`, `model`.
+- Goal: make the routing API universal so other classifier sources (OpenAI Luna and others) can be used. The user configures the classifier in a new `[classifier]` section: `url`, `api_key`, `model`, plus the provider-dependent sizing keys `long_context`, `request_tokens` and `bytes_per_token`, which move there from `[agrouter]`. Switching providers then means overriding one section.
 - The request and response structure stays exactly the one Jev uses today. A source that accepts that wire format works by changing `url` and `model`.
 - Jev stays the default: the embedded config ships the Jev `url` and `model`.
 - No "jev" naming remains in production Go code outside the embedded defaults. The default model id `jev-latest` is data, not naming.
@@ -10,13 +10,15 @@
 ```
 before                                   after
 ------                                   -----
-[agrouter] api_key, jev_model            [classifier] url, api_key, model
+[agrouter] api_key, jev_model,           [classifier] url, api_key, model,
+  long_context, request_tokens,            long_context, request_tokens,
+  bytes_per_token                          bytes_per_token
 --jev-api-key, TYPESAFE_API_KEY          --api-key, AGROUTER_CLASSIFIER_API_KEY
 pkg/jev (DefaultURL const)       ──►     pkg/classifier (url from config)
 router.JevClient                         router.Classifier
 reason jev_*                             reason classifier_*
 ```
-**Note:** every Jev-named piece on the left gets a neutral name on the right; the JSON sent over the wire does not change.
+**Note:** every Jev-named piece on the left gets a neutral name on the right, and everything that depends on the provider moves into `[classifier]`. The JSON sent over the wire does not change. `[agrouter]` keeps `timeout`, `routing_policy`, `complexity_policy` and `log_dir`.
 
 ## Context (from discovery)
 - files/components involved:
@@ -72,17 +74,17 @@ env AGROUTER_CLASSIFIER_API_KEY ─┴─► ResolveAPIKey ──► POST url  {
 ```
 **Note:** the URL now comes from config like everything else. The key precedence and the request body stay as they are.
 
-Key decisions (debated with the partner agent, p2):
+Key decisions (debated with the partner agent, p2, then settled by the user):
 
 | Decision | Choice | Why |
 |---|---|---|
-| Section shape | new `[classifier]` with `url`, `api_key`, `model` | the user named these 3 properties. They describe the endpoint, not agrouter's routing policy |
+| Section shape | new `[classifier]` with `url`, `api_key`, `model`, `long_context`, `request_tokens`, `bytes_per_token` | all of these depend on the provider (Luna takes ~8x Jev's input; tokenizers differ), so one section switches providers. `[agrouter]` keeps routing behavior: `timeout`, the two policies, `log_dir` (user) |
 | Previous versions | not supported: removed keys are simply unknown keys (`pkg/config/load.go:478`); no aliases, warnings or hints | user decision |
 | Package | `pkg/jev` -> `pkg/classifier`; `JevClient` -> `Classifier` | neutral naming. The wire types stay unchanged |
 | URL default | only in `pkg/config/defaults/config`; `DefaultURL` const removed | same rule as catalog names: provider data lives only in config |
 | Flag / env | `--api-key`, `AGROUTER_CLASSIFIER_API_KEY` | a provider-specific env name is wrong for other sources |
 | Reason codes | `jev_*` -> `classifier_*` | decision-JSON contract change, called out in README |
-| `long_context`, `Limits`, startup limit check | **kept as is** (user). The header is TypeSafe's, and other providers ignore it. The startup check uses TypeSafe's limits for **every** endpoint (`pkg/router/router.go:61` has no endpoint condition), and this is documented | user decision. The plan does not try to make limits generic |
+| `long_context`, `Limits`, startup limit check | **behavior kept as is** (user); the key moves to `[classifier]`. The header is TypeSafe's, and other providers ignore it. The startup check uses TypeSafe's limits for **every** endpoint (`pkg/router/router.go:61` has no endpoint condition), and this is documented | user decision. The plan does not try to make limits generic |
 | `max_tokens_exceeded` -> `request_too_long`, 429/529 retry | kept | protocol behavior, invents no capacity |
 | `url` validation | any value is allowed; only an empty url is a config error | the user owns the url (user) |
 
@@ -91,31 +93,39 @@ Key decisions (debated with the partner agent, p2):
 Embedded defaults (`pkg/config/defaults/config`):
 
 ```ini
-# [classifier]: the routing classifier agrouter asks which (cli, model, effort) runs a prompt.
-# any source accepting the same request body works: change url and model.
-#   url      endpoint the routing requests are POSTed to. required
-#   api_key  bearer key for the endpoint. default: empty (no key)
-#   model    the classifier model answering the routing questions. required
+# [classifier]: the routing classifier agrouter asks which (cli, model, effort) runs a prompt, and
+# how big one routing request may be. any source accepting the same request body works.
+#   url              endpoint the routing requests are POSTed to. required
+#   api_key          bearer key for the endpoint. default: empty (no key)
+#   model            the classifier model answering the routing questions. required
+#   long_context     use the provider's long-input mode. default: false
+#   request_tokens   token allowance of one routing request: its state plus all its questions. default: 30000
+#   bytes_per_token  estimated bytes per token, used to size routing requests. default: 3
 # precedence for api_key: --api-key > non-empty AGROUTER_CLASSIFIER_API_KEY > local > global > embedded.
 [classifier]
 url     = https://api.typesafe.ai/v1/systemone
 api_key =
 # pin a versioned id (e.g. jev-1.13.0) to keep routing stable across releases
 model   = jev-latest
+# (the existing request_tokens / bytes_per_token explanation moves here unchanged)
+request_tokens  = 30000
+bytes_per_token = 3
+# long_context works only with Jev (TypeSafe): it sends TypeSafe's long-context header; other
+# providers ignore it. the startup check of request_tokens uses Jev's limits for every url:
+# at most 30000 with long_context = false, 260000 with long_context = true.
+long_context    = false
 
 # example: OpenAI Luna (Decisions API), unverified: it works only if the endpoint accepts this
-# request body. put it in the global config, not a committed local one:
+# request body. put it in the global config, not a committed local one. Luna takes up to 922K
+# input tokens and bills inputs over 272K at 2x, so 250000 stays under that step with margin;
+# long_context = true only lifts agrouter's startup check. larger requests take longer: raise
+# [agrouter] timeout too (e.g. 120s).
 # [classifier]
-# url     = https://api.openai.com/v1/decisions
-# api_key = sk-...
-# model   = gpt-6-luna
-```
-
-And in `[agrouter]`, the `long_context` comment gains:
-
-```ini
-# long_context works only with Jev (TypeSafe): it sends TypeSafe's long-context header; other
-# providers ignore it. the startup check of request_tokens uses Jev's limits for every url.
+# url            = https://api.openai.com/v1/decisions
+# api_key        = sk-...
+# model          = gpt-6-luna
+# long_context   = true
+# request_tokens = 250000
 ```
 
 Config struct:
@@ -127,16 +137,20 @@ type Config struct {
 	// ... CLIs, Models, Efforts unchanged
 }
 
-// Classifier is the [classifier] section: the endpoint routing requests are sent to.
+// Classifier is the [classifier] section: the endpoint routing requests are sent to, and how big
+// one request may be.
 type Classifier struct {
 	URL          string
 	APIKey       string
 	APIKeySource string // layer that set api_key, one of the Layer* names
 	Model        string
+	LongContext  bool    // moved from Agrouter, doc comment kept
+	RequestTokens int    // moved from Agrouter, doc comment kept
+	BytesPerToken float64 // moved from Agrouter, doc comment kept
 }
 ```
 
-`Agrouter` loses `APIKey`, `APIKeySource`, `JevModel`. `ResolveAPIKey` takes `Classifier`.
+`Agrouter` loses `APIKey`, `APIKeySource`, `JevModel`, `LongContext`, `RequestTokens`, `BytesPerToken`. `ResolveAPIKey` takes `Classifier`. `router.checkLimits` takes `config.Classifier`. Error texts that name the moved keys say `[classifier]` (`router.go:63`, `question.go:322`, `validate.go:52,55`).
 
 Previous versions are not supported: an old key is an ordinary unknown key, the old flag an unknown flag, and the old env var is simply not read.
 
@@ -157,19 +171,20 @@ Reason codes: `classifier_no_key`, `classifier_unauthorized`, `classifier_timeou
 - Modify: `pkg/config/defaults/config`
 - Modify: `.agrouter/config` (tracked local copy: its active `jev_model` at line 35 would fail a branch build from this task on)
 - Modify: `pkg/config/config_test.go`, `pkg/config/validate_test.go`, `pkg/config/install_test.go`, `pkg/config/defaults/defaults_test.go`
-- Modify: `cmd/agrouter/app.go`, `pkg/router/{stage,pool,complexity}.go` (only the field moves: `cfg.Agrouter.JevModel` -> `cfg.Classifier.Model`, key from `cfg.Classifier`)
-- Modify: every test fixture and assertion on the moved fields: `pkg/router/router_test.go:32`, `pkg/router/complexity_test.go:168`, `pkg/router/question_test.go:65`, `cmd/agrouter/app_test.go` config fixtures (keep the test model *value* unchanged until Task 3, so golden files do not move yet)
+- Modify: `cmd/agrouter/app.go` (`:264` long context), `pkg/router/{stage,pool,complexity}.go` (`cfg.Agrouter.JevModel` -> `cfg.Classifier.Model`), `pkg/router/router.go` (`:48`, `checkLimits` `:60-64`), `pkg/router/question.go` (`:319`, `:322`); only the fields move, no renames yet
+- Modify: every test fixture and assertion on the moved fields: `pkg/router/router_test.go:32,204-220`, `pkg/router/overflow_test.go:53-54,116`, `pkg/router/complexity_test.go:168`, `pkg/router/question_test.go:65`, `pkg/config/config_test.go:211-246`, `cmd/agrouter/app_test.go:595` (keep the test model *value* unchanged until Task 3, so golden files do not move yet)
 
-- [ ] add `Classifier` struct and `Config.Classifier`; remove `APIKey`, `APIKeySource`, `JevModel` from `Agrouter`
-- [ ] decode `[classifier]` keys `url`, `api_key`, `model` in `load.go`, tracking `APIKeySource` per layer as today
-- [ ] drop the `api_key` and `jev_model` cases from the `[agrouter]` decoder (`load.go:246-249`)
-- [ ] validate `url` and `model` as required (non-empty); any url value is accepted
+- [ ] add `Classifier` struct and `Config.Classifier`; move `LongContext`, `RequestTokens`, `BytesPerToken` (with their doc comments) from `Agrouter` into it; remove `APIKey`, `APIKeySource`, `JevModel` from `Agrouter`
+- [ ] decode `[classifier]` keys `url`, `api_key`, `model`, `long_context`, `request_tokens`, `bytes_per_token` in `load.go`, tracking `APIKeySource` per layer as today
+- [ ] drop the `api_key`, `jev_model`, `long_context`, `request_tokens`, `bytes_per_token` cases from the `[agrouter]` decoder (`load.go:246-261`)
+- [ ] validate `url` and `model` as required (non-empty), any url value accepted; move the `request_tokens` / `bytes_per_token` checks (`validate.go:51-55`) to `[classifier]` with the section name in their messages
+- [ ] `checkLimits` takes `config.Classifier`; the `[agrouter]` prefix in its error (`router.go:63`) and in the budget error (`question.go:322`) becomes `[classifier]`
 - [ ] `ResolveAPIKey` reads `Classifier`. `EnvAPIKey` keeps its current name until Task 4, so `pkg/runner`'s `TestChildEnv` (`runner_test.go:251-257`) stays green and the key is still stripped from children
 - [ ] update `.agrouter/config` to the new `[classifier]` section
-- [ ] write the `[classifier]` block, the commented OpenAI Luna example and the `long_context` comment in `defaults/config` (`install.go` needs no change: it comments out the embedded config generically, `pkg/config/install.go:28-33`)
+- [ ] write the `[classifier]` block with the moved sizing keys and their comments, the Jev-only `long_context` note and the commented OpenAI Luna example in `defaults/config`; drop the moved keys from the `[agrouter]` block and its key reference (`install.go` needs no change: it comments out the embedded config generically, `pkg/config/install.go:28-33`)
 - [ ] move the field at the call sites in `cmd/agrouter/app.go` and `pkg/router`, and in all their tests, so the tree compiles and tests pass (no renames there yet)
-- [ ] write tests: `[classifier]` loading and layering, key precedence (flag > env > local > global > embedded)
-- [ ] write tests: empty `url`, empty `model`
+- [ ] write tests: `[classifier]` loading and layering for all six keys, key precedence (flag > env > local > global > embedded)
+- [ ] write tests: empty `url`, empty `model`, invalid `request_tokens` / `bytes_per_token` under `[classifier]`, the over-limit startup error naming `[classifier]`
 - [ ] run tests - must pass before next task
 
 ### Task 2: Rename pkg/jev to pkg/classifier
@@ -233,7 +248,7 @@ Reason codes: `classifier_no_key`, `classifier_unauthorized`, `classifier_timeou
 - [ ] run tests - must pass before next task
 
 ### Task 6: Verify acceptance criteria
-- [ ] `[classifier] url/api_key/model` drive the request; embedded defaults are Jev
+- [ ] `[classifier] url/api_key/model` drive the request and its sizing keys drive the budget; `[agrouter]` holds only `timeout`, the two policies and `log_dir`; embedded defaults are Jev
 - [ ] request body unchanged: golden fixtures differ only in the synthetic model value
 - [ ] `grep -ri jev --include='*.go' cmd pkg` hits only tests and `pkg/config/defaults`
 - [ ] run full test suite: `make test`
@@ -241,8 +256,8 @@ Reason codes: `classifier_no_key`, `classifier_unauthorized`, `classifier_timeou
 - [ ] verify coverage stays 80%+ per package
 
 ### Task 7: [Final] Update documentation
-- [ ] README: `[classifier]` section, OpenAI Luna example, new flag/env, `classifier_*` reason codes (no migration notes)
-- [ ] CLAUDE.md and AGENTS.md: `pkg/classifier` layout line, `router.Classifier`, `classifier` sentinels, env var, the no-jev guard rule
+- [ ] README: `[classifier]` section with the sizing keys, OpenAI Luna example, new flag/env, `classifier_*` reason codes (no migration notes)
+- [ ] CLAUDE.md and AGENTS.md: `pkg/classifier` layout line, `router.Classifier`, `classifier` sentinels, env var, the no-jev guard rule, and the "routing request size is configured" rule naming `[classifier] request_tokens`/`bytes_per_token` instead of `[agrouter]`
 - [ ] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
