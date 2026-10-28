@@ -13,7 +13,7 @@ import (
 	"github.com/SvetlovA/agrouter/pkg/config"
 )
 
-// TestEvalRouting routes every case of testdata/routing against the real Jev and reports accuracy,
+// TestEvalRouting routes every case of testdata/routing against the real classifier and reports accuracy,
 // latency per case and in total, and the confidence distribution of each routing stage, which is
 // conditional on the stages before it. It reports rather than fails on accuracy: run it with
 // make eval-routing (needs TYPESAFE_API_KEY), never in CI.

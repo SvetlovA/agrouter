@@ -9,7 +9,7 @@ import (
 	"github.com/SvetlovA/agrouter/pkg/classifier"
 )
 
-// answersOnly adapts a test closure that returns only answers to the JevClient's Ask signature, with
+// answersOnly adapts a test closure that returns only answers to the Classifier's Ask signature, with
 // no reported input tokens.
 func answersOnly(fn func(context.Context, classifier.Request) (map[string]classifier.Answer, error)) func(context.Context, classifier.Request) (classifier.Response, error) {
 	return func(ctx context.Context, req classifier.Request) (classifier.Response, error) {

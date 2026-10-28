@@ -10,7 +10,7 @@ import (
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 )
 
-// Question ids in a Jev request.
+// Question ids in a classifier request.
 const (
 	questionRelevance  = "relevance"
 	questionComplexity = "complexity"
@@ -57,7 +57,7 @@ const (
 	// metadata, where entries of one source and type may merge into a count and a byte total, and
 	// the same project.complexity a whole state carries. chunk.text is one part of the prompt or of
 	// one mentioned file, chunk.field names its source ("prompt" or "files"), chunk.index is its
-	// 1-based position and chunk.of the number of chunks. Jev sees only this chunk and the anchor.
+	// 1-based position and chunk.of the number of chunks. The classifier sees only this chunk and the anchor.
 	chunkGuide = "`state.anchor` is context shared by every part of a longer task: excerpts of the prompt " +
 		"and the files it mentions, and `attachments`, the images, PDFs and other non-text inputs the task " +
 		"includes, by type and size only. `state.chunk.text` is one part of the longer input; " +

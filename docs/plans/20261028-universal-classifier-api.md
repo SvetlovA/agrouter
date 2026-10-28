@@ -214,12 +214,12 @@ Reason codes: `classifier_no_key`, `classifier_unauthorized`, `classifier_timeou
 - Modify: `pkg/router/*_test.go`, `pkg/router/testdata/request_*.json`
 - Modify: `cmd/agrouter/app.go` (`:42`, `:59` factory return type), `cmd/agrouter/app_test.go` (`:364`)
 
-- [ ] `JevClient` -> `Classifier`, field `r.jev` -> `r.classifier`, `go:generate` directive, `make generate`
-- [ ] update the `router.JevClient` references in `cmd/agrouter/app.go` and `app_test.go` in the same task, so `cmd` still compiles
-- [ ] neutral comments and error texts in `pkg/router` (`ErrCannotDecide` "jev cannot decide" and "without Jev", `router.go:25,160`); update the cmd tests asserting that text in this same task: `cmd/agrouter/app_test.go:751`, `debug_test.go:118,208`, `reason_test.go:263` (only these router-error assertions; reason codes stay for Task 4)
-- [ ] golden fixtures use a synthetic model (`test-classifier`); regenerate with `go test ./pkg/router -update` and check the diff only changes the model value
-- [ ] update router tests for the renamed mock
-- [ ] run tests - must pass before next task
+- [x] `JevClient` -> `Classifier`, field `r.jev` -> `r.classifier`, `go:generate` directive, `make generate`
+- [x] update the `router.JevClient` references in `cmd/agrouter/app.go` and `app_test.go` in the same task, so `cmd` still compiles
+- [x] neutral comments and error texts in `pkg/router` (`ErrCannotDecide` "jev cannot decide" and "without Jev", `router.go:25,160`); update the cmd tests asserting that text in this same task: `cmd/agrouter/app_test.go:751`, `debug_test.go:118,208`, `reason_test.go:263` (only these router-error assertions; reason codes stay for Task 4)
+- [x] golden fixtures use a synthetic model (`test-classifier`); regenerate with `go test ./pkg/router -update` and check the diff only changes the model value
+- [x] update router tests for the renamed mock
+- [x] run tests - must pass before next task
 
 ### Task 4: Rename the flag, env var and reason codes in the CLI
 

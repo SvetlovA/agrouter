@@ -19,8 +19,8 @@ import (
 )
 
 // overflowClient rejects the requests reject picks with err, once each, and answers the rest.
-func overflowClient(reject func(classifier.Request) bool, err error, rejected *classifier.Request, calls *atomic.Int32) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
+func overflowClient(reject func(classifier.Request) bool, err error, rejected *classifier.Request, calls *atomic.Int32) *mocks.ClassifierMock {
+	return &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 		if reject(req) {
 			calls.Add(1)
 			*rejected = req
@@ -52,7 +52,7 @@ func TestOverflowErrorNamesTheRequest(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	cfg.Classifier.RequestTokens = 20_000
 	cfg.Classifier.BytesPerToken = 2.5
-	probe := newRouter(t, cfg, cat, &mocks.JevClientMock{})
+	probe := newRouter(t, cfg, cat, &mocks.ClassifierMock{})
 
 	big := &prompt.Result{Prompt: "START " + marker + "\n" + filler(200_000)}
 	split, err := big.Split(probe.budget)

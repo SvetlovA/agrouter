@@ -55,8 +55,8 @@ func certain(req classifier.Request, pick string) map[string]classifier.Answer {
 }
 
 // choosing returns a mock answering every stage request with pick's criterion, with certainty.
-func choosing(pick string) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
+func choosing(pick string) *mocks.ClassifierMock {
+	return &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 		return certain(req, pick), nil
 	})}
 }
@@ -87,7 +87,7 @@ func stageAnswers(req classifier.Request, pick string, confidence, relevance flo
 }
 
 // askedLevels lists the stage of every routing request, in call order.
-func askedLevels(client *mocks.JevClientMock) []string {
+func askedLevels(client *mocks.ClassifierMock) []string {
 	var out []string
 	for _, c := range client.AskCalls() {
 		if id, _, ok := stageAsked(c.Req); ok {
@@ -195,7 +195,7 @@ func TestRouteStagesFixedByPassedValues(t *testing.T) {
 			pick: "strong", asked: []string{LevelModel},
 			stages: []Stage{stage("cli", "alpha", true), stage("model", "strong", false), stage("effort", "turbo", true)},
 			want:   "strong"},
-		{name: "all three passed: Jev not asked",
+		{name: "all three passed: classifier not asked",
 			req:    &args.Request{CLI: "alpha", Model: "strong-model", Effort: "high"},
 			stages: []Stage{stage("cli", "alpha", true), stage("model", "strong", true), stage("effort", "high", true)},
 			want:   "strong@high"},
@@ -208,7 +208,7 @@ func TestRouteStagesFixedByPassedValues(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			client := choosing(tc.pick)
 			if tc.pick == "" {
-				client = &mocks.JevClientMock{} // Ask panics if called
+				client = &mocks.ClassifierMock{} // Ask panics if called
 			}
 			el := Eligible(cat, tc.req)
 			assert.Equal(t, tc.warned, len(el.Warnings) > 0)
@@ -264,7 +264,7 @@ func TestRouteStageSequence(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, Decision{CLI: "alpha", Model: "strong-model", Effort: "high", OptionID: "strong@high"},
 		Decision{CLI: d.CLI, Model: d.Model, Effort: d.Effort, OptionID: d.OptionID, Pinned: d.Pinned},
-		"a CLI Jev chose is not pinned")
+		"a CLI the classifier chose is not pinned")
 	assert.Equal(t, before, el.Options, "the caller's eligibility is not narrowed")
 
 	calls := client.AskCalls()
@@ -313,8 +313,8 @@ func TestRouteStageSequence(t *testing.T) {
 }
 
 // failingAt answers with pick until the stage asked under level, which fails with err.
-func failingAt(level, pick string, err error) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
+func failingAt(level, pick string, err error) *mocks.ClassifierMock {
+	return &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 		if id, _, _ := stageAsked(req); id == level {
 			return nil, err
 		}
@@ -338,7 +338,7 @@ func TestRouteStageFailure(t *testing.T) {
 		assert.Equal(t, []Stage{{Level: "cli", Choice: "alpha"}}, stageSummary(d.Stages), "completed stages kept")
 		assert.Empty(t, d.CLI, "the partial decision is discarded")
 		assert.Empty(t, d.OptionID)
-		assert.False(t, d.Pinned, "a CLI Jev chose never pins")
+		assert.False(t, d.Pinned, "a CLI the classifier chose never pins")
 	})
 	t.Run("several CLIs: the model stage succeeds, the effort stage fails", func(t *testing.T) {
 		req := &args.Request{}
@@ -356,7 +356,7 @@ func TestRouteStageFailure(t *testing.T) {
 		require.ErrorIs(t, d.Undecided, boom)
 		assert.Equal(t, "alpha", d.CLI)
 		assert.Equal(t, "strong-model", d.Model)
-		assert.Empty(t, d.Effort, "the effort Jev never chose")
+		assert.Empty(t, d.Effort, "the effort classifier never chose")
 		assert.Empty(t, d.OptionID)
 		assert.False(t, d.Pinned)
 		assert.Equal(t, []Stage{{Level: "cli", Choice: "alpha", Skipped: true}, {Level: "model", Choice: "strong", Skipped: true}},
@@ -380,7 +380,7 @@ func TestRouteStagesSplitState(t *testing.T) {
 			return stageAnswers(req, "strong@low", 0.8, rest), nil
 		}
 	}
-	route := func(t *testing.T, client *mocks.JevClientMock) (Decision, int, error) {
+	route := func(t *testing.T, client *mocks.ClassifierMock) (Decision, int, error) {
 		t.Helper()
 		r := newRouter(t, cfg, cat, client)
 		split, err := c.Split(r.budget)
@@ -393,7 +393,7 @@ func TestRouteStagesSplitState(t *testing.T) {
 	}
 
 	t.Run("pooled per level by relevance; every chunk narrowed the same", func(t *testing.T) {
-		client := &mocks.JevClientMock{AskFunc: answersOnly(mixed(0.9, 0.01))}
+		client := &mocks.ClassifierMock{AskFunc: answersOnly(mixed(0.9, 0.01))}
 		d, n, err := route(t, client)
 		require.NoError(t, err)
 		assert.Equal(t, "worker@high", d.OptionID, "the relevant chunk wins every level")
@@ -425,13 +425,13 @@ func TestRouteStagesSplitState(t *testing.T) {
 		}
 	})
 	t.Run("all-zero relevance: a plain mean, so the other chunks outvote the first", func(t *testing.T) {
-		d, _, err := route(t, &mocks.JevClientMock{AskFunc: answersOnly(mixed(0, 0))})
+		d, _, err := route(t, &mocks.ClassifierMock{AskFunc: answersOnly(mixed(0, 0))})
 		require.NoError(t, err)
 		assert.Equal(t, "alpha", d.Stages[0].Choice)
 		assert.Equal(t, "strong@low", d.OptionID)
 	})
 	t.Run("a chunk failing at a later level fails the routing, earlier stages kept", func(t *testing.T) {
-		client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
+		client := &mocks.ClassifierMock{AskFunc: answersOnly(func(ctx context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 			if id, _, _ := stageAsked(req); id == LevelEffort && req.State.(prompt.ChunkState).Chunk.Index == 2 {
 				return nil, &classifier.StatusError{Status: 500}
 			}
@@ -496,7 +496,7 @@ func TestRouteStageRejectedWholeRequestIsNotResent(t *testing.T) {
 	for i, lv := range routeLevels {
 		for _, rj := range rejections {
 			t.Run(lv.name+"/"+rj.name, func(t *testing.T) {
-				client := &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
+				client := &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 					if id, _, _ := stageAsked(req); id == lv.name {
 						return nil, rj.err
 					}
@@ -521,7 +521,7 @@ func TestRouteStageRejectedWholeRequestIsNotResent(t *testing.T) {
 func TestRouteStageRejectedChunkIsNotResent(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	c := captured("START " + filler(200_000))
-	split, err := c.Split(newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget)
+	split, err := c.Split(newRouter(t, cfg, cat, &mocks.ClassifierMock{}).budget)
 	require.NoError(t, err)
 	require.NotNil(t, split)
 	n := len(split.Chunks)
@@ -531,7 +531,7 @@ func TestRouteStageRejectedChunkIsNotResent(t *testing.T) {
 		for _, rj := range rejections {
 			t.Run(lv.name+"/"+rj.name, func(t *testing.T) {
 				g := newGate(n)
-				client := &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
+				client := &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 					st, ok := req.State.(prompt.ChunkState)
 					if !ok {
 						return nil, fmt.Errorf("unexpected state %T", req.State)
@@ -578,7 +578,7 @@ func TestRouteStageDeadline(t *testing.T) {
 
 func testRouteStageDeadline(t *testing.T) {
 	cfg, cat := requestFixture(t)
-	client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
+	client := &mocks.ClassifierMock{AskFunc: answersOnly(func(ctx context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 		if id, _, _ := stageAsked(req); id == LevelCLI {
 			time.Sleep(2 * time.Second) // the cli stage answers just after the deadline passes
 			return certain(req, pickHigh), nil
@@ -632,7 +632,7 @@ func TestRouteStageMalformedAnswers(t *testing.T) {
 		for _, cr := range corruptions {
 			for i, lv := range routeLevels {
 				t.Run(state.name+"/"+cr.name+"/"+lv.name, func(t *testing.T) {
-					client := &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
+					client := &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 						st, chunk := req.State.(prompt.ChunkState)
 						answers := certain(req, pickHigh)
 						if chunk {
@@ -736,7 +736,7 @@ func TestBudgetPolicyOverBudget(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, cat := requestFixture(t)
 			tc.mutate(&cfg.Agrouter)
-			_, err := New(cfg, cat, &mocks.JevClientMock{})
+			_, err := New(cfg, cat, &mocks.ClassifierMock{})
 			require.ErrorIs(t, err, prompt.ErrQuestionsOverBudget)
 			assert.Contains(t, err.Error(), "config: [classifier]")
 			for _, w := range tc.want {

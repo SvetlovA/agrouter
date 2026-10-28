@@ -22,8 +22,8 @@ import (
 // evalMock answers each stage question with pick's part (probability 1, confidence 0.8; see
 // pickAt), the complexity Score with its last level, and the Nouls (relevance, evidence) with 0.5,
 // over whatever criteria each request sends.
-func evalMock(pick string) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
+func evalMock(pick string) *mocks.ClassifierMock {
+	return &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 		out := map[string]classifier.Answer{}
 		for id, q := range req.Questions {
 			if q.Type == classifier.TypeNoul {
@@ -106,7 +106,7 @@ func TestLoadEvalCases_SeedSet(t *testing.T) {
 	assertMidText(t, midText.FileText, "Action item for the agent")
 	require.Len(t, midText.DocTexts, 1)
 	assertMidText(t, midText.DocTexts[0], "## Outbound calls")
-	b := newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget
+	b := newRouter(t, cfg, cat, &mocks.ClassifierMock{}).budget
 	assert.Greater(t, len((&prompt.Result{Docs: midText.DocTexts}).SplitDocs(b)), 1, "the doc is scored in chunks")
 
 	distant := byName["distant-chunk-dependency"]
@@ -237,7 +237,7 @@ func TestRunEvalCase(t *testing.T) {
 		}
 	})
 
-	t.Run("jev failing with the CLI known is an error, not a guess", func(t *testing.T) {
+	t.Run("classifier failing with the CLI known is an error, not a guess", func(t *testing.T) {
 		r := newRouter(t, cfg, cat, failing(classifier.ErrMalformed))
 		res := runEvalCase(ctx, r, cat, evalCase{Name: "f", Prompt: "x", CLI: "claude", Acceptable: []string{"claude-haiku-5-5@low"}},
 			t.TempDir())

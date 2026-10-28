@@ -1,5 +1,5 @@
 {
-  "model": "test-jev",
+  "model": "test-classifier",
   "state": {
     "docs": [
       "# Payments\n\nTwelve services, PCI scope, Kafka between them.\n",

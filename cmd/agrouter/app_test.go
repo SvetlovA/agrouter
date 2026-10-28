@@ -361,7 +361,7 @@ func (e *env) app(stdin io.Reader, stdout, stderr io.Writer, child CommandRunner
 		getenv:   os.Getenv,
 		workDir:  e.workDir,
 		embedded: defaults.Config,
-		newClassifier: func(_, key string, longContext bool) router.JevClient {
+		newClassifier: func(_, key string, longContext bool) router.Classifier {
 			return newClassifierClient(e.jev.srv.URL, key, longContext)
 		},
 		runner:  child,
@@ -660,7 +660,7 @@ func TestApp_ClassifierAPIKeyPrecedence(t *testing.T) {
 			a := e.app(nil, &stdout, &stderr, runner.Runner{})
 			var keys []string
 			factory := a.newClassifier
-			a.newClassifier = func(url, key string, longContext bool) router.JevClient {
+			a.newClassifier = func(url, key string, longContext bool) router.Classifier {
 				keys = append(keys, key)
 				return factory(url, key, longContext)
 			}
@@ -800,7 +800,7 @@ func TestApp_Errors(t *testing.T) {
 		r := e.run([]string{"--jev-api-key=", "fix it"}, nil)
 		assert.Equal(t, 2, r.code)
 		assert.Equal(t, 1, strings.Count(r.stderr, "\n"), r.stderr)
-		assert.True(t, strings.HasPrefix(r.stderr, "agrouter: jev cannot decide between claude, codex"), r.stderr)
+		assert.True(t, strings.HasPrefix(r.stderr, "agrouter: classifier cannot decide between claude, codex"), r.stderr)
 		d := decision(t, r.stdout)
 		assert.Subset(t, d, map[string]any{"cli": nil, "model": nil, "effort": nil})
 		assert.Equal(t, map[string]any{"code": "jev_no_key", "stage": "cli",

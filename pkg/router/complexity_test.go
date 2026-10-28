@@ -52,8 +52,8 @@ func complexityAnswer(rating float64) classifier.Answer {
 }
 
 // docMock answers every doc request with fn, given the doc chunk (zero for the whole-docs state).
-func docMock(fn func(c prompt.DocChunk, whole bool) (map[string]classifier.Answer, error)) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
+func docMock(fn func(c prompt.DocChunk, whole bool) (map[string]classifier.Answer, error)) *mocks.ClassifierMock {
+	return &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 		switch st := req.State.(type) {
 		case prompt.DocsState:
 			return fn(prompt.DocChunk{}, true)
@@ -170,7 +170,7 @@ func TestComplexitySingleRequest(t *testing.T) {
 
 func TestComplexityChunked(t *testing.T) {
 	cfg, cat := embedded(t)
-	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
+	r := newRouter(t, cfg, cat, &mocks.ClassifierMock{})
 	b := r.budget
 	docs := &prompt.Result{Docs: []string{docsOf("ENTERPRISE", 2*b.Doc), docsOf("STYLE", 3*b.Doc)}}
 	chunks := docs.SplitDocs(b)
@@ -222,7 +222,7 @@ func TestComplexityChunked(t *testing.T) {
 
 func TestComplexityFailures(t *testing.T) {
 	cfg, cat := embedded(t)
-	b := newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget
+	b := newRouter(t, cfg, cat, &mocks.ClassifierMock{}).budget
 	small := &prompt.Result{Docs: []string{"a small CLI"}}
 	big := &prompt.Result{Docs: []string{docsOf("START", 3*b.Doc)}}
 
@@ -287,7 +287,7 @@ func TestComplexityFailures(t *testing.T) {
 
 func TestComplexityRejectedRequestsAreNotResent(t *testing.T) {
 	cfg, cat := embedded(t)
-	b := newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget
+	b := newRouter(t, cfg, cat, &mocks.ClassifierMock{}).budget
 	small := &prompt.Result{Docs: []string{"a small CLI"}}
 	big := &prompt.Result{Docs: []string{docsOf("START", 3*b.Doc)}}
 	n := len(big.SplitDocs(b))
@@ -354,7 +354,7 @@ func testComplexityStopsOnDeadline(t *testing.T) {
 	cfg, cat := embedded(t)
 	var mu sync.Mutex
 	started := 0
-	client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, _ classifier.Request) (map[string]classifier.Answer, error) {
+	client := &mocks.ClassifierMock{AskFunc: answersOnly(func(ctx context.Context, _ classifier.Request) (map[string]classifier.Answer, error) {
 		mu.Lock()
 		started++
 		mu.Unlock()
@@ -378,7 +378,7 @@ func testComplexityStopsOnDeadline(t *testing.T) {
 func TestComplexitySingleRequestDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cfg, cat := embedded(t)
-		client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, _ classifier.Request) (map[string]classifier.Answer, error) {
+		client := &mocks.ClassifierMock{AskFunc: answersOnly(func(ctx context.Context, _ classifier.Request) (map[string]classifier.Answer, error) {
 			<-ctx.Done()
 			return nil, ctx.Err()
 		})}

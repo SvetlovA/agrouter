@@ -260,7 +260,7 @@ func TestApp_FailureReasons(t *testing.T) {
 
 				assert.Equal(t, exitUsage, r.code)
 				assert.Equal(t, 1, strings.Count(r.stderr, "\n"), r.stderr)
-				assert.True(t, strings.HasPrefix(r.stderr, "agrouter: jev cannot decide between alpha, beta"), r.stderr)
+				assert.True(t, strings.HasPrefix(r.stderr, "agrouter: classifier cannot decide between alpha, beta"), r.stderr)
 				d := decision(t, r.stdout)
 				assert.Subset(t, d, map[string]any{"cli": nil, "model": nil, "effort": nil})
 				reason, _ := d["reason"].(map[string]any)

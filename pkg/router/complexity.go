@@ -14,7 +14,7 @@ import (
 type DocScore struct {
 	Index      int // as sent; the whole-docs request is 1 of 1
 	Of         int
-	Score      float64 // Jev's Score normalized from its level range to 0 to 10
+	Score      float64 // the classifier's Score normalized from its level range to 0 to 10
 	Confidence float64 // recorded only; never part of the reduce weight
 	Evidence   float64 // the Noul as answered: the request's weight in the reduce
 	Estimated  int     // agrouter's token estimate of the request
@@ -63,7 +63,7 @@ func (r *Router) complexity(ctx context.Context, captured *prompt.Result) (*Comp
 
 // askDocs sends one doc request and scores its validated answers.
 func (r *Router) askDocs(ctx context.Context, state any, questions map[string]classifier.Question) (DocScore, error) {
-	resp, err := r.jev.Ask(ctx, classifier.Request{Model: r.cfg.Classifier.Model, State: state, Questions: questions})
+	resp, err := r.classifier.Ask(ctx, classifier.Request{Model: r.cfg.Classifier.Model, State: state, Questions: questions})
 	if err != nil {
 		return DocScore{}, fmt.Errorf("doc request: %w", r.sized(err, state, questions))
 	}
@@ -76,7 +76,7 @@ func (r *Router) askDocs(ctx context.Context, state any, questions map[string]cl
 	if !ok {
 		return DocScore{}, fmt.Errorf("%w: %q", classifier.ErrEmptyAnswer, questionEvidence)
 	}
-	// the client validates Score answers; also check completeness for alternate JevClient implementations
+	// the client validates Score answers; also check completeness for alternate Classifier implementations
 	var total float64
 	for i := range complexityLevels {
 		p, ok := level.Probabilities[strconv.Itoa(i)]

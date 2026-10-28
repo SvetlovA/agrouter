@@ -24,7 +24,7 @@ type ChunkResult struct {
 	Index         int // 1-based position in the chunk sequence
 	Of            int
 	Relevance     float64 // the Noul as answered: the chunk's weight in the pool
-	Confidence    float64 // Jev's Choice confidence, recorded only; never part of the pool weight
+	Confidence    float64 // the classifier's Choice confidence, recorded only; never part of the pool weight
 	Choice        string
 	Probabilities map[string]float64 // every criterion, retained for verbose reporting
 	Top           []Score
@@ -33,7 +33,7 @@ type ChunkResult struct {
 }
 
 // Pooled is how a split state decided one level: every chunk's answers in sequence order and the pooled
-// scores. It has no confidence: a pooled decision is agrouter's, not a Jev choice.
+// scores. It has no confidence: a pooled decision is agrouter's, not a classifier choice.
 type Pooled struct {
 	Chunks []ChunkResult
 	Top    []Score
@@ -50,7 +50,7 @@ type routeAnswer struct {
 type slot = piece[prompt.Chunk, routeAnswer]
 
 // pooled asks lv's question of every chunk, all at once, and pools the answers over gs, returning
-// the winning group's index. Any chunk failure means Jev cannot decide; a rejected chunk is never resent.
+// the winning group's index. Any chunk failure means the classifier cannot decide; a rejected chunk is never resent.
 func (r *Router) pooled(ctx context.Context, el *Eligibility, lv level, gs []group, split *prompt.Split) (int, *Pooled, error) {
 	questions := map[string]classifier.Question{
 		lv.name:           stageQuestion(r.cfg, lv, chunkGuide, gs, el.effort),
@@ -81,7 +81,7 @@ func (r *Router) pooled(ctx context.Context, el *Eligibility, lv level, gs []gro
 func (r *Router) askChunk(ctx context.Context, id string, names []string, anchor prompt.Anchor,
 	questions map[string]classifier.Question, c prompt.Chunk) (routeAnswer, error) {
 	state := prompt.ChunkState{Anchor: anchor, Chunk: c}
-	resp, err := r.jev.Ask(ctx, classifier.Request{Model: r.cfg.Classifier.Model, State: state, Questions: questions})
+	resp, err := r.classifier.Ask(ctx, classifier.Request{Model: r.cfg.Classifier.Model, State: state, Questions: questions})
 	if err != nil {
 		return routeAnswer{}, fmt.Errorf("chunk request: %w", r.sized(err, state, questions))
 	}

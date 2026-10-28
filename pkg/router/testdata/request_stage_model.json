@@ -1,5 +1,5 @@
 {
-  "model": "test-jev",
+  "model": "test-classifier",
   "state": {
     "prompt": "fix the flaky test in pkg/foo/foo_test.go",
     "files": [

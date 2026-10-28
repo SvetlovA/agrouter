@@ -9,22 +9,22 @@ import (
 	"sync"
 )
 
-// JevClientMock is a mock implementation of router.JevClient.
+// ClassifierMock is a mock implementation of router.Classifier.
 //
-//	func TestSomethingThatUsesJevClient(t *testing.T) {
+//	func TestSomethingThatUsesClassifier(t *testing.T) {
 //
-//		// make and configure a mocked router.JevClient
-//		mockedJevClient := &JevClientMock{
+//		// make and configure a mocked router.Classifier
+//		mockedClassifier := &ClassifierMock{
 //			AskFunc: func(ctx context.Context, req classifier.Request) (classifier.Response, error) {
 //				panic("mock out the Ask method")
 //			},
 //		}
 //
-//		// use mockedJevClient in code that requires router.JevClient
+//		// use mockedClassifier in code that requires router.Classifier
 //		// and then make assertions.
 //
 //	}
-type JevClientMock struct {
+type ClassifierMock struct {
 	// AskFunc mocks the Ask method.
 	AskFunc func(ctx context.Context, req classifier.Request) (classifier.Response, error)
 
@@ -42,9 +42,9 @@ type JevClientMock struct {
 }
 
 // Ask calls AskFunc.
-func (mock *JevClientMock) Ask(ctx context.Context, req classifier.Request) (classifier.Response, error) {
+func (mock *ClassifierMock) Ask(ctx context.Context, req classifier.Request) (classifier.Response, error) {
 	if mock.AskFunc == nil {
-		panic("JevClientMock.AskFunc: method is nil but JevClient.Ask was just called")
+		panic("ClassifierMock.AskFunc: method is nil but Classifier.Ask was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
@@ -62,8 +62,8 @@ func (mock *JevClientMock) Ask(ctx context.Context, req classifier.Request) (cla
 // AskCalls gets all the calls that were made to Ask.
 // Check the length with:
 //
-//	len(mockedJevClient.AskCalls())
-func (mock *JevClientMock) AskCalls() []struct {
+//	len(mockedClassifier.AskCalls())
+func (mock *ClassifierMock) AskCalls() []struct {
 	Ctx context.Context
 	Req classifier.Request
 } {

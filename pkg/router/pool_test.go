@@ -55,9 +55,9 @@ func chunkAnswers(route classifier.Answer, relevance float64) map[string]classif
 }
 
 // chunked is a mock answering chunk requests with fn; a single request fails.
-func chunked(t *testing.T, fn func(classifier.Request, prompt.ChunkState) (map[string]classifier.Answer, error)) *mocks.JevClientMock {
+func chunked(t *testing.T, fn func(classifier.Request, prompt.ChunkState) (map[string]classifier.Answer, error)) *mocks.ClassifierMock {
 	t.Helper()
-	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
+	return &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 		st, ok := req.State.(prompt.ChunkState)
 		if !ok {
 			return nil, fmt.Errorf("unexpected state %T", req.State)
@@ -76,7 +76,7 @@ func byMarker(req classifier.Request, st prompt.ChunkState) (map[string]classifi
 }
 
 // stageCalls are the requests asked at level, in call order.
-func stageCalls(client *mocks.JevClientMock, level string) []classifier.Request {
+func stageCalls(client *mocks.ClassifierMock, level string) []classifier.Request {
 	var out []classifier.Request
 	for _, c := range client.AskCalls() {
 		if id, _, _ := stageAsked(c.Req); id == level {
@@ -233,7 +233,7 @@ func TestRouteChunked(t *testing.T) {
 	req := &args.Request{CLI: "claude"}
 	el := Eligible(cat, req)
 	c := captured("HARD: keep the public API stable while fixing the parser\n" + filler(600_000))
-	split, err := c.Split(newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget)
+	split, err := c.Split(newRouter(t, cfg, cat, &mocks.ClassifierMock{}).budget)
 	require.NoError(t, err)
 	require.Greater(t, len(split.Chunks), 4)
 
@@ -269,7 +269,7 @@ func TestRouteChunked(t *testing.T) {
 	assert.True(t, d.Stages[0].Skipped, "--cli fixes the cli stage")
 	for i, want := range []string{"claude-opus-5-5", "high"} {
 		st := d.Stages[i+1]
-		assert.Nil(t, st.Answer, "a pooled decision is not a Jev choice")
+		assert.Nil(t, st.Answer, "a pooled decision is not a classifier choice")
 		require.NotNil(t, st.Pooled, st.Level)
 		assert.Equal(t, want, st.Choice)
 		assert.Equal(t, want, st.Pooled.Top[0].ID)
@@ -453,7 +453,7 @@ func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			client := &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
+			client := &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 				return tc.ask(req)
 			})}
 			r := newRouter(t, cfg, cat, client)
@@ -501,7 +501,7 @@ func testRouteChunkedStopsOnDeadline(t *testing.T) {
 	el := Eligible(cat, req)
 	var mu sync.Mutex
 	started := 0
-	client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, _ classifier.Request) (map[string]classifier.Answer, error) {
+	client := &mocks.ClassifierMock{AskFunc: answersOnly(func(ctx context.Context, _ classifier.Request) (map[string]classifier.Answer, error) {
 		mu.Lock()
 		started++
 		mu.Unlock()
@@ -530,7 +530,7 @@ func testRouteChunkedAnsweredAtDeadlineStands(t *testing.T) {
 	cfg, cat := embedded(t)
 	req := &args.Request{CLI: "claude"}
 	el := Eligible(cat, req)
-	client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
+	client := &mocks.ClassifierMock{AskFunc: answersOnly(func(ctx context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 		<-ctx.Done() // every chunk answers just as the deadline passes
 		return stageAnswers(req, "claude-sonnet-5-5@low", 0.9, 0.5), nil
 	})}

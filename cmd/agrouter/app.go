@@ -39,7 +39,7 @@ type app struct {
 	getenv        func(string) string
 	workDir       string
 	embedded      []byte
-	newClassifier func(url, key string, longContext bool) router.JevClient
+	newClassifier func(url, key string, longContext bool) router.Classifier
 	runner        CommandRunner
 	checker       ReadinessChecker // exec only
 	now           func() time.Time // nil means time.Now
@@ -56,7 +56,7 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer) *app {
 		getenv:   os.Getenv,
 		workDir:  wd,
 		embedded: defaults.Config,
-		newClassifier: func(url, key string, longContext bool) router.JevClient {
+		newClassifier: func(url, key string, longContext bool) router.Classifier {
 			return newClassifierClient(url, key, longContext)
 		},
 		runner:  runner.Runner{},

@@ -33,7 +33,7 @@ func (e *StageError) Error() string { return e.Stage + " stage: " + e.Err.Error(
 
 func (e *StageError) Unwrap() error { return e.Err }
 
-// level is one routing stage: the options are grouped by key, Jev chooses among the groups' labels,
+// level is one routing stage: the options are grouped by key, the classifier chooses among the groups' labels,
 // and the options are narrowed to the winning group.
 type level struct {
 	name     string                      // question id, confidence key and debug label
@@ -65,7 +65,7 @@ type Stage struct {
 	// Choice is the criterion name chosen, or the value the options share when the level was skipped:
 	// the CLI, the model section (the model name under passthrough), or the effort, empty without one.
 	Choice  string
-	Skipped bool               // one group: Jev not asked
+	Skipped bool               // one group: classifier not asked
 	Answer  *classifier.Answer // the whole-state answer; nil when skipped or pooled
 	Pooled  *Pooled            // the split-state answers; nil otherwise
 	// Estimated and Reported are the tokens of the whole-state request: agrouter's estimate and the
@@ -116,7 +116,7 @@ func skipped(el *Eligibility, lv level, o catalog.Option) Stage {
 	return Stage{Level: lv.name, Choice: choice, Skipped: true}
 }
 
-// skippedStages records every level as skipped for a single option, chosen without Jev.
+// skippedStages records every level as skipped for a single option, chosen without the classifier.
 func skippedStages(el *Eligibility, o catalog.Option) []Stage {
 	out := make([]Stage, len(routeLevels))
 	for i, lv := range routeLevels {
@@ -132,7 +132,7 @@ type routeState struct {
 }
 
 // decide asks the levels in order over a private copy of el's options. A level with one group is
-// skipped; otherwise Jev chooses a group, by one request for a whole state or by pooling one request
+// skipped; otherwise the classifier chooses a group, by one request for a whole state or by pooling one request
 // per chunk, and every later level is asked over that group alone. It returns the last option left
 // and every stage decided, also on error: then the stages completed before the failing one.
 func (r *Router) decide(ctx context.Context, el *Eligibility, captured *prompt.Result) (catalog.Option, []Stage, error) {
@@ -175,7 +175,7 @@ func (r *Router) stage(ctx context.Context, el *Eligibility, lv level, gs []grou
 // ask sends state in one Choice request over gs and returns the chosen group's index and the stage it decided.
 func (r *Router) ask(ctx context.Context, el *Eligibility, lv level, gs []group, state prompt.State) (int, Stage, error) {
 	questions := map[string]classifier.Question{lv.name: stageQuestion(r.cfg, lv, wholeGuide, gs, el.effort)}
-	resp, err := r.jev.Ask(ctx, classifier.Request{Model: r.cfg.Classifier.Model, State: state, Questions: questions})
+	resp, err := r.classifier.Ask(ctx, classifier.Request{Model: r.cfg.Classifier.Model, State: state, Questions: questions})
 	if err != nil {
 		return 0, Stage{}, fmt.Errorf("route request: %w", r.sized(err, state, questions))
 	}

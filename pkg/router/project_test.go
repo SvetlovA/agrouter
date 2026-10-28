@@ -20,8 +20,8 @@ import (
 )
 
 // staged answers doc requests with docs and every routing request (single or chunk) with route.
-func staged(docs func() (map[string]classifier.Answer, error), route func(req classifier.Request) (map[string]classifier.Answer, error)) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
+func staged(docs func() (map[string]classifier.Answer, error), route func(req classifier.Request) (map[string]classifier.Answer, error)) *mocks.ClassifierMock {
+	return &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 		switch req.State.(type) {
 		case prompt.DocsState, prompt.DocChunkState:
 			return docs()
@@ -51,7 +51,7 @@ func projectCapture() *prompt.Result {
 }
 
 // routeRequests are the requests that are not doc requests, in call order.
-func routeRequests(client *mocks.JevClientMock) []classifier.Request {
+func routeRequests(client *mocks.ClassifierMock) []classifier.Request {
 	calls := client.AskCalls()
 	out := make([]classifier.Request, 0, len(calls))
 	for _, c := range calls {
@@ -158,9 +158,9 @@ func TestRouteProjectSkippedWithoutDocText(t *testing.T) {
 	}
 }
 
-func TestRouteProjectOneOptionSkipsJev(t *testing.T) {
+func TestRouteProjectOneOptionSkipsClassifier(t *testing.T) {
 	cfg, cat := requestFixture(t)
-	client := &mocks.JevClientMock{} // Ask panics if called
+	client := &mocks.ClassifierMock{} // Ask panics if called
 	req := &args.Request{Model: "strong-model", Effort: "high"}
 	el := Eligible(cat, req)
 	require.Len(t, el.Options, 1)
@@ -175,7 +175,7 @@ func TestRouteProjectOneOptionSkipsJev(t *testing.T) {
 func TestRouteProjectStageFailure(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	failures := map[string]func() (map[string]classifier.Answer, error){
-		"jev error": func() (map[string]classifier.Answer, error) { return nil, &classifier.StatusError{Status: 500} },
+		"classifier error": func() (map[string]classifier.Answer, error) { return nil, &classifier.StatusError{Status: 500} },
 		"malformed": func() (map[string]classifier.Answer, error) { return map[string]classifier.Answer{}, nil },
 		"deadline":  func() (map[string]classifier.Answer, error) { return nil, context.DeadlineExceeded },
 	}
@@ -233,7 +233,7 @@ func TestRouteProjectUndecidableCaptureSkipsBothStages(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	req := &args.Request{CLI: "alpha"}
 	el := Eligible(cat, req)
-	client := &mocks.JevClientMock{} // Ask panics if called
+	client := &mocks.ClassifierMock{} // Ask panics if called
 	c := &prompt.Result{Docs: []string{"docs"}, Undecidable: context.DeadlineExceeded}
 
 	d, err := newRouter(t, cfg, cat, client).Route(context.Background(), el, req, c)

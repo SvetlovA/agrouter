@@ -115,7 +115,7 @@ func TestDebug_NoKeyAndNoDecision(t *testing.T) {
 	require.NotEmpty(t, lines)
 	assert.Equal(t, "api key: none (flag)", lines[0])
 	assert.True(t, strings.HasPrefix(lines[len(lines)-1], "no decision: "), r.stderr)
-	assert.Contains(t, r.stderr, "agrouter: jev cannot decide")
+	assert.Contains(t, r.stderr, "agrouter: classifier cannot decide")
 }
 
 func TestDebug_SingleOption(t *testing.T) {
@@ -205,7 +205,7 @@ func TestDebug_StagesBeforeAFailureWithTwoCLIs(t *testing.T) {
 	assert.Equal(t, "eligible: 6 option(s) on alpha, beta", lines[1])
 	assert.Regexp(t, `^stage cli: choice alpha, confidence 0\.900, top \[alpha 1\.000, beta 0\.000\], tokens: estimated \d+, provider reported unknown$`,
 		lines[2])
-	assert.True(t, strings.HasPrefix(lines[3], "no decision: jev cannot decide between alpha, beta: model stage: "), lines[3])
+	assert.True(t, strings.HasPrefix(lines[3], "no decision: classifier cannot decide between alpha, beta: model stage: "), lines[3])
 	assert.Contains(t, lines[3], "model stage rejected")
 	assert.True(t, strings.HasSuffix(r.stderr, "\nagrouter: "+strings.TrimPrefix(lines[3], "no decision: ")+"\n"),
 		"the one error line follows the debug lines: %s", r.stderr)
