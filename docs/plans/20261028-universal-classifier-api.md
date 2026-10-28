@@ -248,12 +248,12 @@ Reason codes: `classifier_no_key`, `classifier_unauthorized`, `classifier_timeou
 - [x] run tests - must pass before next task
 
 ### Task 6: Verify acceptance criteria
-- [ ] `[classifier] url/api_key/model` drive the request and its sizing keys drive the budget; `[agrouter]` holds only `timeout`, the two policies and `log_dir`; embedded defaults are Jev
-- [ ] request body unchanged: golden fixtures differ only in the synthetic model value
-- [ ] `grep -ri jev --include='*.go' cmd pkg` hits only tests and `pkg/config/defaults`
-- [ ] run full test suite: `make test`
-- [ ] run lint: `make lint`, also `GOOS=linux`, `GOOS=darwin` and `--build-tags=eval`
-- [ ] verify coverage stays 80%+ per package
+- [x] `[classifier] url/api_key/model` drive the request and its sizing keys drive the budget; `[agrouter]` holds only `timeout`, the two policies and `log_dir`; embedded defaults are Jev
+- [x] request body unchanged: golden fixtures differ only in the synthetic model value
+- [x] `grep -ri jev --include='*.go' cmd pkg` hits only tests and `pkg/config/defaults`
+- [x] run full test suite: `make test`
+- [x] run lint: `make lint`, also `GOOS=linux`, `GOOS=darwin` and `--build-tags=eval`
+- [x] verify coverage stays 80%+ per package
 
 ### Task 7: [Final] Update documentation
 

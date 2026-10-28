@@ -5,8 +5,8 @@
 # every key is written out here. each section kind starts with a key reference: "default" is what
 # agrouter uses when no layer sets the key; "required" keys have no default and must be set.
 # environment variables are set in the process environment, not as keys in this file:
-# TYPESAFE_API_KEY: overrides [classifier] api_key; --jev-api-key takes precedence,
-# including an explicitly empty --jev-api-key, which clears the key.
+# AGROUTER_CLASSIFIER_API_KEY: overrides [classifier] api_key; --api-key takes precedence,
+# including an explicitly empty --api-key, which clears the key.
 # AGROUTER_CONFIG_DIR: directory containing the global config file, replacing
 # ~/.config/agrouter; .agrouter/config in the working directory still overrides it.
 # AGROUTER_DEBUG=1: enables redacted diagnostics on stderr; it is separate from
@@ -52,9 +52,9 @@ log_dir         = .agrouter/logs
 url     = https://api.typesafe.ai/v1/systemone
 # bearer key for the endpoint. Empty = no key. Prefer the env var or the global config;
 # never put it in a local .agrouter/config that may be committed.
-# before using Jev routing, uncomment [classifier] and api_key in the generated global
-# config and enter your TypeSafe API key, or set TYPESAFE_API_KEY in the environment.
-# precedence: --jev-api-key > non-empty TYPESAFE_API_KEY > local > global > embedded.
+# before using the classifier, uncomment [classifier] and api_key in the generated global
+# config and enter your API key, or set AGROUTER_CLASSIFIER_API_KEY in the environment.
+# precedence: --api-key > non-empty AGROUTER_CLASSIFIER_API_KEY > local > global > embedded.
 api_key =
 # pin a versioned id (e.g. jev-1.13.0) to keep routing stable across releases
 model   = jev-latest
