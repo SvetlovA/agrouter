@@ -62,7 +62,7 @@ func TestComplexityGoldenRequest(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := jev.Request{Model: cfg.Agrouter.JevModel, State: tc.state, Questions: complexityQuestions(cfg.Agrouter)}
+			req := jev.Request{Model: cfg.Classifier.Model, State: tc.state, Questions: complexityQuestions(cfg.Agrouter)}
 			got, err := json.MarshalIndent(req, "", "  ")
 			require.NoError(t, err)
 			assert.NotContains(t, string(got), "rename the flag", "the prompt never reaches a doc request")

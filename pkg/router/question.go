@@ -316,10 +316,10 @@ func budget(cfg *config.Config, cat *catalog.Catalog) (prompt.Budget, error) {
 		Complexity: questionLen(questionComplexity, complexityQuestion(cfg.Agrouter.ComplexityPolicy)),
 		Evidence:   questionLen(questionEvidence, evidenceQuestion()),
 	}
-	policy := prompt.Policy{BytesPerToken: cfg.Agrouter.BytesPerToken, RequestTokens: cfg.Agrouter.RequestTokens}
+	policy := prompt.Policy{BytesPerToken: cfg.Classifier.BytesPerToken, RequestTokens: cfg.Classifier.RequestTokens}
 	b, err := prompt.NewBudget(policy, sizes)
 	if err != nil {
-		return b, fmt.Errorf("config: [agrouter]: %w", err)
+		return b, fmt.Errorf("config: [classifier]: %w", err)
 	}
 	return b, nil
 }

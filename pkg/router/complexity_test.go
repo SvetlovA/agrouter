@@ -165,7 +165,7 @@ func TestComplexitySingleRequest(t *testing.T) {
 	require.Len(t, calls, 1)
 	assert.Equal(t, prompt.DocsState{Docs: []string{"# Shop\n\nThree services.\n", "Use gofmt.\n"}}, calls[0].Req.State)
 	assert.Equal(t, complexityQuestions(cfg.Agrouter), calls[0].Req.Questions)
-	assert.Equal(t, cfg.Agrouter.JevModel, calls[0].Req.Model)
+	assert.Equal(t, cfg.Classifier.Model, calls[0].Req.Model)
 }
 
 func TestComplexityChunked(t *testing.T) {

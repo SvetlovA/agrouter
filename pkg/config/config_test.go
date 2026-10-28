@@ -13,15 +13,18 @@ import (
 
 const baseConfig = `
 [agrouter]
-api_key   =
-jev_model = jev-latest
 timeout   = 10s
 routing_policy    = Prefer the cheapest option; compare ` + "`models`" + ` "well".
 complexity_policy = Judge the whole codebase.
-request_tokens    = 20000
-bytes_per_token   = 3
-long_context      = false
 log_dir           = .agrouter/logs
+
+[classifier]
+url             = https://classifier.example.test/v1
+api_key         =
+model           = test-classifier
+long_context    = false
+request_tokens  = 20000
+bytes_per_token = 3
 
 [cli.alpha]
 command               = alpha
@@ -100,15 +103,18 @@ func TestLoad_Embedded(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, Agrouter{
-		APIKeySource:     LayerEmbedded,
-		JevModel:         "jev-latest",
 		Timeout:          10 * time.Second,
 		RoutingPolicy:    "Prefer the cheapest option; compare `models` \"well\".",
 		ComplexityPolicy: "Judge the whole codebase.",
-		RequestTokens:    20000,
-		BytesPerToken:    3,
 		LogDir:           ".agrouter/logs",
 	}, cfg.Agrouter)
+	assert.Equal(t, Classifier{
+		URL:           "https://classifier.example.test/v1",
+		APIKeySource:  LayerEmbedded,
+		Model:         "test-classifier",
+		RequestTokens: 20000,
+		BytesPerToken: 3,
+	}, cfg.Classifier)
 
 	require.Len(t, cfg.CLIs, 2)
 	alpha := cfg.CLIs[0]
@@ -153,9 +159,12 @@ func TestLoad_Embedded(t *testing.T) {
 func TestLoad_Layering(t *testing.T) {
 	global := `
 [agrouter]
-api_key = global-key
 timeout = 20s
 routing_policy = Prefer the strongest option.
+
+[classifier]
+api_key = global-key
+url = https://global.example.test/v1
 
 [cli.alpha]
 exec_args     = ["--print"]
@@ -167,6 +176,9 @@ description = Global description.
 [agrouter]
 timeout = 30s
 complexity_policy = Judge only the architecture.
+
+[classifier]
+model = local-classifier
 
 [cli.alpha]
 model_args = ["--use-model", "{model}"]
@@ -182,9 +194,11 @@ name = local-new
 	require.NoError(t, err)
 
 	assert.Equal(t, 30*time.Second, cfg.Agrouter.Timeout, "local overrides global")
-	assert.Equal(t, "global-key", cfg.Agrouter.APIKey)
-	assert.Equal(t, LayerGlobal, cfg.Agrouter.APIKeySource)
-	assert.Equal(t, "jev-latest", cfg.Agrouter.JevModel, "untouched keys keep the embedded value")
+	assert.Equal(t, "global-key", cfg.Classifier.APIKey)
+	assert.Equal(t, LayerGlobal, cfg.Classifier.APIKeySource)
+	assert.Equal(t, "https://global.example.test/v1", cfg.Classifier.URL, "global overrides the embedded url")
+	assert.Equal(t, "local-classifier", cfg.Classifier.Model, "local overrides the embedded model")
+	assert.Equal(t, 20000, cfg.Classifier.RequestTokens, "untouched keys keep the embedded value")
 	assert.Equal(t, "Prefer the strongest option.", cfg.Agrouter.RoutingPolicy, "global overrides a policy")
 	assert.Equal(t, "Judge only the architecture.", cfg.Agrouter.ComplexityPolicy, "local overrides a policy")
 
@@ -199,58 +213,80 @@ name = local-new
 	assert.Equal(t, "alpha-big-1", cfg.Models[0].Name, "other model keys stay embedded")
 }
 
-func TestLoad_SizingKeysLayering(t *testing.T) {
+func TestLoad_ClassifierLayering(t *testing.T) {
 	tests := []struct {
 		name          string
 		global, local string
-		want          func(t *testing.T, a Agrouter)
+		want          func(t *testing.T, cfg *Config)
 	}{
 		{
 			name: "omitted everywhere keeps the embedded values",
-			want: func(t *testing.T, a Agrouter) {
-				assert.False(t, a.LongContext)
-				assert.Equal(t, 20000, a.RequestTokens)
-				assert.InDelta(t, 3.0, a.BytesPerToken, 0)
-				assert.Equal(t, ".agrouter/logs", a.LogDir)
+			want: func(t *testing.T, cfg *Config) {
+				c := cfg.Classifier
+				assert.Equal(t, "https://classifier.example.test/v1", c.URL)
+				assert.Empty(t, c.APIKey)
+				assert.Equal(t, LayerEmbedded, c.APIKeySource)
+				assert.Equal(t, "test-classifier", c.Model)
+				assert.False(t, c.LongContext)
+				assert.Equal(t, 20000, c.RequestTokens)
+				assert.InDelta(t, 3.0, c.BytesPerToken, 0)
+				assert.Equal(t, ".agrouter/logs", cfg.Agrouter.LogDir)
 			},
 		},
 		{
-			name:   "global overrides the embedded layer and the rest is inherited",
-			global: "[agrouter]\nlong_context = true\nrequest_tokens = 120000\n",
-			want: func(t *testing.T, a Agrouter) {
-				assert.True(t, a.LongContext)
-				assert.Equal(t, 120000, a.RequestTokens)
-				assert.InDelta(t, 3.0, a.BytesPerToken, 0, "omitted in global: embedded value")
-				assert.Equal(t, ".agrouter/logs", a.LogDir, "omitted in global: embedded value")
+			name: "global overrides the embedded layer and the rest is inherited",
+			global: "[classifier]\nurl = https://global.example.test/v1\nmodel = global-model\n" +
+				"long_context = true\nrequest_tokens = 120000\n",
+			want: func(t *testing.T, cfg *Config) {
+				c := cfg.Classifier
+				assert.Equal(t, "https://global.example.test/v1", c.URL)
+				assert.Equal(t, "global-model", c.Model)
+				assert.True(t, c.LongContext)
+				assert.Equal(t, 120000, c.RequestTokens)
+				assert.InDelta(t, 3.0, c.BytesPerToken, 0, "omitted in global: embedded value")
+				assert.Equal(t, LayerEmbedded, c.APIKeySource, "api_key omitted in global: embedded layer")
+				assert.Equal(t, ".agrouter/logs", cfg.Agrouter.LogDir, "[agrouter] is untouched")
 			},
 		},
 		{
-			name:   "local overrides global per key",
-			global: "[agrouter]\nlong_context = true\nrequest_tokens = 120000\nbytes_per_token = 2.5\n",
-			local:  "[agrouter]\nrequest_tokens = 90000\nlong_context = false\nlog_dir = logs/agrouter\n",
-			want: func(t *testing.T, a Agrouter) {
-				assert.False(t, a.LongContext, "local false beats global true")
-				assert.Equal(t, 90000, a.RequestTokens)
-				assert.InDelta(t, 2.5, a.BytesPerToken, 0, "omitted in local: global value")
-				assert.Equal(t, "logs/agrouter", a.LogDir)
+			name: "local overrides global per key",
+			global: "[classifier]\nurl = https://global.example.test/v1\napi_key = g\nmodel = global-model\n" +
+				"long_context = true\nrequest_tokens = 120000\nbytes_per_token = 2.5\n",
+			local: "[classifier]\nurl = https://local.example.test/v1\napi_key = l\nrequest_tokens = 90000\nlong_context = false\n" +
+				"[agrouter]\nlog_dir = logs/agrouter\n",
+			want: func(t *testing.T, cfg *Config) {
+				c := cfg.Classifier
+				assert.Equal(t, "https://local.example.test/v1", c.URL)
+				assert.Equal(t, "l", c.APIKey)
+				assert.Equal(t, LayerLocal, c.APIKeySource)
+				assert.Equal(t, "global-model", c.Model, "omitted in local: global value")
+				assert.False(t, c.LongContext, "local false beats global true")
+				assert.Equal(t, 90000, c.RequestTokens)
+				assert.InDelta(t, 2.5, c.BytesPerToken, 0, "omitted in local: global value")
+				assert.Equal(t, "logs/agrouter", cfg.Agrouter.LogDir)
 			},
 		},
 		{
 			name:  "accepted boolean spellings",
-			local: "[agrouter]\nlong_context = 1\n",
-			want:  func(t *testing.T, a Agrouter) { assert.True(t, a.LongContext) },
+			local: "[classifier]\nlong_context = 1\n",
+			want:  func(t *testing.T, cfg *Config) { assert.True(t, cfg.Classifier.LongContext) },
 		},
 		{
 			name:  "fractional ratio",
-			local: "[agrouter]\nbytes_per_token = 2.75\n",
-			want:  func(t *testing.T, a Agrouter) { assert.InDelta(t, 2.75, a.BytesPerToken, 0) },
+			local: "[classifier]\nbytes_per_token = 2.75\n",
+			want:  func(t *testing.T, cfg *Config) { assert.InDelta(t, 2.75, cfg.Classifier.BytesPerToken, 0) },
+		},
+		{
+			name:  "any url value is kept as written",
+			local: "[classifier]\nurl = not a url\n",
+			want:  func(t *testing.T, cfg *Config) { assert.Equal(t, "not a url", cfg.Classifier.URL) },
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, err := load(t, tc.global, tc.local)
 			require.NoError(t, err)
-			tc.want(t, cfg.Agrouter)
+			tc.want(t, cfg)
 		})
 	}
 }
@@ -281,18 +317,18 @@ func TestLoad_LogDir(t *testing.T) {
 	})
 }
 
-func TestLoad_SizingKeyErrors(t *testing.T) {
+func TestLoad_ClassifierKeyErrors(t *testing.T) {
 	tests := []struct {
 		name  string
 		local string
 		want  string
 	}{
-		{name: "bad long_context", local: "[agrouter]\nlong_context = sometimes\n", want: `[agrouter] long_context = "sometimes" (local `},
-		{name: "request_tokens not a number", local: "[agrouter]\nrequest_tokens = many\n", want: `[agrouter] request_tokens = "many" (local `},
-		{name: "request_tokens fractional", local: "[agrouter]\nrequest_tokens = 1.5\n", want: `[agrouter] request_tokens = "1.5" (local `},
-		{name: "request_tokens with unit", local: "[agrouter]\nrequest_tokens = 30k\n", want: `[agrouter] request_tokens = "30k" (local `},
-		{name: "bytes_per_token not a number", local: "[agrouter]\nbytes_per_token = three\n", want: `[agrouter] bytes_per_token = "three" (local `},
-		{name: "bytes_per_token out of range", local: "[agrouter]\nbytes_per_token = 1e999\n", want: `[agrouter] bytes_per_token = "1e999" (local `},
+		{name: "bad long_context", local: "[classifier]\nlong_context = sometimes\n", want: `[classifier] long_context = "sometimes" (local `},
+		{name: "request_tokens not a number", local: "[classifier]\nrequest_tokens = many\n", want: `[classifier] request_tokens = "many" (local `},
+		{name: "request_tokens fractional", local: "[classifier]\nrequest_tokens = 1.5\n", want: `[classifier] request_tokens = "1.5" (local `},
+		{name: "request_tokens with unit", local: "[classifier]\nrequest_tokens = 30k\n", want: `[classifier] request_tokens = "30k" (local `},
+		{name: "bytes_per_token not a number", local: "[classifier]\nbytes_per_token = three\n", want: `[classifier] bytes_per_token = "three" (local `},
+		{name: "bytes_per_token out of range", local: "[classifier]\nbytes_per_token = 1e999\n", want: `[classifier] bytes_per_token = "1e999" (local `},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -372,6 +408,7 @@ func TestLoad_Errors(t *testing.T) {
 		{name: "bad enabled", local: "[model.alpha-big]\nenabled = nope\n", want: "[model.alpha-big] enabled"},
 		{name: "bad cli enabled", local: "[cli.beta]\nenabled = maybe\n", want: "[cli.beta] enabled"},
 		{name: "unknown agrouter key", local: "[agrouter]\ntimeuot = 1s\n", want: "[agrouter] timeuot"},
+		{name: "unknown classifier key", local: "[classifier]\nendpoint = x\n", want: "[classifier] endpoint (local "},
 		{name: "unknown cli key", local: "[cli.alpha]\ncmd = x\n", want: "[cli.alpha] cmd"},
 		{name: "unknown model key", local: "[model.alpha-big]\neffort = low\n", want: "[model.alpha-big] effort"},
 		{name: "unknown effort key", local: "[effort.alpha.low]\nname = x\n", want: "[effort.alpha.low] name"},
@@ -441,11 +478,28 @@ func TestLoad_RemovedNativeMetadata(t *testing.T) {
 }
 
 func TestLoad_UnknownKeyHidesValue(t *testing.T) {
-	_, err := load(t, "", "[agrouter]\napikey = sk-secret\n")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "[agrouter] apikey (local ")
-	assert.Contains(t, err.Error(), "unknown key")
-	assert.NotContains(t, err.Error(), "sk-secret")
+	for _, section := range []string{"agrouter", "classifier"} {
+		t.Run(section, func(t *testing.T) {
+			_, err := load(t, "", "["+section+"]\napikey = sk-secret\n")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "["+section+"] apikey (local ")
+			assert.Contains(t, err.Error(), "unknown key")
+			assert.NotContains(t, err.Error(), "sk-secret")
+		})
+	}
+}
+
+// the keys that moved to [classifier] are ordinary unknown keys under [agrouter], their values left out
+func TestLoad_MovedKeysUnknownInAgrouter(t *testing.T) {
+	for _, key := range []string{"api_key", "jev_model", "long_context", "request_tokens", "bytes_per_token"} {
+		t.Run(key, func(t *testing.T) {
+			_, err := load(t, "", "[agrouter]\n"+key+" = sk-secret\n")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "[agrouter] "+key+" (local ")
+			assert.Contains(t, err.Error(), "unknown key")
+			assert.NotContains(t, err.Error(), "sk-secret")
+		})
+	}
 }
 
 func TestLoad_ParseErrorHidesLine(t *testing.T) {
@@ -493,9 +547,9 @@ func TestLoad_ErrorNamesEmbeddedLayer(t *testing.T) {
 }
 
 func TestLoad_InlineCommentKeptInValue(t *testing.T) {
-	cfg, err := load(t, "", "[agrouter]\njev_model = jev-1 ; pinned\n")
+	cfg, err := load(t, "", "[classifier]\nmodel = model-1 ; pinned\n")
 	require.NoError(t, err)
-	assert.Equal(t, "jev-1 ; pinned", cfg.Agrouter.JevModel, "IgnoreInlineComment: comments must be on their own lines")
+	assert.Equal(t, "model-1 ; pinned", cfg.Classifier.Model, "IgnoreInlineComment: comments must be on their own lines")
 }
 
 func TestLocalDir(t *testing.T) {
@@ -530,13 +584,13 @@ func TestDefaultPaths(t *testing.T) {
 	t.Run("loads from config dir", func(t *testing.T) {
 		dir := t.TempDir()
 		t.Setenv(EnvConfigDir, dir)
-		writeFile(t, dir, "config", "[agrouter]\napi_key = from-dir\n")
+		writeFile(t, dir, "config", "[classifier]\napi_key = from-dir\n")
 		global, local, err := DefaultPaths(t.TempDir())
 		require.NoError(t, err)
 		cfg, err := Load(Sources{Embedded: []byte(baseConfig), GlobalPath: global, LocalPath: local})
 		require.NoError(t, err)
-		assert.Equal(t, "from-dir", cfg.Agrouter.APIKey)
-		assert.Equal(t, LayerGlobal, cfg.Agrouter.APIKeySource)
+		assert.Equal(t, "from-dir", cfg.Classifier.APIKey)
+		assert.Equal(t, LayerGlobal, cfg.Classifier.APIKeySource)
 	})
 }
 
@@ -563,14 +617,14 @@ func TestResolveAPIKey(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var global, local string
 			if tc.global != "" {
-				global = "[agrouter]\napi_key = " + tc.global + "\n"
+				global = "[classifier]\napi_key = " + tc.global + "\n"
 			}
 			if tc.local != "" {
-				local = "[agrouter]\napi_key = " + tc.local + "\n"
+				local = "[classifier]\napi_key = " + tc.local + "\n"
 			}
 			cfg, err := load(t, global, local)
 			require.NoError(t, err)
-			key, source := ResolveAPIKey(tc.flag, tc.flagSet, tc.env, cfg.Agrouter)
+			key, source := ResolveAPIKey(tc.flag, tc.flagSet, tc.env, cfg.Classifier)
 			assert.Equal(t, tc.wantKey, key)
 			assert.Equal(t, tc.wantSource, source)
 		})

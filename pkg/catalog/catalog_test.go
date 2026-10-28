@@ -18,9 +18,13 @@ const catalogConfig = `
 timeout = 10s
 routing_policy = Prefer cheap.
 complexity_policy = Judge the codebase.
+log_dir = logs
+
+[classifier]
+url = https://classifier.example.test/v1
+model = test-classifier
 request_tokens = 20000
 bytes_per_token = 3
-log_dir = logs
 
 [cli.alpha]
 command     = alpha

@@ -175,7 +175,7 @@ func (r *Router) stage(ctx context.Context, el *Eligibility, lv level, gs []grou
 // ask sends state in one Choice request over gs and returns the chosen group's index and the stage it decided.
 func (r *Router) ask(ctx context.Context, el *Eligibility, lv level, gs []group, state prompt.State) (int, Stage, error) {
 	questions := map[string]jev.Question{lv.name: stageQuestion(r.cfg, lv, wholeGuide, gs, el.effort)}
-	resp, err := r.jev.Ask(ctx, jev.Request{Model: r.cfg.Agrouter.JevModel, State: state, Questions: questions})
+	resp, err := r.jev.Ask(ctx, jev.Request{Model: r.cfg.Classifier.Model, State: state, Questions: questions})
 	if err != nil {
 		return 0, Stage{}, fmt.Errorf("route request: %w", r.sized(err, state, questions))
 	}

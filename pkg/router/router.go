@@ -45,7 +45,7 @@ const providerReserve = 2000
 // New checks request_tokens against the provider's limits and the questions against request_tokens
 // over the whole catalog, and returns a router asking client. Either check failing is a config error.
 func New(cfg *config.Config, cat *catalog.Catalog, client JevClient) (*Router, error) {
-	if err := checkLimits(cfg.Agrouter); err != nil {
+	if err := checkLimits(cfg.Classifier); err != nil {
 		return nil, err
 	}
 	b, err := budget(cfg, cat)
@@ -57,12 +57,12 @@ func New(cfg *config.Config, cat *catalog.Catalog, client JevClient) (*Router, e
 
 // checkLimits is an error when request_tokens, less providerReserve, would pass the provider's
 // limit for one question or for one whole request in the configured mode.
-func checkLimits(a config.Agrouter) error {
-	perQuestion, perRequest := jev.Limits(a.LongContext)
+func checkLimits(c config.Classifier) error {
+	perQuestion, perRequest := jev.Limits(c.LongContext)
 	limit := min(perQuestion, perRequest)
-	if a.RequestTokens > limit-providerReserve {
-		return fmt.Errorf("config: [agrouter]: %w: request_tokens = %d, the provider takes %d per request (long_context = %t) less a %d reserve for the estimate, so at most %d",
-			ErrRequestTokensOverLimit, a.RequestTokens, limit, a.LongContext, providerReserve, limit-providerReserve)
+	if c.RequestTokens > limit-providerReserve {
+		return fmt.Errorf("config: [classifier]: %w: request_tokens = %d, the provider takes %d per request (long_context = %t) less a %d reserve for the estimate, so at most %d",
+			ErrRequestTokensOverLimit, c.RequestTokens, limit, c.LongContext, providerReserve, limit-providerReserve)
 	}
 	return nil
 }

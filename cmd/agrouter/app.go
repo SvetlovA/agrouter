@@ -259,9 +259,9 @@ func (a *app) setup(req *args.Request) (*config.Config, *catalog.Catalog, *route
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	key, source := config.ResolveAPIKey(req.APIKey.Value, req.APIKey.Set, a.getenv(config.EnvAPIKey), cfg.Agrouter)
+	key, source := config.ResolveAPIKey(req.APIKey.Value, req.APIKey.Set, a.getenv(config.EnvAPIKey), cfg.Classifier)
 	a.debug.apiKey(key, source)
-	rt, err := router.New(cfg, cat, a.newJev(key, cfg.Agrouter.LongContext))
+	rt, err := router.New(cfg, cat, a.newJev(key, cfg.Classifier.LongContext))
 	if err != nil {
 		return nil, nil, nil, err
 	}

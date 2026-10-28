@@ -174,18 +174,18 @@ Reason codes: `classifier_no_key`, `classifier_unauthorized`, `classifier_timeou
 - Modify: `cmd/agrouter/app.go` (`:264` long context), `pkg/router/{stage,pool,complexity}.go` (`cfg.Agrouter.JevModel` -> `cfg.Classifier.Model`), `pkg/router/router.go` (`:48`, `checkLimits` `:60-64`), `pkg/router/question.go` (`:319`, `:322`); only the fields move, no renames yet
 - Modify: every test fixture and assertion on the moved fields: `pkg/router/router_test.go:32,204-220`, `pkg/router/overflow_test.go:53-54,116`, `pkg/router/complexity_test.go:168`, `pkg/router/question_test.go:65`, `pkg/config/config_test.go:211-246`, `cmd/agrouter/app_test.go:595` (keep the test model *value* unchanged until Task 3, so golden files do not move yet)
 
-- [ ] add `Classifier` struct and `Config.Classifier`; move `LongContext`, `RequestTokens`, `BytesPerToken` (with their doc comments) from `Agrouter` into it; remove `APIKey`, `APIKeySource`, `JevModel` from `Agrouter`
-- [ ] decode `[classifier]` keys `url`, `api_key`, `model`, `long_context`, `request_tokens`, `bytes_per_token` in `load.go`, tracking `APIKeySource` per layer as today
-- [ ] drop the `api_key`, `jev_model`, `long_context`, `request_tokens`, `bytes_per_token` cases from the `[agrouter]` decoder (`load.go:246-261`)
-- [ ] validate `url` and `model` as required (non-empty), any url value accepted; move the `request_tokens` / `bytes_per_token` checks (`validate.go:51-55`) to `[classifier]` with the section name in their messages
-- [ ] `checkLimits` takes `config.Classifier`; the `[agrouter]` prefix in its error (`router.go:63`) and in the budget error (`question.go:322`) becomes `[classifier]`
-- [ ] `ResolveAPIKey` reads `Classifier`. `EnvAPIKey` keeps its current name until Task 4, so `pkg/runner`'s `TestChildEnv` (`runner_test.go:251-257`) stays green and the key is still stripped from children
-- [ ] update `.agrouter/config` to the new `[classifier]` section
-- [ ] write the `[classifier]` block with the moved sizing keys and their comments, the Jev-only `long_context` note and the commented OpenAI Luna example in `defaults/config`; drop the moved keys from the `[agrouter]` block and its key reference (`install.go` needs no change: it comments out the embedded config generically, `pkg/config/install.go:28-33`)
-- [ ] move the field at the call sites in `cmd/agrouter/app.go` and `pkg/router`, and in all their tests, so the tree compiles and tests pass (no renames there yet)
-- [ ] write tests: `[classifier]` loading and layering for all six keys, key precedence (flag > env > local > global > embedded)
-- [ ] write tests: empty `url`, empty `model`, invalid `request_tokens` / `bytes_per_token` under `[classifier]`, the over-limit startup error naming `[classifier]`
-- [ ] run tests - must pass before next task
+- [x] add `Classifier` struct and `Config.Classifier`; move `LongContext`, `RequestTokens`, `BytesPerToken` (with their doc comments) from `Agrouter` into it; remove `APIKey`, `APIKeySource`, `JevModel` from `Agrouter`
+- [x] decode `[classifier]` keys `url`, `api_key`, `model`, `long_context`, `request_tokens`, `bytes_per_token` in `load.go`, tracking `APIKeySource` per layer as today
+- [x] drop the `api_key`, `jev_model`, `long_context`, `request_tokens`, `bytes_per_token` cases from the `[agrouter]` decoder (`load.go:246-261`)
+- [x] validate `url` and `model` as required (non-empty), any url value accepted; move the `request_tokens` / `bytes_per_token` checks (`validate.go:51-55`) to `[classifier]` with the section name in their messages
+- [x] `checkLimits` takes `config.Classifier`; the `[agrouter]` prefix in its error (`router.go:63`) and in the budget error (`question.go:322`) becomes `[classifier]`
+- [x] `ResolveAPIKey` reads `Classifier`. `EnvAPIKey` keeps its current name until Task 4, so `pkg/runner`'s `TestChildEnv` (`runner_test.go:251-257`) stays green and the key is still stripped from children
+- [x] update `.agrouter/config` to the new `[classifier]` section
+- [x] write the `[classifier]` block with the moved sizing keys and their comments, the Jev-only `long_context` note and the commented OpenAI Luna example in `defaults/config`; drop the moved keys from the `[agrouter]` block and its key reference (`install.go` needs no change: it comments out the embedded config generically, `pkg/config/install.go:28-33`)
+- [x] move the field at the call sites in `cmd/agrouter/app.go` and `pkg/router`, and in all their tests, so the tree compiles and tests pass (no renames there yet)
+- [x] write tests: `[classifier]` loading and layering for all six keys, key precedence (flag > env > local > global > embedded)
+- [x] write tests: empty `url`, empty `model`, invalid `request_tokens` / `bytes_per_token` under `[classifier]`, the over-limit startup error naming `[classifier]`
+- [x] run tests - must pass before next task
 
 ### Task 2: Rename pkg/jev to pkg/classifier
 

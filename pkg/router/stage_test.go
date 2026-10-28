@@ -738,7 +738,7 @@ func TestBudgetPolicyOverBudget(t *testing.T) {
 			tc.mutate(&cfg.Agrouter)
 			_, err := New(cfg, cat, &mocks.JevClientMock{})
 			require.ErrorIs(t, err, prompt.ErrQuestionsOverBudget)
-			assert.Contains(t, err.Error(), "config: [agrouter]")
+			assert.Contains(t, err.Error(), "config: [classifier]")
 			for _, w := range tc.want {
 				assert.Contains(t, err.Error(), w)
 			}

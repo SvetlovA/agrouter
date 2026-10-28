@@ -603,8 +603,8 @@ func TestApp_LongContext(t *testing.T) {
 		header string
 	}{
 		{name: "off by default"},
-		{name: "off when set to false", config: "[agrouter]\nlong_context = false\n"},
-		{name: "on when set", config: "[agrouter]\nlong_context = true\n", header: "true"},
+		{name: "off when set to false", config: "[classifier]\nlong_context = false\n"},
+		{name: "on when set", config: "[classifier]\nlong_context = true\n", header: "true"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -618,6 +618,59 @@ func TestApp_LongContext(t *testing.T) {
 			require.Equal(t, 0, r.code, r.stderr)
 			headers := e.jev.longContextHeaders()
 			assert.Equal(t, repeated(tt.header, 3), headers, "every cli, model and effort request alike")
+		})
+	}
+}
+
+// the classifier key resolves flag > env > local > global > embedded, and the source is reported
+func TestApp_ClassifierAPIKeyPrecedence(t *testing.T) {
+	tests := []struct {
+		name     string
+		global   string
+		local    string
+		env      string
+		argv     []string
+		wantKey  string
+		wantExit int
+		wantLine string // the key line of the debug output
+	}{
+		{name: "global config", global: "global-key", env: "", wantKey: "global-key", wantLine: "api key: from global"},
+		{name: "local over global", global: "global-key", local: "local-key", env: "", wantKey: "local-key", wantLine: "api key: from local"},
+		{name: "env over config", global: "global-key", local: "local-key", env: "env-key", wantKey: "env-key", wantLine: "api key: from env"},
+		{name: "flag over env", local: "local-key", env: "env-key", argv: []string{"--jev-api-key=flag-key"},
+			wantKey: "flag-key", wantLine: "api key: from flag"},
+		{name: "empty flag clears the key", local: "local-key", env: "env-key", argv: []string{"--jev-api-key="},
+			wantKey: "", wantLine: "api key: none (flag)", wantExit: exitUsage},
+		{name: "embedded without a key", env: "", wantKey: "", wantLine: "api key: none (embedded)", wantExit: exitUsage},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.jev.pick = "claude-sonnet-5-5@low"
+			t.Setenv(config.EnvAPIKey, tc.env)
+			t.Setenv(envDebug, "1")
+			if tc.global != "" {
+				e.globalConfig("[classifier]\napi_key = " + tc.global + "\n")
+			}
+			if tc.local != "" {
+				require.NoError(t, os.MkdirAll(filepath.Join(e.workDir, ".agrouter"), 0o750))
+				require.NoError(t, os.WriteFile(filepath.Join(e.workDir, ".agrouter", "config"),
+					[]byte("[classifier]\napi_key = "+tc.local+"\n"), 0o600))
+			}
+			var stdout, stderr bytes.Buffer
+			a := e.app(nil, &stdout, &stderr, runner.Runner{})
+			var keys []string
+			factory := a.newJev
+			a.newJev = func(key string, longContext bool) router.JevClient {
+				keys = append(keys, key)
+				return factory(key, longContext)
+			}
+
+			code := a.run(append(slices.Clone(tc.argv), "fix the typo in README"))
+
+			require.Equal(t, tc.wantExit, code, stderr.String())
+			assert.Equal(t, []string{tc.wantKey}, keys)
+			assert.Contains(t, stderr.String(), "agrouter debug: "+tc.wantLine+"\n")
 		})
 	}
 }
@@ -1603,8 +1656,8 @@ func TestApp_MirrorLog(t *testing.T) {
 			argv   []string
 		}{
 			{"usage error", "", []string{"--no-such-flag"}},
-			{"invalid config", "\n[agrouter]\nrequest_tokens = 0\n", []string{"fix it"}},
-			{"request_tokens over the provider limit", "\n[agrouter]\nrequest_tokens = 40000\n", []string{"fix it"}},
+			{"invalid config", "\n[classifier]\nrequest_tokens = 0\n", []string{"fix it"}},
+			{"request_tokens over the provider limit", "\n[classifier]\nrequest_tokens = 40000\n", []string{"fix it"}},
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {

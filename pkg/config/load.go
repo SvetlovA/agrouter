@@ -50,8 +50,8 @@ func DefaultPaths(workDir string) (global, local string, err error) {
 
 // ResolveAPIKey applies the key precedence and returns the key with the layer that decided it:
 // --jev-api-key when given (an explicit empty value clears the key), then a non-empty TYPESAFE_API_KEY,
-// then api_key from the merged config (local > global > embedded).
-func ResolveAPIKey(flagValue string, flagSet bool, envValue string, cfg Agrouter) (key, source string) {
+// then [classifier] api_key from the merged config (local > global > embedded).
+func ResolveAPIKey(flagValue string, flagSet bool, envValue string, cfg Classifier) (key, source string) {
 	switch {
 	case flagSet:
 		return flagValue, LayerFlag
@@ -193,6 +193,8 @@ func (m *merged) decodeSection(cfg *Config, s *section, disabled map[string]bool
 	switch name := s.name; {
 	case name == "agrouter":
 		return s.decodeAgrouter(&cfg.Agrouter)
+	case name == "classifier":
+		return s.decodeClassifier(&cfg.Classifier)
 	case strings.HasPrefix(name, "cli."):
 		cliName, sub, _ := cliSection(name)
 		if sub != "" {
@@ -243,28 +245,45 @@ func (s *section) decodeAgrouter(a *Agrouter) error {
 		e := s.values[k]
 		var err error
 		switch k {
-		case "api_key":
-			a.APIKey, a.APIKeySource = e.value, e.layer
-		case "jev_model":
-			a.JevModel = e.value
 		case "timeout":
 			a.Timeout, err = time.ParseDuration(e.value)
 		case "routing_policy":
 			a.RoutingPolicy = e.value
 		case "complexity_policy":
 			a.ComplexityPolicy = e.value
-		case "long_context":
-			a.LongContext, err = strconv.ParseBool(e.value)
-		case "request_tokens":
-			a.RequestTokens, err = strconv.Atoi(e.value)
-		case "bytes_per_token":
-			a.BytesPerToken, err = strconv.ParseFloat(e.value, 64)
 		case "log_dir":
 			a.LogDir = e.value
 		default:
 			if hint, ok := removedAgrouterKeys[k]; ok {
 				return s.removedKey(k, hint)
 			}
+			return s.unknownKey(k)
+		}
+		if err != nil {
+			return s.keyError(k, err)
+		}
+	}
+	return nil
+}
+
+func (s *section) decodeClassifier(c *Classifier) error {
+	for _, k := range s.keys {
+		e := s.values[k]
+		var err error
+		switch k {
+		case "url":
+			c.URL = e.value
+		case "api_key":
+			c.APIKey, c.APIKeySource = e.value, e.layer
+		case "model":
+			c.Model = e.value
+		case "long_context":
+			c.LongContext, err = strconv.ParseBool(e.value)
+		case "request_tokens":
+			c.RequestTokens, err = strconv.Atoi(e.value)
+		case "bytes_per_token":
+			c.BytesPerToken, err = strconv.ParseFloat(e.value, 64)
+		default:
 			return s.unknownKey(k)
 		}
 		if err != nil {

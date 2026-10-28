@@ -63,7 +63,7 @@ func (r *Router) complexity(ctx context.Context, captured *prompt.Result) (*Comp
 
 // askDocs sends one doc request and scores its validated answers.
 func (r *Router) askDocs(ctx context.Context, state any, questions map[string]jev.Question) (DocScore, error) {
-	resp, err := r.jev.Ask(ctx, jev.Request{Model: r.cfg.Agrouter.JevModel, State: state, Questions: questions})
+	resp, err := r.jev.Ask(ctx, jev.Request{Model: r.cfg.Classifier.Model, State: state, Questions: questions})
 	if err != nil {
 		return DocScore{}, fmt.Errorf("doc request: %w", r.sized(err, state, questions))
 	}

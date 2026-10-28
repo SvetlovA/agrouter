@@ -147,44 +147,59 @@ func TestValidate_Violations(t *testing.T) {
 			want:  []string{"[model.beta-two] name: required"},
 		},
 		{
+			name:  "empty url",
+			local: "[classifier]\nurl =\n",
+			want:  []string{"[classifier] url: must not be empty"},
+		},
+		{
+			name:  "blank url",
+			local: "[classifier]\nurl = \" \"\n",
+			want:  []string{"[classifier] url: must not be empty"},
+		},
+		{
+			name:  "empty model",
+			local: "[classifier]\nmodel =\n",
+			want:  []string{"[classifier] model: must not be empty"},
+		},
+		{
 			name:  "timeout not positive",
 			local: "[agrouter]\ntimeout = 0s\n",
 			want:  []string{"[agrouter] timeout = 0s: must be positive"},
 		},
 		{
 			name:  "request_tokens zero",
-			local: "[agrouter]\nrequest_tokens = 0\n",
-			want:  []string{"[agrouter] request_tokens = 0: must be positive"},
+			local: "[classifier]\nrequest_tokens = 0\n",
+			want:  []string{"[classifier] request_tokens = 0: must be positive"},
 		},
 		{
 			name:  "request_tokens negative",
-			local: "[agrouter]\nrequest_tokens = -5\n",
-			want:  []string{"[agrouter] request_tokens = -5: must be positive"},
+			local: "[classifier]\nrequest_tokens = -5\n",
+			want:  []string{"[classifier] request_tokens = -5: must be positive"},
 		},
 		{
 			name:  "bytes_per_token zero",
-			local: "[agrouter]\nbytes_per_token = 0\n",
-			want:  []string{"[agrouter] bytes_per_token = 0: must be a finite number greater than zero"},
+			local: "[classifier]\nbytes_per_token = 0\n",
+			want:  []string{"[classifier] bytes_per_token = 0: must be a finite number greater than zero"},
 		},
 		{
 			name:  "bytes_per_token negative",
-			local: "[agrouter]\nbytes_per_token = -2.5\n",
-			want:  []string{"[agrouter] bytes_per_token = -2.5: must be a finite number greater than zero"},
+			local: "[classifier]\nbytes_per_token = -2.5\n",
+			want:  []string{"[classifier] bytes_per_token = -2.5: must be a finite number greater than zero"},
 		},
 		{
 			name:  "bytes_per_token NaN",
-			local: "[agrouter]\nbytes_per_token = NaN\n",
-			want:  []string{"[agrouter] bytes_per_token = NaN: must be a finite number greater than zero"},
+			local: "[classifier]\nbytes_per_token = NaN\n",
+			want:  []string{"[classifier] bytes_per_token = NaN: must be a finite number greater than zero"},
 		},
 		{
 			name:  "bytes_per_token positive infinity",
-			local: "[agrouter]\nbytes_per_token = +Inf\n",
-			want:  []string{"[agrouter] bytes_per_token = +Inf: must be a finite number greater than zero"},
+			local: "[classifier]\nbytes_per_token = +Inf\n",
+			want:  []string{"[classifier] bytes_per_token = +Inf: must be a finite number greater than zero"},
 		},
 		{
 			name:  "bytes_per_token negative infinity",
-			local: "[agrouter]\nbytes_per_token = -Inf\n",
-			want:  []string{"[agrouter] bytes_per_token = -Inf: must be a finite number greater than zero"},
+			local: "[classifier]\nbytes_per_token = -Inf\n",
+			want:  []string{"[classifier] bytes_per_token = -Inf: must be a finite number greater than zero"},
 		},
 		{
 			name:  "blank log_dir",
@@ -222,10 +237,12 @@ func TestValidate_Allowed(t *testing.T) {
 			"model_args = [\"--model\", \"{model}\"]\neffort_args = [\"--effort\", \"{effort}\"]\nprompt_args = [\"--\", \"{prompt}\"]\n" +
 			"[model.gamma-one]\ncli = gamma\nname = gamma-one\nefforts = low, high\n"},
 		{name: "no effort_args when no model has efforts", local: ""},
-		{name: "fractional ratio", local: "[agrouter]\nbytes_per_token = 2.5\n"},
-		{name: "very small finite ratio", local: "[agrouter]\nbytes_per_token = 1e-300\n"},
-		{name: "very large finite ratio", local: "[agrouter]\nbytes_per_token = 1e300\n"},
-		{name: "huge request_tokens", local: "[agrouter]\nrequest_tokens = 9000000000\n"},
+		{name: "any url value", local: "[classifier]\nurl = not a url\n"},
+		{name: "api_key left empty", local: "[classifier]\napi_key =\n"},
+		{name: "fractional ratio", local: "[classifier]\nbytes_per_token = 2.5\n"},
+		{name: "very small finite ratio", local: "[classifier]\nbytes_per_token = 1e-300\n"},
+		{name: "very large finite ratio", local: "[classifier]\nbytes_per_token = 1e300\n"},
+		{name: "huge request_tokens", local: "[classifier]\nrequest_tokens = 9000000000\n"},
 		{name: "model of a disabled cli is dropped, not unknown", local: "[cli.beta]\nenabled = false\n"},
 	}
 	for _, tc := range tests {
@@ -233,5 +250,18 @@ func TestValidate_Allowed(t *testing.T) {
 			_, err := load(t, "", tc.local)
 			require.NoError(t, err)
 		})
+	}
+}
+
+func TestValidate_ClassifierSectionMissing(t *testing.T) {
+	_, err := Load(Sources{Embedded: []byte("[agrouter]\ntimeout = 10s\nrouting_policy = cheap\ncomplexity_policy = whole\nlog_dir = logs\n")})
+	require.Error(t, err)
+	for _, want := range []string{
+		"[classifier] url: must not be empty",
+		"[classifier] model: must not be empty",
+		"[classifier] request_tokens = 0: must be positive",
+		"[classifier] bytes_per_token = 0: must be a finite number greater than zero",
+	} {
+		assert.Contains(t, err.Error(), want)
 	}
 }

@@ -50,8 +50,8 @@ func estimateOf(t *testing.T, p prompt.Policy, req jev.Request) int {
 func TestOverflowErrorNamesTheRequest(t *testing.T) {
 	const marker = "SECRET-PROMPT-MARKER"
 	cfg, cat := requestFixture(t)
-	cfg.Agrouter.RequestTokens = 20_000
-	cfg.Agrouter.BytesPerToken = 2.5
+	cfg.Classifier.RequestTokens = 20_000
+	cfg.Classifier.BytesPerToken = 2.5
 	probe := newRouter(t, cfg, cat, &mocks.JevClientMock{})
 
 	big := &prompt.Result{Prompt: "START " + marker + "\n" + filler(200_000)}
@@ -113,7 +113,7 @@ func TestOverflowEstimateFollowsPolicy(t *testing.T) {
 	estimates := make([]int, 0, 3)
 	for _, ratio := range []float64{1, 2, 4} {
 		cfg, cat := requestFixture(t)
-		cfg.Agrouter.BytesPerToken = ratio
+		cfg.Classifier.BytesPerToken = ratio
 		var rejected jev.Request
 		var calls atomic.Int32
 		r := newRouter(t, cfg, cat, overflowClient(func(jev.Request) bool { return true }, tooLong(), &rejected, &calls))

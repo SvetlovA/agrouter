@@ -59,7 +59,7 @@ func TestInstallDefaults_RefreshAndLayering(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "upgraded-agent", cfg.CLIs[0].Command)
 	assert.Equal(t, "25s", cfg.Agrouter.Timeout.String())
-	assert.Equal(t, LayerEmbedded, cfg.Agrouter.APIKeySource)
+	assert.Equal(t, LayerEmbedded, cfg.Classifier.APIKeySource)
 }
 
 func TestInstallDefaults_Permissions(t *testing.T) {
