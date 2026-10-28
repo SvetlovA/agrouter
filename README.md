@@ -138,7 +138,7 @@ These values are a starting point, not calibrated; compare the `tokens:` lines a
 
 A prompt with its files that is too large for one request is split into chunks, all sent at once. Each chunk also rates how relevant its text is to the task, and the chunks' answers are averaged with that relevance as weight, so filler with zero relevance has no effect. Low but non-zero relevance still dilutes the result when there is a lot of it. Every routing stage asks all chunks and pools their answers; every chunk then moves on to the same narrowed next stage.
 
-`[agrouter] timeout` covers the whole routing: reading the inputs, the complexity stage and every routing stage. Routing makes up to three sequential the classifier round trips (`cli`, `model`, `effort`), plus one for the complexity stage with `--doc`; chunks within a stage run in parallel. The timeout is cooperative: reading stdin and files and every the classifier request stop at it, but splitting and encoding a very large input do not. Raise it when routing often runs out of time, typically with very long inputs, many `--doc` files or a slow network.
+`[agrouter] timeout` covers the whole routing: reading the inputs, the complexity stage and every routing stage. Routing makes up to three sequential classifier round trips (`cli`, `model`, `effort`), plus one for the complexity stage with `--doc`; chunks within a stage run in parallel. The timeout is cooperative: reading stdin and files and every classifier request stop at it, but splitting and encoding a very large input do not. Raise it when routing often runs out of time, typically with very long inputs, many `--doc` files or a slow network.
 
 Decision mode:
 
@@ -210,7 +210,7 @@ Decision JSON and the exec selection line explain a failed routing and every `nu
 
 | `reason.code` | Cause |
 |---|---|
-| `classifier_no_key` | no the classifier API key is set |
+| `classifier_no_key` | no classifier API key is set |
 | `classifier_unauthorized` | the classifier rejected the key (HTTP 401) |
 | `classifier_timeout` | `[agrouter] timeout` passed |
 | `classifier_canceled` | routing was canceled |
@@ -237,7 +237,7 @@ Messages never carry the prompt, `--doc` text, the key or the classifier's respo
 
 ### Exec readiness
 
-Before any the classifier request, including the `--doc` complexity stage, exec checks that its CLI can run now: the executable, then the prompt-free checks in `[cli.<name>.availability]` (authentication, the subscription five-hour and weekly quota windows, model support). The checks run once per invocation, while agrouter reads the prompt, docs and stdin, within both the availability `timeout` and `[agrouter] timeout`; nothing is cached between invocations. Decision mode never runs them.
+Before any classifier request, including the `--doc` complexity stage, exec checks that its CLI can run now: the executable, then the prompt-free checks in `[cli.<name>.availability]` (authentication, the subscription five-hour and weekly quota windows, model support). The checks run once per invocation, while agrouter reads the prompt, docs and stdin, within both the availability `timeout` and `[agrouter] timeout`; nothing is cached between invocations. Decision mode never runs them.
 
 Exec then routes only over the CLI's options that are left. It never switches to another CLI and never broadens a `--model`/`--effort` the caller fixed. Every outcome is one stderr line:
 
@@ -248,7 +248,7 @@ Exec then routes only over the CLI's options that are left. It never switches to
 | nothing is left: subscription quota exhausted | `<error_prefix><error_message>; <windows> subscription quota exhausted[; resets at <RFC 3339>]` | `127` |
 | nothing is left under `unknown = block` | `agrouter: <cli> availability unverified: <reason>` | `2` |
 
-A preflight block prints no selection line, nothing on stdout, and makes no the classifier request. It does print one explanation line before the lines above: `agrouter: routing skipped: <cli> <reason>; routing provider was not called; child CLI was not started`, where the reason is fixed text (`subscription quota exhausted`, `executable missing`, `authentication failed`, `availability unverified`, `model not supported`, `unavailable`). A block found after routing, such as a delegated model's default, is reported the same way with the classifier call already made: agrouter logs the selection routing produced, then prints `agrouter: run skipped: <cli> <reason>; child CLI was not started` (see [Exec fallback](#exec-fallback)). The reset is the latest reset of the exhausted windows, since a weekly window outlasts a five-hour one, and is left out when any of them is unverified. `error_prefix` (default `agrouter: `) and `error_message` come from the check that found the block, the first one in `checks` order, so the line can match a caller's own limit pattern, for example a severity prefix such as `ERROR: agrouter: `. An unknown availability is never reported as a quota block. Readiness uses agrouter's configured context. Native arguments after `--` never alter or disable probes; native settings, profile and provider overrides apply only to the child.
+A preflight block prints no selection line, nothing on stdout, and makes no classifier request. It does print one explanation line before the lines above: `agrouter: routing skipped: <cli> <reason>; routing provider was not called; child CLI was not started`, where the reason is fixed text (`subscription quota exhausted`, `executable missing`, `authentication failed`, `availability unverified`, `model not supported`, `unavailable`). A block found after routing, such as a delegated model's default, is reported the same way with the classifier call already made: agrouter logs the selection routing produced, then prints `agrouter: run skipped: <cli> <reason>; child CLI was not started` (see [Exec fallback](#exec-fallback)). The reset is the latest reset of the exhausted windows, since a weekly window outlasts a five-hour one, and is left out when any of them is unverified. `error_prefix` (default `agrouter: `) and `error_message` come from the check that found the block, the first one in `checks` order, so the line can match a caller's own limit pattern, for example a severity prefix such as `ERROR: agrouter: `. An unknown availability is never reported as a quota block. Readiness uses agrouter's configured context. Native arguments after `--` never alter or disable probes; native settings, profile and provider overrides apply only to the child.
 
 The `<reason>` in these lines, and the reasons in the selection line's `readiness`, are fixed codes:
 

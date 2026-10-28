@@ -674,6 +674,25 @@ func TestApp_ClassifierAPIKeyPrecedence(t *testing.T) {
 	}
 }
 
+// TestApp_ClassifierURL pins that the configured url, not a built-in endpoint, reaches the client.
+func TestApp_ClassifierURL(t *testing.T) {
+	e := newEnv(t)
+	e.jev.pick = "claude-sonnet-5-5@low"
+	e.globalConfig("[classifier]\nurl = https://classifier.example.test/v1/route\n")
+	var stdout, stderr bytes.Buffer
+	a := e.app(nil, &stdout, &stderr, runner.Runner{})
+	var urls []string
+	factory := a.newClassifier
+	a.newClassifier = func(url, key string, longContext bool) router.Classifier {
+		urls = append(urls, url)
+		return factory(url, key, longContext)
+	}
+
+	a.run([]string{"fix the typo in README"})
+
+	assert.Equal(t, []string{"https://classifier.example.test/v1/route"}, urls)
+}
+
 // TestApp_ClassifierAPIKeyEnvName pins the env var name: the literal name is read, and the name used
 // by previous versions is not.
 func TestApp_ClassifierAPIKeyEnvName(t *testing.T) {

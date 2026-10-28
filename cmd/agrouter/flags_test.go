@@ -316,6 +316,7 @@ func TestParseArgs_Errors(t *testing.T) {
 		{"removed --sandbox", []string{"--sandbox", "read-only", "x"}, "sandbox"},
 		{"removed -c", []string{"exec", "tool-a", "-c", "k=v", "x"}, "unknown flag"},
 		{"removed --config", []string{"--config=k=v", "x"}, "config"},
+		{"removed --jev-api-key", []string{"--jev-api-key=k", "x"}, "jev-api-key"},
 		{"second --prompt-file", []string{"--prompt-file", "a", "--prompt-file=b"}, "--prompt-file given more than once"},
 		{"-p value looks like a flag", []string{"-p", "--model", "x"}, "expected argument"},
 		{"-p without value", []string{"x", "-p"}, "prompt"},
