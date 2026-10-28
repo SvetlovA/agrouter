@@ -243,9 +243,9 @@ Reason codes: `classifier_no_key`, `classifier_unauthorized`, `classifier_timeou
 - Modify: `cmd/agrouter/guard_test.go`
 - Modify: `pkg/prompt/{capture,chunk,mentions}.go`, `pkg/config/config.go:80`, remaining comment hits the guard reports
 
-- [ ] add `TestGuard_NoJevNamingInProduction`: case-insensitive `jev` must not appear in non-test Go files outside `pkg/config/defaults`, with no exceptions
-- [ ] reword remaining comments ("Jev's prompt" -> "the classifier's prompt", etc.); provider-specific comments use "TypeSafe" wording, until the guard passes
-- [ ] run tests - must pass before next task
+- [x] add `TestGuard_NoJevNamingInProduction`: case-insensitive `jev` must not appear in non-test Go files outside `pkg/config/defaults`, with no exceptions
+- [x] reword remaining comments ("Jev's prompt" -> "the classifier's prompt", etc.); provider-specific comments use "TypeSafe" wording, until the guard passes
+- [x] run tests - must pass before next task
 
 ### Task 6: Verify acceptance criteria
 - [ ] `[classifier] url/api_key/model` drive the request and its sizing keys drive the budget; `[agrouter]` holds only `timeout`, the two policies and `log_dir`; embedded defaults are Jev

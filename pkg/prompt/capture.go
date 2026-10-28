@@ -1,4 +1,4 @@
-// Package prompt builds the state agrouter sends to Jev from the explicit prompt texts (-p, the
+// Package prompt builds the state agrouter sends to the classifier from the explicit prompt texts (-p, the
 // positional prompt, --prompt-file), stdin and the files the prompt mentions, and keeps stdin for the
 // child byte-for-byte.
 package prompt
@@ -63,7 +63,7 @@ func (s *Stdin) Reader() io.Reader {
 
 // Result is the captured prompt.
 type Result struct {
-	Prompt      string       // Jev's prompt: the explicit texts, then stdin text, joined by Join
+	Prompt      string       // the classifier's prompt: the explicit texts, then stdin text, joined by Join
 	Files       []string     // contents of the text files the prompt mentions (ReadMentions)
 	Attachments []Attachment // binary stdin and binary mentioned files, if any
 	Stdin       *Stdin       // nil when there was no stdin
@@ -73,7 +73,7 @@ type Result struct {
 	// Project is what the docs say about the codebase, set by the router after the complexity stage;
 	// nil without docs. It goes in the single state and in the anchor of every chunk state.
 	Project *Project
-	// Undecidable is why Jev cannot decide from this capture (the routing context's error); Prompt,
+	// Undecidable is why the classifier cannot decide from this capture (the routing context's error); Prompt,
 	// Files and Attachments are then empty, and Stdin still replays everything.
 	Undecidable error
 }
@@ -91,7 +91,7 @@ func StdinOf(f *os.File) io.Reader {
 	return f
 }
 
-// Capture reads stdin (nil for none) to EOF under ctx, with no size limit, and builds Jev's prompt
+// Capture reads stdin (nil for none) to EOF under ctx, with no size limit, and builds the classifier's prompt
 // from given, the explicit texts (-p, positional, --prompt-file) already joined, followed by stdin
 // text. It returns ErrNoPrompt when given is empty and there is no stdin byte, and an error when
 // stdin cannot be read.
@@ -139,7 +139,7 @@ type capturer struct {
 	size      int64 // binary stdin size
 }
 
-// run captures stdin. It returns why Jev cannot decide, if so, and an error when stdin fails.
+// run captures stdin. It returns why the classifier cannot decide, if so, and an error when stdin fails.
 func (c *capturer) run(stdin io.Reader) (undecidable, err error) {
 	if err := c.fill(SniffLen); err != nil {
 		return c.split(err)

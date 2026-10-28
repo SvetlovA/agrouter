@@ -84,7 +84,7 @@ const DefaultAvailabilityTimeout = 5 * time.Second
 const DefaultErrorPrefix = "agrouter: "
 
 // Availability is a [cli.<name>.availability] section with its checks: how exec verifies, before any
-// Jev request, that the CLI can run.
+// classifier request, that the CLI can run.
 type Availability struct {
 	Enabled bool          // false skips every check, leaving availability unknown
 	Checks  []Check       // in the order the checks key lists them

@@ -53,7 +53,7 @@ func (p *preflight) wait() readiness.Report {
 }
 
 // applyPreflight removes the options cli cannot run now from el, and warns once when what is left
-// is unverified. When nothing is left it returns the error that stops exec before any Jev request.
+// is unverified. When nothing is left it returns the error that stops exec before any classifier request.
 func (a *app) applyPreflight(cli config.CLI, models []config.Model, p *preflight, el *router.Eligibility) (*checked, error) {
 	report := p.wait()
 	ev := readiness.Evaluate(report, el.Options, models, unknownPolicy(cli), a.clock())

@@ -35,7 +35,7 @@ type Request struct {
 }
 
 // ArgvPrompt is the {prompt} text: the prompt texts given on the command line joined in prompt
-// order (-p, the positional prompt, then the --prompt-file contents), like the prompt Jev sees but
+// order (-p, the positional prompt, then the --prompt-file contents), like the prompt the classifier sees but
 // without stdin, which the child gets replayed instead.
 func (r *Request) ArgvPrompt() string {
 	return prompt.Join(r.PromptFlag.Value, r.Prompt.Value, r.FileText)

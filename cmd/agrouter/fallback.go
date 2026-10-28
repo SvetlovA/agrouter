@@ -13,7 +13,7 @@ import (
 
 // Sources of an effective exec value.
 const (
-	sourceRouter          = "router"                 // agrouter chose it: Jev, or the one option left
+	sourceRouter          = "router"                 // agrouter chose it: the classifier, or the one option left
 	sourceCaller          = "caller"                 // --model or --effort fixed it
 	sourceVerifiedDefault = "verified_child_default" // left to the child, whose probe reported its default
 	sourceUnknownDefault  = "child_default_unknown"  // left to the child, whose default is not known

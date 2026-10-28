@@ -13,8 +13,8 @@ const (
 	FieldFiles  = "files"
 )
 
-// ErrAttachmentsOverAnchor means the attachments exceed their anchor share even summarized, so Jev
-// cannot decide.
+// ErrAttachmentsOverAnchor means the attachments exceed their anchor share even summarized, so the
+// classifier cannot decide.
 var ErrAttachmentsOverAnchor = errors.New("attachments over their anchor share")
 
 // minFileShare is the least anchor room, in bytes, worth giving one file's head and tail.
@@ -25,7 +25,7 @@ type Project struct {
 	Complexity float64 `json:"complexity"` // 0 to 10, from the docs
 }
 
-// State is the state of a single Jev request.
+// State is the state of a single classifier request.
 type State struct {
 	Prompt      string       `json:"prompt"`
 	Files       []string     `json:"files,omitempty"`
@@ -97,7 +97,7 @@ func (r *Result) StateTokens(p Policy) int {
 
 // Split returns nil when the state fits in one request, and otherwise the anchor and the chunks
 // that together carry every captured byte, with no limit on their number. It returns
-// ErrAttachmentsOverAnchor when Jev cannot decide, and ErrQuestionsOverBudget when the budget leaves
+// ErrAttachmentsOverAnchor when the classifier cannot decide, and ErrQuestionsOverBudget when the budget leaves
 // no room for chunk text.
 func (r *Result) Split(b Budget) (*Split, error) {
 	if r.Fits(b) {

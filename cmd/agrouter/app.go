@@ -29,7 +29,7 @@ const (
 	exitUsage = 2 // arguments, prompt, config, or no decision with the CLI unknown
 )
 
-// app is one agrouter invocation with its dependencies, so tests can replace the Jev client and runner.
+// app is one agrouter invocation with its dependencies, so tests can replace the classifier client and runner.
 type app struct {
 	stdin          io.Reader // nil: no stdin
 	stdout, stderr io.Writer
@@ -88,7 +88,7 @@ func stdinReader(r io.Reader) io.Reader {
 }
 
 // selectionJSON records the selection, why routing failed or a value is null, project complexity
-// and available Jev confidence.
+// and available classifier confidence.
 type selectionJSON struct {
 	CLI               *string          `json:"cli"`
 	Model             *string          `json:"model"`
@@ -165,7 +165,7 @@ func (a *app) run(argv []string) int {
 
 	d, err := a.route(cfg, cat, rt, req)
 	if err != nil {
-		// the stages completed before Jev failed, if any
+		// the stages completed before the classifier failed, if any
 		a.debug.decision(d.Decision)
 		a.debug.failed(err)
 		if blocked, ok := errors.AsType[*preflightError](err); ok {
@@ -245,7 +245,7 @@ func (a *app) startLog(mirror *consoleLog, logDir string) {
 }
 
 // setup loads and validates the config, derives the catalog and builds the router with the resolved
-// Jev key. Every error is a config error.
+// classifier key. Every error is a config error.
 func (a *app) setup(req *args.Request) (*config.Config, *catalog.Catalog, *router.Router, error) {
 	global, local, err := config.DefaultPaths(a.workDir)
 	if err != nil {
@@ -284,8 +284,8 @@ type routed struct {
 
 // route reads --prompt-file and every --doc, captures the prompt and decides, all within the routing
 // deadline. Exec checks its CLI's readiness meanwhile and routes only over what it can run now; when
-// nothing is left it returns a *preflightError without asking Jev. Eligibility warnings go to stderr
-// once the prompt is known to be there. When Jev cannot decide, the error comes with the partial
+// nothing is left it returns a *preflightError without asking the classifier. Eligibility warnings go to stderr
+// once the prompt is known to be there. When the classifier cannot decide, the error comes with the partial
 // decision: the stages and complexity completed.
 func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router, req *args.Request) (routed, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Agrouter.Timeout)
@@ -312,7 +312,7 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 		defer func() { cancel(); pf.wait() }()
 	}
 	// docs are read even when one option will be left, so a bad --doc fails every call alike; the
-	// deadline passing mid-read is not a bad doc, so Jev cannot decide
+	// deadline passing mid-read is not a bad doc, so the classifier cannot decide
 	var (
 		docs        []string
 		undecidable error
@@ -348,7 +348,7 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 		fmt.Fprintln(a.stderr, w)
 	}
 	a.debug.eligibility(el)
-	// one option runs without Jev, so the files the prompt mentions are not read for it
+	// one option runs without the classifier, so the files the prompt mentions are not read for it
 	if len(el.Options) > 1 {
 		if err = captured.ReadMentions(ctx, a.workDir); err != nil {
 			return routed{}, fmt.Errorf("read mentioned files: %w", err)
