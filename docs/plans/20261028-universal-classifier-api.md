@@ -11,7 +11,7 @@
 before                                   after
 ------                                   -----
 [agrouter] api_key, jev_model            [classifier] url, api_key, model
---jev-api-key, TYPESAFE_API_KEY          --classifier-api-key, AGROUTER_CLASSIFIER_API_KEY
+--jev-api-key, TYPESAFE_API_KEY          --api-key, AGROUTER_CLASSIFIER_API_KEY
 pkg/jev (DefaultURL const)       ──►     pkg/classifier (url from config)
 router.JevClient                         router.Classifier
 reason jev_*                             reason classifier_*
@@ -65,7 +65,7 @@ reason jev_*                             reason classifier_*
 ```
 config layers ──► [classifier] url, api_key, model ──► classifier.New(url, key)
                                                             │
-flag --classifier-api-key ─┐                                ▼
+flag --api-key ──────────────────┐                          ▼
 env AGROUTER_CLASSIFIER_API_KEY ─┴─► ResolveAPIKey ──► POST url  {model, state, questions}
                                                             │
                                     router.Classifier ◄─────┘  same Request/Response types
@@ -80,7 +80,7 @@ Key decisions (debated with the partner agent, p2):
 | Previous versions | not supported: removed keys are simply unknown keys (`pkg/config/load.go:478`); no aliases, warnings or hints | user decision |
 | Package | `pkg/jev` -> `pkg/classifier`; `JevClient` -> `Classifier` | neutral naming. The wire types stay unchanged |
 | URL default | only in `pkg/config/defaults/config`; `DefaultURL` const removed | same rule as catalog names: provider data lives only in config |
-| Flag / env | `--classifier-api-key`, `AGROUTER_CLASSIFIER_API_KEY` | a provider-specific env name is wrong for other sources |
+| Flag / env | `--api-key`, `AGROUTER_CLASSIFIER_API_KEY` | a provider-specific env name is wrong for other sources |
 | Reason codes | `jev_*` -> `classifier_*` | decision-JSON contract change, called out in README |
 | `long_context`, `Limits`, startup limit check | **kept as is** (user). The header is TypeSafe's, and other providers ignore it. The startup check uses TypeSafe's limits for **every** endpoint (`pkg/router/router.go:61` has no endpoint condition), and this is documented | user decision. The plan does not try to make limits generic |
 | `max_tokens_exceeded` -> `request_too_long`, 429/529 retry | kept | protocol behavior, invents no capacity |
@@ -96,7 +96,7 @@ Embedded defaults (`pkg/config/defaults/config`):
 #   url      endpoint the routing requests are POSTed to. required
 #   api_key  bearer key for the endpoint. default: empty (no key)
 #   model    the classifier model answering the routing questions. required
-# precedence for api_key: --classifier-api-key > non-empty AGROUTER_CLASSIFIER_API_KEY > local > global > embedded.
+# precedence for api_key: --api-key > non-empty AGROUTER_CLASSIFIER_API_KEY > local > global > embedded.
 [classifier]
 url     = https://api.typesafe.ai/v1/systemone
 api_key =
@@ -216,7 +216,7 @@ Reason codes: `classifier_no_key`, `classifier_unauthorized`, `classifier_timeou
 
 - [ ] rename `EnvAPIKey` to `AGROUTER_CLASSIFIER_API_KEY` and update the godoc precedence text, in the same task as `childEnv` below
 - [ ] `eval-routing` in `Makefile` and `WMakefile` checks `AGROUTER_CLASSIFIER_API_KEY`
-- [ ] `--jev-api-key` -> `--classifier-api-key` (`flags.go`, `args.Request.APIKey` comment); help text says "a routing classifier" instead of "TypeSafe's Jev"
+- [ ] `--jev-api-key` -> `--api-key` (`flags.go`, `args.Request.APIKey` comment); its description says it is the routing classifier's key (in exec, a child's own `--api-key` goes after `--`); help text says "a routing classifier" instead of "TypeSafe's Jev"
 - [ ] reason codes `jev_*` -> `classifier_*` in `reason.go`; fallback warning "Jev routing failed" / "not a Jev selection" -> neutral wording; debug output labels
 - [ ] `runner.childEnv` strips `AGROUTER_CLASSIFIER_API_KEY` (case-insensitive on Windows, as today)
 - [ ] write tests: new flag and env precedence end to end, `classifier_*` codes in decision JSON, child env without the key
