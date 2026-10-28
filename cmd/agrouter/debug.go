@@ -16,7 +16,7 @@ import (
 // envDebug turns on the routing diagnostics on stderr.
 const envDebug = "AGROUTER_DEBUG"
 
-// debugTop is how many options a Jev answer lists.
+// debugTop is how many options a classifier answer lists.
 const debugTop = 3
 
 // debugLog writes AGROUTER_DEBUG=1 lines to stderr. A nil *debugLog prints nothing. It never prints
@@ -115,8 +115,8 @@ func orUnknown(v *string) string {
 }
 
 // decision prints how the option was chosen: the doc scores and project complexity when the docs
-// were scored, then one line per routing stage (skipped, Jev's answer, or the pooled chunks), and
-// why Jev could not decide. On a failure it prints the stages completed before it.
+// were scored, then one line per routing stage (skipped, the classifier's answer, or the pooled chunks), and
+// why the classifier could not decide. On a failure it prints the stages completed before it.
 func (l *debugLog) decision(d router.Decision) {
 	if l == nil {
 		return
@@ -152,9 +152,9 @@ func (l *debugLog) decision(d router.Decision) {
 	}
 	switch {
 	case d.Undecided != nil:
-		l.printf("jev failed: %v; running %s with the caller's fixed values", d.Undecided, d.CLI)
+		l.printf("classifier failed: %v; running %s with the caller's fixed values", d.Undecided, d.CLI)
 	case !asked && d.OptionID != "":
-		l.printf("one option, jev not asked: %s", d.OptionID)
+		l.printf("one option, classifier not asked: %s", d.OptionID)
 	}
 }
 

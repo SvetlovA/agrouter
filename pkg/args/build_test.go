@@ -124,7 +124,7 @@ func TestBuildOwnFlagsNeverInArgv(t *testing.T) {
 	for _, tok := range res.Argv {
 		assert.NotContains(t, tok, "sk-secret")
 		assert.NotContains(t, tok, "--cli")
-		assert.NotContains(t, tok, "--jev-api-key")
+		assert.NotContains(t, tok, "--api-key")
 		assert.NotContains(t, tok, "AGENTS.md")
 	}
 }
@@ -135,9 +135,13 @@ func TestBuildMadeUpCLI(t *testing.T) {
 timeout         = 10s
 routing_policy  = Prefer the cheapest option.
 complexity_policy = Judge the whole codebase.
+log_dir           = logs
+
+[classifier]
+url               = https://classifier.example.test/v1
+model             = test-classifier
 request_tokens    = 20000
 bytes_per_token   = 3
-log_dir           = logs
 
 [cli.zeta]
 command     = zeta-agent

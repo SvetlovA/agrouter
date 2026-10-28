@@ -15,22 +15,32 @@ const (
 
 // Config is the merged configuration with disabled sections removed.
 type Config struct {
-	Agrouter Agrouter
-	CLIs     []CLI             // in the order their sections first appear across the layers
-	Models   []Model           // catalog order: the order their sections first appear across the layers
-	Efforts  map[string]Effort // keyed "<cli>.<level>"
+	Agrouter   Agrouter
+	Classifier Classifier
+	CLIs       []CLI             // in the order their sections first appear across the layers
+	Models     []Model           // catalog order: the order their sections first appear across the layers
+	Efforts    map[string]Effort // keyed "<cli>.<level>"
 }
 
 // Agrouter is the [agrouter] section.
 type Agrouter struct {
-	APIKey       string
-	APIKeySource string // layer that set api_key, one of the Layer* names
-	JevModel     string
-	Timeout      time.Duration // the whole routing budget: capture, file reading, requests and retries
+	Timeout time.Duration // the whole routing budget: capture, file reading, requests and retries
 	// RoutingPolicy is the cost/quality preference sent with every routing question, whole or chunk.
 	RoutingPolicy string
 	// ComplexityPolicy is how the complexity stage judges the codebase the --doc text describes.
 	ComplexityPolicy string
+	// LogDir is where the console log is kept, as configured: a relative path is resolved against the
+	// work directory by the caller.
+	LogDir string
+}
+
+// Classifier is the [classifier] section: the endpoint routing requests are sent to, and how big one
+// request may be.
+type Classifier struct {
+	URL          string
+	APIKey       string
+	APIKeySource string // layer that set api_key, one of the Layer* names
+	Model        string
 	// LongContext opts into the routing provider's long-input mode. It changes only the provider's own
 	// limits; RequestTokens is not raised with it.
 	LongContext bool
@@ -38,9 +48,6 @@ type Agrouter struct {
 	RequestTokens int
 	// BytesPerToken is the ratio that turns bytes into estimated tokens when sizing requests.
 	BytesPerToken float64
-	// LogDir is where the console log is kept, as configured: a relative path is resolved against the
-	// work directory by the caller.
-	LogDir string
 }
 
 // CLI is a [cli.<name>] section: the command and the fixed invocation descriptors agrouter builds the
@@ -77,7 +84,7 @@ const DefaultAvailabilityTimeout = 5 * time.Second
 const DefaultErrorPrefix = "agrouter: "
 
 // Availability is a [cli.<name>.availability] section with its checks: how exec verifies, before any
-// Jev request, that the CLI can run.
+// classifier request, that the CLI can run.
 type Availability struct {
 	Enabled bool          // false skips every check, leaving availability unknown
 	Checks  []Check       // in the order the checks key lists them

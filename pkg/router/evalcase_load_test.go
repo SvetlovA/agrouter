@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/SvetlovA/agrouter/pkg/catalog"
-	"github.com/SvetlovA/agrouter/pkg/jev"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 	"github.com/SvetlovA/agrouter/pkg/router/mocks"
 )
@@ -22,15 +22,15 @@ import (
 // evalMock answers each stage question with pick's part (probability 1, confidence 0.8; see
 // pickAt), the complexity Score with its last level, and the Nouls (relevance, evidence) with 0.5,
 // over whatever criteria each request sends.
-func evalMock(pick string) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
-		out := map[string]jev.Answer{}
+func evalMock(pick string) *mocks.ClassifierMock {
+	return &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
+		out := map[string]classifier.Answer{}
 		for id, q := range req.Questions {
-			if q.Type == jev.TypeNoul {
-				out[id] = jev.Answer{Type: jev.TypeNoul, Noul: 0.5}
+			if q.Type == classifier.TypeNoul {
+				out[id] = classifier.Answer{Type: classifier.TypeNoul, Noul: 0.5}
 				continue
 			}
-			if q.Type == jev.TypeScore {
+			if q.Type == classifier.TypeScore {
 				out[id] = levels(map[int]float64{len(q.Levels) - 1: 1})
 				continue
 			}
@@ -44,7 +44,7 @@ func evalMock(pick string) *mocks.JevClientMock {
 				probs[name] = 0
 			}
 			probs[choice] = 1
-			out[id] = jev.Answer{Type: jev.TypeChoice, Choice: choice, Probabilities: probs, Confidence: 0.8}
+			out[id] = classifier.Answer{Type: classifier.TypeChoice, Choice: choice, Probabilities: probs, Confidence: 0.8}
 		}
 		return out, nil
 	})}
@@ -53,7 +53,7 @@ func evalMock(pick string) *mocks.JevClientMock {
 // pickAt is the criterion name of option id pick ("<section>@<effort>" or "<section>") in the stage
 // question q asked under id: its CLI, found in the cli stage's instructions, its section, or its
 // effort label.
-func pickAt(id string, q jev.Question, pick string) string {
+func pickAt(id string, q classifier.Question, pick string) string {
 	section, effort, _ := strings.Cut(pick, "@")
 	switch id {
 	case LevelModel:
@@ -106,7 +106,7 @@ func TestLoadEvalCases_SeedSet(t *testing.T) {
 	assertMidText(t, midText.FileText, "Action item for the agent")
 	require.Len(t, midText.DocTexts, 1)
 	assertMidText(t, midText.DocTexts[0], "## Outbound calls")
-	b := newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget
+	b := newRouter(t, cfg, cat, &mocks.ClassifierMock{}).budget
 	assert.Greater(t, len((&prompt.Result{Docs: midText.DocTexts}).SplitDocs(b)), 1, "the doc is scored in chunks")
 
 	distant := byName["distant-chunk-dependency"]
@@ -237,15 +237,15 @@ func TestRunEvalCase(t *testing.T) {
 		}
 	})
 
-	t.Run("jev failing with the CLI known is an error, not a guess", func(t *testing.T) {
-		r := newRouter(t, cfg, cat, failing(jev.ErrMalformed))
+	t.Run("classifier failing with the CLI known is an error, not a guess", func(t *testing.T) {
+		r := newRouter(t, cfg, cat, failing(classifier.ErrMalformed))
 		res := runEvalCase(ctx, r, cat, evalCase{Name: "f", Prompt: "x", CLI: "claude", Acceptable: []string{"claude-haiku-5-5@low"}},
 			t.TempDir())
-		require.ErrorIs(t, res.Err, jev.ErrMalformed)
+		require.ErrorIs(t, res.Err, classifier.ErrMalformed)
 	})
 
 	t.Run("cannot decide", func(t *testing.T) {
-		r := newRouter(t, cfg, cat, failing(jev.ErrMalformed))
+		r := newRouter(t, cfg, cat, failing(classifier.ErrMalformed))
 		res := runEvalCase(ctx, r, cat, evalCase{Name: "f", Prompt: "x", Acceptable: []string{"claude-haiku-5-5@low"}},
 			t.TempDir())
 		require.ErrorIs(t, res.Err, ErrCannotDecide)
@@ -274,7 +274,7 @@ func TestEvalStages(t *testing.T) {
 	b := catalog.Option{ID: "m1@high", CLI: "c1", Section: "m1", Effort: "high"}
 	c := catalog.Option{ID: "m2", CLI: "c2", Section: "m2"}
 	asked := func(level, choice string, confidence float64) Stage {
-		return Stage{Level: level, Choice: choice, Answer: &jev.Answer{Confidence: confidence}}
+		return Stage{Level: level, Choice: choice, Answer: &classifier.Answer{Confidence: confidence}}
 	}
 	pooled := Stage{Level: LevelEffort, Choice: "high", Pooled: &Pooled{Chunks: []ChunkResult{{Confidence: 0.2}, {Confidence: 0.6}}}}
 

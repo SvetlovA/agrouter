@@ -52,7 +52,7 @@ type mentions struct {
 	attachments []Attachment
 }
 
-// read reads every file text mentions, in textual order, and returns why Jev cannot decide, if so.
+// read reads every file text mentions, in textual order, and returns why the classifier cannot decide, if so.
 func (m *mentions) read(text string) error {
 	for _, c := range candidates(text) {
 		for _, v := range variants(c) {
@@ -72,7 +72,7 @@ func (m *mentions) read(text string) error {
 }
 
 // try reads the file one candidate spelling names. It reports whether the spelling named a regular
-// file inside the working directory, and returns why Jev cannot decide, if so.
+// file inside the working directory, and returns why the classifier cannot decide, if so.
 func (m *mentions) try(name string) (bool, error) {
 	if name == "" || m.tried[name] {
 		return false, nil
@@ -132,7 +132,7 @@ func (m *mentions) attach(mediaType string, size int64) {
 	m.attachments = append(m.attachments, Attachment{Source: SourceMentioned, Type: mediaType, Bytes: size})
 }
 
-// split sorts a read error: the routing deadline means Jev cannot decide; any other error is an
+// split sorts a read error: the routing deadline means the classifier cannot decide; any other error is an
 // unreadable file, which is ignored.
 func (m *mentions) split(err error) error {
 	if m.ctx.Err() != nil && errors.Is(err, m.ctx.Err()) {

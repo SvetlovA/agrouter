@@ -1,4 +1,4 @@
-package jev
+package classifier
 
 import (
 	"encoding/json"
@@ -16,13 +16,13 @@ func TestAskScore(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		data, err := io.ReadAll(r.Body)
 		assert.NoError(t, err)
-		assert.JSONEq(t, `{"model":"test-jev","state":{"docs":["three services"]},"questions":{
+		assert.JSONEq(t, `{"model":"test-classifier","state":{"docs":["three services"]},"questions":{
 			"complexity":{"type":"score","instructions":"rate complexity","criteria":["small","medium","large"]}}}`, string(data))
 		_, _ = io.WriteString(w, `{"answers":{"complexity":{"type":"score","score":1.5,
 			"probabilities":{"0":0,"1":0.5,"2":0.5},"confidence":0.7,
 			"legend":{"0":"small","1":"medium","2":"large"}}}}`)
 	})
-	resp, err := c.Ask(t.Context(), Request{Model: "test-jev", State: map[string]any{"docs": []string{"three services"}},
+	resp, err := c.Ask(t.Context(), Request{Model: "test-classifier", State: map[string]any{"docs": []string{"three services"}},
 		Questions: map[string]Question{"complexity": q}})
 	require.NoError(t, err)
 	assert.Equal(t, Answer{Type: TypeScore, Score: 1.5, Confidence: 0.7,

@@ -20,7 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/SvetlovA/agrouter/pkg/args"
-	"github.com/SvetlovA/agrouter/pkg/jev"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 	"github.com/SvetlovA/agrouter/pkg/router/mocks"
 )
@@ -40,24 +40,24 @@ func filler(n int) string {
 }
 
 // favoring is a stage answer putting 0.9 on id and the rest evenly over the other names.
-func favoring(names []string, id string, confidence float64) jev.Answer {
+func favoring(names []string, id string, confidence float64) classifier.Answer {
 	probs := make(map[string]float64, len(names))
 	for _, n := range names {
 		probs[n] = 0.1 / float64(len(names)-1)
 	}
 	probs[id] = 0.9
-	return jev.Answer{Type: jev.TypeChoice, Choice: id, Probabilities: probs, Confidence: confidence}
+	return classifier.Answer{Type: classifier.TypeChoice, Choice: id, Probabilities: probs, Confidence: confidence}
 }
 
 // chunkAnswers are a chunk request's answers to a model stage question and relevance.
-func chunkAnswers(route jev.Answer, relevance float64) map[string]jev.Answer {
-	return map[string]jev.Answer{LevelModel: route, questionRelevance: {Type: jev.TypeNoul, Noul: relevance}}
+func chunkAnswers(route classifier.Answer, relevance float64) map[string]classifier.Answer {
+	return map[string]classifier.Answer{LevelModel: route, questionRelevance: {Type: classifier.TypeNoul, Noul: relevance}}
 }
 
 // chunked is a mock answering chunk requests with fn; a single request fails.
-func chunked(t *testing.T, fn func(jev.Request, prompt.ChunkState) (map[string]jev.Answer, error)) *mocks.JevClientMock {
+func chunked(t *testing.T, fn func(classifier.Request, prompt.ChunkState) (map[string]classifier.Answer, error)) *mocks.ClassifierMock {
 	t.Helper()
-	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+	return &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 		st, ok := req.State.(prompt.ChunkState)
 		if !ok {
 			return nil, fmt.Errorf("unexpected state %T", req.State)
@@ -68,7 +68,7 @@ func chunked(t *testing.T, fn func(jev.Request, prompt.ChunkState) (map[string]j
 
 // byMarker answers the chunks containing "HARD" as relevant and favoring the strong option, and the
 // rest as filler favoring the cheap one, at every stage.
-func byMarker(req jev.Request, st prompt.ChunkState) (map[string]jev.Answer, error) {
+func byMarker(req classifier.Request, st prompt.ChunkState) (map[string]classifier.Answer, error) {
 	if strings.Contains(st.Chunk.Text, "HARD") {
 		return stageAnswers(req, optHard, 0.4, 0.95), nil
 	}
@@ -76,8 +76,8 @@ func byMarker(req jev.Request, st prompt.ChunkState) (map[string]jev.Answer, err
 }
 
 // stageCalls are the requests asked at level, in call order.
-func stageCalls(client *mocks.JevClientMock, level string) []jev.Request {
-	var out []jev.Request
+func stageCalls(client *mocks.ClassifierMock, level string) []classifier.Request {
+	var out []classifier.Request
 	for _, c := range client.AskCalls() {
 		if id, _, _ := stageAsked(c.Req); id == level {
 			out = append(out, c.Req)
@@ -86,7 +86,7 @@ func stageCalls(client *mocks.JevClientMock, level string) []jev.Request {
 	return out
 }
 
-func slots(answers ...map[string]jev.Answer) []*slot {
+func slots(answers ...map[string]classifier.Answer) []*slot {
 	out := make([]*slot, len(answers))
 	for i, a := range answers {
 		out[i] = &slot{answer: routeAnswer{probs: a[LevelModel].Probabilities,
@@ -95,8 +95,8 @@ func slots(answers ...map[string]jev.Answer) []*slot {
 	return out
 }
 
-func repeatAnswers(n int, a map[string]jev.Answer) []map[string]jev.Answer {
-	out := make([]map[string]jev.Answer, n)
+func repeatAnswers(n int, a map[string]classifier.Answer) []map[string]classifier.Answer {
+	out := make([]map[string]classifier.Answer, n)
 	for i := range out {
 		out[i] = a
 	}
@@ -110,8 +110,8 @@ func TestPoolRelevanceWeights(t *testing.T) {
 	fill := chunkAnswers(favoring(opts, optEasy, 0.99), 0.01)
 	zero := chunkAnswers(favoring(opts, optEasy, 0.99), 0)
 	other := 0.1 / float64(len(opts)-1)
-	withHard := func(n int, a map[string]jev.Answer) []*slot {
-		return slots(append([]map[string]jev.Answer{hard}, repeatAnswers(n, a)...)...)
+	withHard := func(n int, a map[string]classifier.Answer) []*slot {
+		return slots(append([]map[string]classifier.Answer{hard}, repeatAnswers(n, a)...)...)
 	}
 
 	t.Run("short hard requirement outweighs long filler", func(t *testing.T) {
@@ -162,8 +162,8 @@ func TestRankedStableTies(t *testing.T) {
 
 func TestPoolRetainsEveryNameInOrder(t *testing.T) {
 	names := []string{"a", "b", "c", "d"}
-	first := chunkAnswers(jev.Answer{Probabilities: map[string]float64{"a": 0.1, "b": 0.2, "c": 0.3, "d": 0.4}}, 0.25)
-	second := chunkAnswers(jev.Answer{Probabilities: map[string]float64{"a": 0.4, "b": 0.3, "c": 0.2, "d": 0.1}}, 0.75)
+	first := chunkAnswers(classifier.Answer{Probabilities: map[string]float64{"a": 0.1, "b": 0.2, "c": 0.3, "d": 0.4}}, 0.25)
+	second := chunkAnswers(classifier.Answer{Probabilities: map[string]float64{"a": 0.4, "b": 0.3, "c": 0.2, "d": 0.1}}, 0.75)
 	chosen, top, all := pool(names, slots(first, second))
 	assert.Equal(t, "a", names[chosen])
 	assert.Len(t, top, 3)
@@ -176,20 +176,20 @@ func TestPoolRetainsEveryNameInOrder(t *testing.T) {
 
 func TestPoolNamesOtherThanOptionIDs(t *testing.T) {
 	// a later stage's criteria: effort labels or CLIs, not option IDs
-	probs := func(p map[string]float64, relevance float64) map[string]jev.Answer {
-		return chunkAnswers(jev.Answer{Probabilities: p}, relevance)
+	probs := func(p map[string]float64, relevance float64) map[string]classifier.Answer {
+		return chunkAnswers(classifier.Answer{Probabilities: p}, relevance)
 	}
 	tests := []struct {
 		name    string
 		names   []string
-		answers []map[string]jev.Answer
+		answers []map[string]classifier.Answer
 		want    string
 		top     []Score
 	}{
 		{
 			name:  "weighted by relevance",
 			names: []string{"low", "medium", "high"},
-			answers: []map[string]jev.Answer{
+			answers: []map[string]classifier.Answer{
 				probs(map[string]float64{"low": 0.1, "medium": 0.2, "high": 0.7}, 0.9),
 				probs(map[string]float64{"low": 0.8, "medium": 0.1, "high": 0.1}, 0.1),
 			},
@@ -199,14 +199,14 @@ func TestPoolNamesOtherThanOptionIDs(t *testing.T) {
 		{
 			name:    "ties keep the order of names",
 			names:   []string{"beta", "alpha"},
-			answers: []map[string]jev.Answer{probs(map[string]float64{"alpha": 0.5, "beta": 0.5}, 0)},
+			answers: []map[string]classifier.Answer{probs(map[string]float64{"alpha": 0.5, "beta": 0.5}, 0)},
 			want:    "beta",
 			top:     []Score{{"beta", 0.5}, {"alpha", 0.5}},
 		},
 		{
 			name:    "probabilities for unlisted names are ignored",
 			names:   []string{"alpha", "beta"},
-			answers: []map[string]jev.Answer{probs(map[string]float64{"alpha": 0.2, "beta": 0.3, "alpha@high": 0.5}, 1)},
+			answers: []map[string]classifier.Answer{probs(map[string]float64{"alpha": 0.2, "beta": 0.3, "alpha@high": 0.5}, 1)},
 			want:    "beta",
 			top:     []Score{{"beta", 0.3}, {"alpha", 0.2}},
 		},
@@ -233,14 +233,14 @@ func TestRouteChunked(t *testing.T) {
 	req := &args.Request{CLI: "claude"}
 	el := Eligible(cat, req)
 	c := captured("HARD: keep the public API stable while fixing the parser\n" + filler(600_000))
-	split, err := c.Split(newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget)
+	split, err := c.Split(newRouter(t, cfg, cat, &mocks.ClassifierMock{}).budget)
 	require.NoError(t, err)
 	require.Greater(t, len(split.Chunks), 4)
 
 	// every request waits until all chunks are in flight: none waits for another to finish
 	var inFlight, peak atomic.Int32
 	all := make(chan struct{})
-	client := chunked(t, func(req jev.Request, st prompt.ChunkState) (map[string]jev.Answer, error) {
+	client := chunked(t, func(req classifier.Request, st prompt.ChunkState) (map[string]classifier.Answer, error) {
 		n := inFlight.Add(1)
 		defer inFlight.Add(-1)
 		for p := peak.Load(); n > p; p = peak.Load() {
@@ -269,7 +269,7 @@ func TestRouteChunked(t *testing.T) {
 	assert.True(t, d.Stages[0].Skipped, "--cli fixes the cli stage")
 	for i, want := range []string{"claude-opus-5-5", "high"} {
 		st := d.Stages[i+1]
-		assert.Nil(t, st.Answer, "a pooled decision is not a Jev choice")
+		assert.Nil(t, st.Answer, "a pooled decision is not a classifier choice")
 		require.NotNil(t, st.Pooled, st.Level)
 		assert.Equal(t, want, st.Choice)
 		assert.Equal(t, want, st.Pooled.Top[0].ID)
@@ -295,7 +295,7 @@ func TestRouteChunked(t *testing.T) {
 			require.True(t, ok)
 			assert.Equal(t, split.Anchor, st.Anchor, "anchor repeated")
 		}
-		assert.Equal(t, jev.TypeNoul, first.Questions[questionRelevance].Type)
+		assert.Equal(t, classifier.TypeNoul, first.Questions[questionRelevance].Type)
 		assert.Equal(t, relevanceText, first.Questions[questionRelevance].Instructions)
 		in, ok := first.Questions[level].Instructions.(stageInstructions)
 		require.True(t, ok)
@@ -314,7 +314,7 @@ func TestRouteChunkedConfidenceNotAveraged(t *testing.T) {
 	c := captured("HARD: migrate the schema\n" + filler(200_000))
 	tops := make([][]Score, 0, 2)
 	for _, conf := range []float64{0.01, 0.99} {
-		client := chunked(t, func(req jev.Request, st prompt.ChunkState) (map[string]jev.Answer, error) {
+		client := chunked(t, func(req classifier.Request, st prompt.ChunkState) (map[string]classifier.Answer, error) {
 			if strings.Contains(st.Chunk.Text, "HARD") {
 				return stageAnswers(req, optHard, 1-conf, 0.5), nil
 			}
@@ -339,7 +339,7 @@ func TestRouteChunkGoldenRequest(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	req := &args.Request{CLI: "alpha"}
 	el := Eligible(cat, req)
-	client := chunked(t, func(req jev.Request, _ prompt.ChunkState) (map[string]jev.Answer, error) {
+	client := chunked(t, func(req classifier.Request, _ prompt.ChunkState) (map[string]classifier.Answer, error) {
 		return stageAnswers(req, "fast", 0.9, 0.5), nil
 	})
 	r := newRouter(t, cfg, cat, client)
@@ -379,12 +379,12 @@ func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 	tests := []struct {
 		name     string
 		captured *prompt.Result
-		ask      func(jev.Request) (map[string]jev.Answer, error)
+		ask      func(classifier.Request) (map[string]classifier.Answer, error)
 		want     error
 		status   int // a plain status error of this status, not an overflow
 	}{
-		{name: "overflow on a chunk", captured: big, want: jev.ErrTooLong,
-			ask: func(req jev.Request) (map[string]jev.Answer, error) {
+		{name: "overflow on a chunk", captured: big, want: classifier.ErrTooLong,
+			ask: func(req classifier.Request) (map[string]classifier.Answer, error) {
 				st, _ := req.State.(prompt.ChunkState)
 				if strings.HasPrefix(st.Chunk.Text, "START") {
 					return nil, tooLong()
@@ -392,46 +392,46 @@ func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 				return answer(req, st)
 			}},
 		{name: "another 400 on a chunk", captured: big, status: http.StatusBadRequest,
-			ask: func(req jev.Request) (map[string]jev.Answer, error) {
+			ask: func(req classifier.Request) (map[string]classifier.Answer, error) {
 				st, _ := req.State.(prompt.ChunkState)
 				if st.Chunk.Index == st.Chunk.Of {
-					return nil, &jev.StatusError{Status: http.StatusBadRequest, ErrorType: "invalid_request"}
+					return nil, &classifier.StatusError{Status: http.StatusBadRequest, ErrorType: "invalid_request"}
 				}
 				return answer(req, st)
 			}},
 		{name: "422 on the last chunk", captured: big, status: http.StatusUnprocessableEntity,
-			ask: func(req jev.Request) (map[string]jev.Answer, error) {
+			ask: func(req classifier.Request) (map[string]classifier.Answer, error) {
 				st, _ := req.State.(prompt.ChunkState)
 				if st.Chunk.Index == st.Chunk.Of {
 					return nil, unprocessable()
 				}
 				return answer(req, st)
 			}},
-		{name: "one chunk failing after retries", captured: big, want: jev.ErrOverloaded,
-			ask: func(req jev.Request) (map[string]jev.Answer, error) {
+		{name: "one chunk failing after retries", captured: big, want: classifier.ErrOverloaded,
+			ask: func(req classifier.Request) (map[string]classifier.Answer, error) {
 				st, _ := req.State.(prompt.ChunkState)
 				if st.Chunk.Index == 2 {
-					return nil, &jev.StatusError{Status: 529}
+					return nil, &classifier.StatusError{Status: 529}
 				}
 				return answer(req, st)
 			}},
-		{name: "missing relevance answer", captured: big, want: jev.ErrEmptyAnswer,
-			ask: func(req jev.Request) (map[string]jev.Answer, error) {
+		{name: "missing relevance answer", captured: big, want: classifier.ErrEmptyAnswer,
+			ask: func(req classifier.Request) (map[string]classifier.Answer, error) {
 				st, _ := req.State.(prompt.ChunkState)
 				a, err := answer(req, st)
 				delete(a, questionRelevance)
 				return a, err
 			}},
-		{name: "missing route answer", captured: big, want: jev.ErrEmptyAnswer,
-			ask: func(req jev.Request) (map[string]jev.Answer, error) {
+		{name: "missing route answer", captured: big, want: classifier.ErrEmptyAnswer,
+			ask: func(req classifier.Request) (map[string]classifier.Answer, error) {
 				st, _ := req.State.(prompt.ChunkState)
 				a, err := answer(req, st)
 				id, _, _ := stageAsked(req)
 				delete(a, id)
 				return a, err
 			}},
-		{name: "probability missing for an option", captured: big, want: jev.ErrInvalidAnswer,
-			ask: func(req jev.Request) (map[string]jev.Answer, error) {
+		{name: "probability missing for an option", captured: big, want: classifier.ErrInvalidAnswer,
+			ask: func(req classifier.Request) (map[string]classifier.Answer, error) {
 				st, _ := req.State.(prompt.ChunkState)
 				a, err := answer(req, st)
 				id, _, easy := stageChoice(req, optEasy)
@@ -446,14 +446,14 @@ func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 				a[id] = route
 				return a, err
 			}},
-		{name: "single request overflow", captured: captured("HARD: tiny"), want: jev.ErrTooLong,
-			ask: func(jev.Request) (map[string]jev.Answer, error) { return nil, tooLong() }},
+		{name: "single request overflow", captured: captured("HARD: tiny"), want: classifier.ErrTooLong,
+			ask: func(classifier.Request) (map[string]classifier.Answer, error) { return nil, tooLong() }},
 		{name: "single request 422", captured: captured("HARD: tiny"), status: http.StatusUnprocessableEntity,
-			ask: func(jev.Request) (map[string]jev.Answer, error) { return nil, unprocessable() }},
+			ask: func(classifier.Request) (map[string]classifier.Answer, error) { return nil, unprocessable() }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			client := &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+			client := &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 				return tc.ask(req)
 			})}
 			r := newRouter(t, cfg, cat, client)
@@ -462,10 +462,10 @@ func TestRouteChunkFailuresCannotDecide(t *testing.T) {
 			if tc.want != nil {
 				require.ErrorIs(t, d.Undecided, tc.want)
 			} else {
-				var serr *jev.StatusError
+				var serr *classifier.StatusError
 				require.ErrorAs(t, d.Undecided, &serr)
 				assert.Equal(t, tc.status, serr.Status)
-				require.NotErrorIs(t, d.Undecided, jev.ErrTooLong)
+				require.NotErrorIs(t, d.Undecided, classifier.ErrTooLong)
 			}
 			se, ok := errors.AsType[*StageError](d.Undecided)
 			require.True(t, ok, "a chunked failure carries its stage")
@@ -480,7 +480,7 @@ func TestRouteChunkedCannotDecideCLIUnknown(t *testing.T) {
 	cfg, cat := embedded(t)
 	req := &args.Request{}
 	el := Eligible(cat, req)
-	client := chunked(t, func(jev.Request, prompt.ChunkState) (map[string]jev.Answer, error) {
+	client := chunked(t, func(classifier.Request, prompt.ChunkState) (map[string]classifier.Answer, error) {
 		return nil, context.DeadlineExceeded
 	})
 	_, err := newRouter(t, cfg, cat, client).Route(context.Background(), el, req, captured(filler(200_000)))
@@ -501,7 +501,7 @@ func testRouteChunkedStopsOnDeadline(t *testing.T) {
 	el := Eligible(cat, req)
 	var mu sync.Mutex
 	started := 0
-	client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, _ jev.Request) (map[string]jev.Answer, error) {
+	client := &mocks.ClassifierMock{AskFunc: answersOnly(func(ctx context.Context, _ classifier.Request) (map[string]classifier.Answer, error) {
 		mu.Lock()
 		started++
 		mu.Unlock()
@@ -530,7 +530,7 @@ func testRouteChunkedAnsweredAtDeadlineStands(t *testing.T) {
 	cfg, cat := embedded(t)
 	req := &args.Request{CLI: "claude"}
 	el := Eligible(cat, req)
-	client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, req jev.Request) (map[string]jev.Answer, error) {
+	client := &mocks.ClassifierMock{AskFunc: answersOnly(func(ctx context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 		<-ctx.Done() // every chunk answers just as the deadline passes
 		return stageAnswers(req, "claude-sonnet-5-5@low", 0.9, 0.5), nil
 	})}

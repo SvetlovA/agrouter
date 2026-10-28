@@ -1,4 +1,4 @@
-// Package main is the agrouter CLI: it asks Jev which (cli, model, effort) should run a prompt,
+// Package main is the agrouter CLI: it asks a routing classifier which (cli, model, effort) should run a prompt,
 // then prints that decision or runs the chosen CLI.
 package main
 

@@ -164,3 +164,59 @@ var label = "effort"
 	assert.Contains(t, hits[1], `"test-alias"`)
 	assert.Contains(t, hits[2], `"test-effort"`)
 }
+
+// TestGuard_NoJevNamingInProduction keeps the provider's name out of production Go code: the
+// classifier is neutral, and provider specifics use the "TypeSafe" wording. Only the embedded
+// defaults, where the default endpoint and model id live as data, are exempt. Test files are exempt.
+func TestGuard_NoJevNamingInProduction(t *testing.T) {
+	root := filepath.Join("..", "..")
+	skipDirs := map[string]bool{
+		filepath.Join(root, "vendor"):                    true,
+		filepath.Join(root, ".git"):                      true,
+		filepath.Join(root, "pkg", "config", "defaults"): true,
+	}
+	checked := 0
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if skipDirs[path] || (strings.HasPrefix(d.Name(), ".") && path != root) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		checked++
+		for _, hit := range jevNaming(t, path) {
+			t.Errorf("%s: uses the provider name: %s", filepath.ToSlash(path), hit)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Positive(t, checked)
+}
+
+// jevNaming returns the lines of a source file that contain the provider name in any case.
+func jevNaming(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path) //nolint:gosec // the guard reads repository sources
+	require.NoError(t, err)
+	var hits []string
+	for i, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(strings.ToLower(line), "jev") {
+			hits = append(hits, strconv.Itoa(i+1)+": "+strings.TrimSpace(line))
+		}
+	}
+	return hits
+}
+
+func TestGuard_DetectsJevNaming(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.go")
+	src := "package x\n\n// asks Jev\nvar jevURL = \"u\"\nvar clean = 1\n"
+	require.NoError(t, os.WriteFile(path, []byte(src), 0o600))
+
+	assert.Equal(t, []string{"3: // asks Jev", "4: var jevURL = \"u\""}, jevNaming(t, path))
+}

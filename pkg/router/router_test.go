@@ -16,9 +16,9 @@ import (
 
 	"github.com/SvetlovA/agrouter/pkg/args"
 	"github.com/SvetlovA/agrouter/pkg/catalog"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/config"
 	"github.com/SvetlovA/agrouter/pkg/config/defaults"
-	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 	"github.com/SvetlovA/agrouter/pkg/router/mocks"
 )
@@ -29,10 +29,11 @@ var update = goflag.Bool("update", false, "rewrite golden files")
 func requestFixture(t *testing.T) (*config.Config, *catalog.Catalog) {
 	t.Helper()
 	cfg := &config.Config{
-		Agrouter: config.Agrouter{JevModel: "test-jev", Timeout: time.Second,
-			RequestTokens: 30000, BytesPerToken: 3, LogDir: "logs",
+		Agrouter: config.Agrouter{Timeout: time.Second, LogDir: "logs",
 			RoutingPolicy:    "Prefer the cheapest option that can do the task.",
 			ComplexityPolicy: "Judge the codebase as a whole."},
+		Classifier: config.Classifier{URL: "https://classifier.example.test/v1", Model: "test-classifier",
+			RequestTokens: 30000, BytesPerToken: 3},
 		CLIs: []config.CLI{
 			{Name: "alpha", Command: "alpha", Description: "Alpha agent."},
 			{Name: "beta", Command: "beta", Description: "Beta agent."},
@@ -54,15 +55,15 @@ func requestFixture(t *testing.T) (*config.Config, *catalog.Catalog) {
 	return cfg, cat
 }
 
-func newRouter(t *testing.T, cfg *config.Config, cat *catalog.Catalog, client JevClient) *Router {
+func newRouter(t *testing.T, cfg *config.Config, cat *catalog.Catalog, client Classifier) *Router {
 	t.Helper()
 	r, err := New(cfg, cat, client)
 	require.NoError(t, err)
 	return r
 }
 
-func failing(err error) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: answersOnly(func(context.Context, jev.Request) (map[string]jev.Answer, error) {
+func failing(err error) *mocks.ClassifierMock {
+	return &mocks.ClassifierMock{AskFunc: answersOnly(func(context.Context, classifier.Request) (map[string]classifier.Answer, error) {
 		return nil, err
 	})}
 }
@@ -71,9 +72,9 @@ func captured(text string) *prompt.Result {
 	return &prompt.Result{Prompt: text}
 }
 
-func TestRouteSingleOptionSkipsJev(t *testing.T) {
+func TestRouteSingleOptionSkipsClassifier(t *testing.T) {
 	cfg, cat := embedded(t)
-	client := &mocks.JevClientMock{} // Ask panics if called
+	client := &mocks.ClassifierMock{} // Ask panics if called
 	r := newRouter(t, cfg, cat, client)
 
 	req := &args.Request{Model: "claude-opus-5-5", Effort: "high"}
@@ -90,7 +91,7 @@ func TestRouteSingleOptionSkipsJev(t *testing.T) {
 
 func TestRouteSingleOptionPassthrough(t *testing.T) {
 	cfg, cat := embedded(t)
-	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
+	r := newRouter(t, cfg, cat, &mocks.ClassifierMock{})
 
 	req := &args.Request{CLI: "codex", Model: "gpt-9", Effort: "turbo"}
 	el := Eligible(cat, req)
@@ -103,7 +104,7 @@ func TestRouteSingleOptionPassthrough(t *testing.T) {
 		args.Build(mustCLI(t, cfg, d.CLI), req, d.Choice()).Argv)
 }
 
-func TestRouteJevChoice(t *testing.T) {
+func TestRouteClassifierChoice(t *testing.T) {
 	cfg, cat := embedded(t)
 	client := choosing("gpt-6.1-sol@medium")
 	r := newRouter(t, cfg, cat, client)
@@ -125,7 +126,7 @@ func TestRouteJevChoice(t *testing.T) {
 
 	require.Len(t, client.AskCalls(), 3)
 	sent := client.AskCalls()[0].Req
-	assert.Equal(t, cfg.Agrouter.JevModel, sent.Model)
+	assert.Equal(t, cfg.Classifier.Model, sent.Model)
 	assert.Equal(t, prompt.State{Prompt: "fix it"}, sent.State)
 	assert.Equal(t, el.CLIs(), sent.Questions[LevelCLI].Criteria.Names())
 }
@@ -169,26 +170,27 @@ func TestRouteGoldenRequest(t *testing.T) {
 func TestNewQuestionOverBudget(t *testing.T) {
 	long := strings.Repeat("x", 100_000)
 	tests := []struct {
-		key   string
-		value string
-		want  []string // the budgets the setting exhausts
+		section string
+		key     string
+		value   string
+		want    []string // the budgets the setting exhausts
 	}{
-		{"routing_policy", long, []string{"request_tokens", "routing_policy question leaves", "for the state", "beside the anchor"}},
-		{"complexity_policy", long, []string{"request_tokens", "complexity_policy questions leaves", "for the doc state"}},
-		{"request_tokens", "100", []string{"request_tokens 100 less", "for the state", "beside the anchor", "for the doc state"}},
+		{"agrouter", "routing_policy", long, []string{"request_tokens", "routing_policy question leaves", "for the state", "beside the anchor"}},
+		{"agrouter", "complexity_policy", long, []string{"request_tokens", "complexity_policy questions leaves", "for the doc state"}},
+		{"classifier", "request_tokens", "100", []string{"request_tokens 100 less", "for the state", "beside the anchor", "for the doc state"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.key, func(t *testing.T) {
 			local := filepath.Join(t.TempDir(), "config")
-			require.NoError(t, os.WriteFile(local, fmt.Appendf(nil, "[agrouter]\n%s = %s\n", tc.key, tc.value), 0o600))
+			require.NoError(t, os.WriteFile(local, fmt.Appendf(nil, "[%s]\n%s = %s\n", tc.section, tc.key, tc.value), 0o600))
 			cfg, err := config.Load(config.Sources{Embedded: defaults.Config, LocalPath: local})
 			require.NoError(t, err)
 			cat, err := catalog.Build(cfg)
 			require.NoError(t, err)
 
-			_, err = New(cfg, cat, &mocks.JevClientMock{})
+			_, err = New(cfg, cat, &mocks.ClassifierMock{})
 			require.ErrorIs(t, err, prompt.ErrQuestionsOverBudget)
-			assert.Contains(t, err.Error(), "config: [agrouter]")
+			assert.Contains(t, err.Error(), "config: [classifier]")
 			for _, w := range tc.want {
 				assert.Contains(t, err.Error(), w)
 			}
@@ -198,11 +200,11 @@ func TestNewQuestionOverBudget(t *testing.T) {
 
 func TestNewRequestTokensAloneNamesTheKey(t *testing.T) {
 	cfg, cat := requestFixture(t)
-	_, err := New(cfg, cat, &mocks.JevClientMock{})
+	_, err := New(cfg, cat, &mocks.ClassifierMock{})
 	require.NoError(t, err, "the fixture's policies fit its allowance")
 
-	cfg.Agrouter.RequestTokens = 500
-	_, err = New(cfg, cat, &mocks.JevClientMock{})
+	cfg.Classifier.RequestTokens = 500
+	_, err = New(cfg, cat, &mocks.ClassifierMock{})
 	require.ErrorIs(t, err, prompt.ErrQuestionsOverBudget)
 	assert.Contains(t, err.Error(), "request_tokens 500")
 	require.NotErrorIs(t, err, ErrRequestTokensOverLimit)
@@ -210,23 +212,23 @@ func TestNewRequestTokensAloneNamesTheKey(t *testing.T) {
 
 func TestNewChecksProviderLimits(t *testing.T) {
 	for _, longContext := range []bool{false, true} {
-		perQuestion, perRequest := jev.Limits(longContext)
+		perQuestion, perRequest := classifier.Limits(longContext)
 		limit := min(perQuestion, perRequest)
 		top := limit - providerReserve
 		t.Run(fmt.Sprintf("long_context=%t", longContext), func(t *testing.T) {
 			cfg, cat := requestFixture(t)
-			cfg.Agrouter.LongContext = longContext
+			cfg.Classifier.LongContext = longContext
 
-			cfg.Agrouter.RequestTokens = top
-			r, err := New(cfg, cat, &mocks.JevClientMock{})
+			cfg.Classifier.RequestTokens = top
+			r, err := New(cfg, cat, &mocks.ClassifierMock{})
 			require.NoError(t, err, "request_tokens at the limit less the reserve")
 			assert.Equal(t, top, r.budget.RequestTokens)
 
-			cfg.Agrouter.RequestTokens = top + 1
-			_, err = New(cfg, cat, &mocks.JevClientMock{})
+			cfg.Classifier.RequestTokens = top + 1
+			_, err = New(cfg, cat, &mocks.ClassifierMock{})
 			require.ErrorIs(t, err, ErrRequestTokensOverLimit)
 			msg := err.Error()
-			assert.Contains(t, msg, "config: [agrouter]")
+			assert.Contains(t, msg, "config: [classifier]")
 			assert.Contains(t, msg, fmt.Sprintf("request_tokens = %d", top+1), "the value")
 			assert.Contains(t, msg, fmt.Sprintf("takes %d per request", limit), "the provider limit")
 			assert.Contains(t, msg, fmt.Sprintf("%d reserve", providerReserve), "the reserve")
@@ -239,31 +241,31 @@ func TestNewChecksProviderLimits(t *testing.T) {
 
 func TestNewLongContextRaisesOnlyTheProviderLimit(t *testing.T) {
 	cfg, cat := requestFixture(t)
-	_, defaultLimit := jev.Limits(false)
-	_, longLimit := jev.Limits(true)
+	_, defaultLimit := classifier.Limits(false)
+	_, longLimit := classifier.Limits(true)
 	require.Greater(t, longLimit, defaultLimit)
-	cfg.Agrouter.RequestTokens = defaultLimit // over the default limits, under the long ones
+	cfg.Classifier.RequestTokens = defaultLimit // over the default limits, under the long ones
 
-	_, err := New(cfg, cat, &mocks.JevClientMock{})
+	_, err := New(cfg, cat, &mocks.ClassifierMock{})
 	require.ErrorIs(t, err, ErrRequestTokensOverLimit, "request_tokens is not raised by long_context, so it is over the default limit")
 
-	cfg.Agrouter.LongContext = true
-	r, err := New(cfg, cat, &mocks.JevClientMock{})
+	cfg.Classifier.LongContext = true
+	r, err := New(cfg, cat, &mocks.ClassifierMock{})
 	require.NoError(t, err)
 	assert.Equal(t, defaultLimit, r.budget.RequestTokens, "long_context leaves request_tokens as configured")
 
-	cfg.Agrouter.LongContext = false
-	cfg.Agrouter.RequestTokens = 1000
-	_, err = New(cfg, cat, &mocks.JevClientMock{})
+	cfg.Classifier.LongContext = false
+	cfg.Classifier.RequestTokens = 1000
+	_, err = New(cfg, cat, &mocks.ClassifierMock{})
 	require.ErrorIs(t, err, prompt.ErrQuestionsOverBudget, "a small allowance is still checked against the questions")
 }
 
 func TestNewBudgetFromWholeCatalog(t *testing.T) {
 	cfg, cat := embedded(t)
-	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
+	r := newRouter(t, cfg, cat, &mocks.ClassifierMock{})
 	b := r.budget
-	assert.Equal(t, cfg.Agrouter.RequestTokens, b.RequestTokens)
-	assert.InDelta(t, cfg.Agrouter.BytesPerToken, b.BytesPerToken, 0)
+	assert.Equal(t, cfg.Classifier.RequestTokens, b.RequestTokens)
+	assert.InDelta(t, cfg.Classifier.BytesPerToken, b.BytesPerToken, 0)
 	assert.Positive(t, b.State)
 	assert.Less(t, b.State, b.RequestTokens)
 	assert.Positive(t, b.Chunk)
@@ -278,12 +280,12 @@ func TestRouteCannotDecide(t *testing.T) {
 		name string
 		err  error
 	}{
-		{"no key", jev.ErrNoKey},
+		{"no key", classifier.ErrNoKey},
 		{"timeout", context.DeadlineExceeded},
-		{"401", &jev.StatusError{Status: 401}},
-		{"429 exhausted", &jev.StatusError{Status: 429}},
-		{"529 exhausted", &jev.StatusError{Status: 529}},
-		{"malformed", jev.ErrMalformed},
+		{"401", &classifier.StatusError{Status: 401}},
+		{"429 exhausted", &classifier.StatusError{Status: 429}},
+		{"529 exhausted", &classifier.StatusError{Status: 529}},
+		{"malformed", classifier.ErrMalformed},
 	}
 	cases := []struct {
 		name   string
@@ -357,7 +359,7 @@ func TestRouteCannotDecideWithoutRequest(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			client := &mocks.JevClientMock{}
+			client := &mocks.ClassifierMock{}
 			r := newRouter(t, cfg, cat, client)
 			req := &args.Request{CLI: "codex"}
 			d, err := r.Route(context.Background(), Eligible(cat, req), req, tc.captured)
@@ -376,26 +378,26 @@ func TestRouteMalformedAnswers(t *testing.T) {
 	cfg, cat := embedded(t)
 	tests := []struct {
 		name    string
-		answers map[string]jev.Answer
+		answers map[string]classifier.Answer
 		want    error
 	}{
-		{name: "missing stage answer", answers: map[string]jev.Answer{}, want: jev.ErrEmptyAnswer},
-		{name: "choice outside the criteria", answers: map[string]jev.Answer{LevelModel: {Choice: "gpt-6.1-sol",
+		{name: "missing stage answer", answers: map[string]classifier.Answer{}, want: classifier.ErrEmptyAnswer},
+		{name: "choice outside the criteria", answers: map[string]classifier.Answer{LevelModel: {Choice: "gpt-6.1-sol",
 			Probabilities: map[string]float64{"claude-opus-5-5": 0.5, "claude-sonnet-5-5": 0.5, "claude-haiku-5-5": 0,
-				"claude-fable-5-1": 0}}}, want: jev.ErrInvalidAnswer},
-		{name: "missing probability", answers: map[string]jev.Answer{LevelModel: {Choice: "claude-opus-5-5",
-			Probabilities: map[string]float64{"claude-opus-5-5": 1}}}, want: jev.ErrInvalidAnswer},
+				"claude-fable-5-1": 0}}}, want: classifier.ErrInvalidAnswer},
+		{name: "missing probability", answers: map[string]classifier.Answer{LevelModel: {Choice: "claude-opus-5-5",
+			Probabilities: map[string]float64{"claude-opus-5-5": 1}}}, want: classifier.ErrInvalidAnswer},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			client := &mocks.JevClientMock{AskFunc: answersOnly(func(context.Context, jev.Request) (map[string]jev.Answer, error) {
+			client := &mocks.ClassifierMock{AskFunc: answersOnly(func(context.Context, classifier.Request) (map[string]classifier.Answer, error) {
 				return tc.answers, nil
 			})}
 			r := newRouter(t, cfg, cat, client)
 			req := &args.Request{CLI: "claude"}
 			d, err := r.Route(context.Background(), Eligible(cat, req), req, captured("x"))
 			require.NoError(t, err)
-			require.ErrorIs(t, d.Undecided, jev.ErrMalformed)
+			require.ErrorIs(t, d.Undecided, classifier.ErrMalformed)
 			require.ErrorIs(t, d.Undecided, tc.want)
 			se, ok := errors.AsType[*StageError](d.Undecided)
 			require.True(t, ok)
@@ -426,7 +428,7 @@ func overAnchor() *prompt.Result {
 
 func TestRouteNoEligible(t *testing.T) {
 	cfg, cat := requestFixture(t)
-	client := &mocks.JevClientMock{} // Ask panics if called
+	client := &mocks.ClassifierMock{} // Ask panics if called
 	r := newRouter(t, cfg, cat, client)
 	req := &args.Request{CLI: "alpha"}
 	el := Eligible(cat, req)
@@ -445,9 +447,9 @@ func TestRouteNoEligible(t *testing.T) {
 	assert.Equal(t, Decision{}, d)
 }
 
-func TestRouteAfterExcludeSkipsJevForOneOption(t *testing.T) {
+func TestRouteAfterExcludeSkipsClassifierForOneOption(t *testing.T) {
 	cfg, cat := requestFixture(t)
-	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
+	r := newRouter(t, cfg, cat, &mocks.ClassifierMock{})
 	req := &args.Request{CLI: "alpha"}
 	el := Eligible(cat, req)
 	el.Exclude([]string{"strong@low", "strong@high"})
@@ -460,8 +462,8 @@ func TestRouteAfterExcludeSkipsJevForOneOption(t *testing.T) {
 
 func TestRouteKeepsAskedModelOnLaterFailure(t *testing.T) {
 	cfg, cat := requestFixture(t)
-	failEffort := func(fail error) *mocks.JevClientMock {
-		return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+	failEffort := func(fail error) *mocks.ClassifierMock {
+		return &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 			if _, ok := req.Questions[LevelEffort]; ok {
 				return nil, fail
 			}
@@ -498,6 +500,6 @@ func TestRouteKeepsAskedModelOnLaterFailure(t *testing.T) {
 		assert.Empty(t, d.Model)
 	})
 	t.Run("a choice outside the options keeps nothing", func(t *testing.T) {
-		assert.Empty(t, askedModel(Eligible(cat, &args.Request{}), []Stage{{Level: LevelModel, Choice: "no-such", Answer: &jev.Answer{}}}))
+		assert.Empty(t, askedModel(Eligible(cat, &args.Request{}), []Stage{{Level: LevelModel, Choice: "no-such", Answer: &classifier.Answer{}}}))
 	})
 }

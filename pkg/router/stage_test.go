@@ -16,25 +16,25 @@ import (
 
 	"github.com/SvetlovA/agrouter/pkg/args"
 	"github.com/SvetlovA/agrouter/pkg/catalog"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/config"
-	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 	"github.com/SvetlovA/agrouter/pkg/router/mocks"
 )
 
 // stageAsked is the routing stage question of req and its id; ok is false for a doc request.
-func stageAsked(req jev.Request) (string, jev.Question, bool) {
+func stageAsked(req classifier.Request) (string, classifier.Question, bool) {
 	for _, lv := range routeLevels {
 		if q, ok := req.Questions[lv.name]; ok {
 			return lv.name, q, true
 		}
 	}
-	return "", jev.Question{}, false
+	return "", classifier.Question{}, false
 }
 
 // stageChoice is pick's criterion name in req's stage question (see pickAt), or the first criterion
 // when pick has none there.
-func stageChoice(req jev.Request, pick string) (string, jev.Question, string) {
+func stageChoice(req classifier.Request, pick string) (string, classifier.Question, string) {
 	id, q, _ := stageAsked(req)
 	choice := pickAt(id, q, pick)
 	if !slices.Contains(q.Criteria.Names(), choice) {
@@ -44,26 +44,26 @@ func stageChoice(req jev.Request, pick string) (string, jev.Question, string) {
 }
 
 // certain answers req's stage question choosing pick's criterion with certainty.
-func certain(req jev.Request, pick string) map[string]jev.Answer {
+func certain(req classifier.Request, pick string) map[string]classifier.Answer {
 	id, q, choice := stageChoice(req, pick)
 	probs := map[string]float64{}
 	for _, name := range q.Criteria.Names() {
 		probs[name] = 0
 	}
 	probs[choice] = 1
-	return map[string]jev.Answer{id: {Type: jev.TypeChoice, Choice: choice, Probabilities: probs, Confidence: 0.9}}
+	return map[string]classifier.Answer{id: {Type: classifier.TypeChoice, Choice: choice, Probabilities: probs, Confidence: 0.9}}
 }
 
 // choosing returns a mock answering every stage request with pick's criterion, with certainty.
-func choosing(pick string) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+func choosing(pick string) *mocks.ClassifierMock {
+	return &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 		return certain(req, pick), nil
 	})}
 }
 
 // favorStage answers req's stage question with 0.9 on pick's criterion and the rest evenly over the
 // others; evenly over all, choosing the first, when pick has no criterion there.
-func favorStage(req jev.Request, pick string, confidence float64) (string, jev.Answer) {
+func favorStage(req classifier.Request, pick string, confidence float64) (string, classifier.Answer) {
 	id, q, choice := stageChoice(req, pick)
 	names := q.Criteria.Names()
 	probs := make(map[string]float64, len(names))
@@ -77,17 +77,17 @@ func favorStage(req jev.Request, pick string, confidence float64) (string, jev.A
 		}
 		probs[choice] = 0.9
 	}
-	return id, jev.Answer{Type: jev.TypeChoice, Choice: choice, Probabilities: probs, Confidence: confidence}
+	return id, classifier.Answer{Type: classifier.TypeChoice, Choice: choice, Probabilities: probs, Confidence: confidence}
 }
 
 // stageAnswers are a chunk request's answers: favorStage and the relevance.
-func stageAnswers(req jev.Request, pick string, confidence, relevance float64) map[string]jev.Answer {
+func stageAnswers(req classifier.Request, pick string, confidence, relevance float64) map[string]classifier.Answer {
 	id, a := favorStage(req, pick, confidence)
-	return map[string]jev.Answer{id: a, questionRelevance: {Type: jev.TypeNoul, Noul: relevance}}
+	return map[string]classifier.Answer{id: a, questionRelevance: {Type: classifier.TypeNoul, Noul: relevance}}
 }
 
 // askedLevels lists the stage of every routing request, in call order.
-func askedLevels(client *mocks.JevClientMock) []string {
+func askedLevels(client *mocks.ClassifierMock) []string {
 	var out []string
 	for _, c := range client.AskCalls() {
 		if id, _, ok := stageAsked(c.Req); ok {
@@ -195,7 +195,7 @@ func TestRouteStagesFixedByPassedValues(t *testing.T) {
 			pick: "strong", asked: []string{LevelModel},
 			stages: []Stage{stage("cli", "alpha", true), stage("model", "strong", false), stage("effort", "turbo", true)},
 			want:   "strong"},
-		{name: "all three passed: Jev not asked",
+		{name: "all three passed: classifier not asked",
 			req:    &args.Request{CLI: "alpha", Model: "strong-model", Effort: "high"},
 			stages: []Stage{stage("cli", "alpha", true), stage("model", "strong", true), stage("effort", "high", true)},
 			want:   "strong@high"},
@@ -208,7 +208,7 @@ func TestRouteStagesFixedByPassedValues(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			client := choosing(tc.pick)
 			if tc.pick == "" {
-				client = &mocks.JevClientMock{} // Ask panics if called
+				client = &mocks.ClassifierMock{} // Ask panics if called
 			}
 			el := Eligible(cat, tc.req)
 			assert.Equal(t, tc.warned, len(el.Warnings) > 0)
@@ -248,7 +248,7 @@ func TestRoutePassedValuesInStageCriteria(t *testing.T) {
 		for _, m := range in.Models {
 			assert.Equal(t, []string{"turbo"}, m.Value.(modelEntry).Efforts, m.Name)
 		}
-		assert.Equal(t, jev.Criteria{{Name: "alpha", Value: jev.Criteria{{Name: "turbo", Value: descEffortPassed}}}}, in.Efforts)
+		assert.Equal(t, classifier.Criteria{{Name: "alpha", Value: classifier.Criteria{{Name: "turbo", Value: descEffortPassed}}}}, in.Efforts)
 	})
 }
 
@@ -264,12 +264,12 @@ func TestRouteStageSequence(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, Decision{CLI: "alpha", Model: "strong-model", Effort: "high", OptionID: "strong@high"},
 		Decision{CLI: d.CLI, Model: d.Model, Effort: d.Effort, OptionID: d.OptionID, Pinned: d.Pinned},
-		"a CLI Jev chose is not pinned")
+		"a CLI the classifier chose is not pinned")
 	assert.Equal(t, before, el.Options, "the caller's eligibility is not narrowed")
 
 	calls := client.AskCalls()
 	require.Len(t, calls, 3)
-	wantCriteria := []jev.Criteria{
+	wantCriteria := []classifier.Criteria{
 		{{Name: "alpha", Value: stageCriterion{CLI: "alpha"}}, {Name: "beta", Value: stageCriterion{CLI: "beta"}}},
 		{{Name: "strong", Value: stageCriterion{Model: "strong-model", CLI: "alpha"}},
 			{Name: "fast", Value: stageCriterion{Model: "fast-model", CLI: "alpha"}}},
@@ -295,12 +295,12 @@ func TestRouteStageSequence(t *testing.T) {
 
 	cliIn := calls[0].Req.Questions[LevelCLI].Instructions.(stageInstructions)
 	assert.Nil(t, cliIn.Models, "the cli stage nests the models under each CLI")
-	assert.Equal(t, jev.Criteria{
-		{Name: "alpha", Value: cliEntry{Description: "Alpha agent.", Models: jev.Criteria{
+	assert.Equal(t, classifier.Criteria{
+		{Name: "alpha", Value: cliEntry{Description: "Alpha agent.", Models: classifier.Criteria{
 			{Name: "strong", Value: modelEntry{Description: "Strong model.", Efforts: []string{"low", "high"}}},
 			{Name: "fast", Value: modelEntry{Description: "Fast model.", Efforts: []string{effortNone}}},
 		}}},
-		{Name: "beta", Value: cliEntry{Description: "Beta agent.", Models: jev.Criteria{
+		{Name: "beta", Value: cliEntry{Description: "Beta agent.", Models: classifier.Criteria{
 			{Name: "worker", Value: modelEntry{Description: "Worker model.", Efforts: []string{"low", "high"}}},
 		}}},
 	}, cliIn.CLIs)
@@ -308,13 +308,13 @@ func TestRouteStageSequence(t *testing.T) {
 	effortIn := calls[2].Req.Questions[LevelEffort].Instructions.(stageInstructions)
 	assert.Nil(t, effortIn.CLIs)
 	assert.Equal(t, []string{"strong"}, effortIn.Models.Names(), "only the chosen model")
-	assert.Equal(t, jev.Criteria{{Name: "alpha", Value: jev.Criteria{
+	assert.Equal(t, classifier.Criteria{{Name: "alpha", Value: classifier.Criteria{
 		{Name: "low", Value: "Quick reasoning."}, {Name: "high", Value: "Deep reasoning."}}}}, effortIn.Efforts)
 }
 
 // failingAt answers with pick until the stage asked under level, which fails with err.
-func failingAt(level, pick string, err error) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+func failingAt(level, pick string, err error) *mocks.ClassifierMock {
+	return &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 		if id, _, _ := stageAsked(req); id == level {
 			return nil, err
 		}
@@ -327,7 +327,7 @@ func failingAt(level, pick string, err error) *mocks.JevClientMock {
 
 func TestRouteStageFailure(t *testing.T) {
 	cfg, cat := requestFixture(t)
-	boom := &jev.StatusError{Status: 500}
+	boom := &classifier.StatusError{Status: 500}
 	t.Run("several CLIs: the cli stage succeeds, the model stage fails", func(t *testing.T) {
 		req := &args.Request{}
 		client := failingAt(LevelModel, "strong@high", boom)
@@ -338,7 +338,7 @@ func TestRouteStageFailure(t *testing.T) {
 		assert.Equal(t, []Stage{{Level: "cli", Choice: "alpha"}}, stageSummary(d.Stages), "completed stages kept")
 		assert.Empty(t, d.CLI, "the partial decision is discarded")
 		assert.Empty(t, d.OptionID)
-		assert.False(t, d.Pinned, "a CLI Jev chose never pins")
+		assert.False(t, d.Pinned, "a CLI the classifier chose never pins")
 	})
 	t.Run("several CLIs: the model stage succeeds, the effort stage fails", func(t *testing.T) {
 		req := &args.Request{}
@@ -356,7 +356,7 @@ func TestRouteStageFailure(t *testing.T) {
 		require.ErrorIs(t, d.Undecided, boom)
 		assert.Equal(t, "alpha", d.CLI)
 		assert.Equal(t, "strong-model", d.Model)
-		assert.Empty(t, d.Effort, "the effort Jev never chose")
+		assert.Empty(t, d.Effort, "the effort classifier never chose")
 		assert.Empty(t, d.OptionID)
 		assert.False(t, d.Pinned)
 		assert.Equal(t, []Stage{{Level: "cli", Choice: "alpha", Skipped: true}, {Level: "model", Choice: "strong", Skipped: true}},
@@ -368,11 +368,11 @@ func TestRouteStagesSplitState(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	c := captured(filler(200_000))
 	// chunk 1 favors worker@high, every other chunk strong@low, each with its relevance
-	mixed := func(first, rest float64) func(context.Context, jev.Request) (map[string]jev.Answer, error) {
-		return func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+	mixed := func(first, rest float64) func(context.Context, classifier.Request) (map[string]classifier.Answer, error) {
+		return func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 			st, ok := req.State.(prompt.ChunkState)
 			if !ok {
-				return nil, &jev.StatusError{Status: 500}
+				return nil, &classifier.StatusError{Status: 500}
 			}
 			if st.Chunk.Index == 1 {
 				return stageAnswers(req, "worker@high", 0.6, first), nil
@@ -380,7 +380,7 @@ func TestRouteStagesSplitState(t *testing.T) {
 			return stageAnswers(req, "strong@low", 0.8, rest), nil
 		}
 	}
-	route := func(t *testing.T, client *mocks.JevClientMock) (Decision, int, error) {
+	route := func(t *testing.T, client *mocks.ClassifierMock) (Decision, int, error) {
 		t.Helper()
 		r := newRouter(t, cfg, cat, client)
 		split, err := c.Split(r.budget)
@@ -393,7 +393,7 @@ func TestRouteStagesSplitState(t *testing.T) {
 	}
 
 	t.Run("pooled per level by relevance; every chunk narrowed the same", func(t *testing.T) {
-		client := &mocks.JevClientMock{AskFunc: answersOnly(mixed(0.9, 0.01))}
+		client := &mocks.ClassifierMock{AskFunc: answersOnly(mixed(0.9, 0.01))}
 		d, n, err := route(t, client)
 		require.NoError(t, err)
 		assert.Equal(t, "worker@high", d.OptionID, "the relevant chunk wins every level")
@@ -411,7 +411,7 @@ func TestRouteStagesSplitState(t *testing.T) {
 		perLevel := map[string][]int{}
 		for _, call := range calls {
 			id, q, _ := stageAsked(call.Req)
-			assert.Equal(t, jev.TypeNoul, call.Req.Questions[questionRelevance].Type, "relevance asked at every level")
+			assert.Equal(t, classifier.TypeNoul, call.Req.Questions[questionRelevance].Type, "relevance asked at every level")
 			perLevel[id] = append(perLevel[id], call.Req.State.(prompt.ChunkState).Chunk.Index)
 			if id == LevelEffort {
 				assert.Equal(t, []string{"low", "high"}, q.Criteria.Names(), "every chunk asked within the pooled winner")
@@ -425,15 +425,15 @@ func TestRouteStagesSplitState(t *testing.T) {
 		}
 	})
 	t.Run("all-zero relevance: a plain mean, so the other chunks outvote the first", func(t *testing.T) {
-		d, _, err := route(t, &mocks.JevClientMock{AskFunc: answersOnly(mixed(0, 0))})
+		d, _, err := route(t, &mocks.ClassifierMock{AskFunc: answersOnly(mixed(0, 0))})
 		require.NoError(t, err)
 		assert.Equal(t, "alpha", d.Stages[0].Choice)
 		assert.Equal(t, "strong@low", d.OptionID)
 	})
 	t.Run("a chunk failing at a later level fails the routing, earlier stages kept", func(t *testing.T) {
-		client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, req jev.Request) (map[string]jev.Answer, error) {
+		client := &mocks.ClassifierMock{AskFunc: answersOnly(func(ctx context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 			if id, _, _ := stageAsked(req); id == LevelEffort && req.State.(prompt.ChunkState).Chunk.Index == 2 {
-				return nil, &jev.StatusError{Status: 500}
+				return nil, &classifier.StatusError{Status: 500}
 			}
 			return mixed(0.9, 0.01)(ctx, req)
 		})}
@@ -496,7 +496,7 @@ func TestRouteStageRejectedWholeRequestIsNotResent(t *testing.T) {
 	for i, lv := range routeLevels {
 		for _, rj := range rejections {
 			t.Run(lv.name+"/"+rj.name, func(t *testing.T) {
-				client := &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+				client := &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 					if id, _, _ := stageAsked(req); id == lv.name {
 						return nil, rj.err
 					}
@@ -521,7 +521,7 @@ func TestRouteStageRejectedWholeRequestIsNotResent(t *testing.T) {
 func TestRouteStageRejectedChunkIsNotResent(t *testing.T) {
 	cfg, cat := requestFixture(t)
 	c := captured("START " + filler(200_000))
-	split, err := c.Split(newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget)
+	split, err := c.Split(newRouter(t, cfg, cat, &mocks.ClassifierMock{}).budget)
 	require.NoError(t, err)
 	require.NotNil(t, split)
 	n := len(split.Chunks)
@@ -531,7 +531,7 @@ func TestRouteStageRejectedChunkIsNotResent(t *testing.T) {
 		for _, rj := range rejections {
 			t.Run(lv.name+"/"+rj.name, func(t *testing.T) {
 				g := newGate(n)
-				client := &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+				client := &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 					st, ok := req.State.(prompt.ChunkState)
 					if !ok {
 						return nil, fmt.Errorf("unexpected state %T", req.State)
@@ -578,7 +578,7 @@ func TestRouteStageDeadline(t *testing.T) {
 
 func testRouteStageDeadline(t *testing.T) {
 	cfg, cat := requestFixture(t)
-	client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, req jev.Request) (map[string]jev.Answer, error) {
+	client := &mocks.ClassifierMock{AskFunc: answersOnly(func(ctx context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 		if id, _, _ := stageAsked(req); id == LevelCLI {
 			time.Sleep(2 * time.Second) // the cli stage answers just after the deadline passes
 			return certain(req, pickHigh), nil
@@ -604,20 +604,20 @@ func TestRouteStageMalformedAnswers(t *testing.T) {
 	unchosen := map[string]string{LevelCLI: "beta", LevelModel: "fast", LevelEffort: "low"}
 	corruptions := []struct {
 		name    string
-		corrupt func(id string, answers map[string]jev.Answer)
+		corrupt func(id string, answers map[string]classifier.Answer)
 	}{
-		{name: "a choice not among the criteria sent", corrupt: func(id string, answers map[string]jev.Answer) {
+		{name: "a choice not among the criteria sent", corrupt: func(id string, answers map[string]classifier.Answer) {
 			a := answers[id]
 			a.Choice = "nope"
 			answers[id] = a
 		}},
-		{name: "a missing probability", corrupt: func(id string, answers map[string]jev.Answer) {
+		{name: "a missing probability", corrupt: func(id string, answers map[string]classifier.Answer) {
 			a := answers[id]
 			a.Probabilities = maps.Clone(a.Probabilities)
 			delete(a.Probabilities, unchosen[id])
 			answers[id] = a
 		}},
-		{name: "a missing answer id", corrupt: func(id string, answers map[string]jev.Answer) {
+		{name: "a missing answer id", corrupt: func(id string, answers map[string]classifier.Answer) {
 			delete(answers, id)
 		}},
 	}
@@ -632,7 +632,7 @@ func TestRouteStageMalformedAnswers(t *testing.T) {
 		for _, cr := range corruptions {
 			for i, lv := range routeLevels {
 				t.Run(state.name+"/"+cr.name+"/"+lv.name, func(t *testing.T) {
-					client := &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+					client := &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 						st, chunk := req.State.(prompt.ChunkState)
 						answers := certain(req, pickHigh)
 						if chunk {
@@ -648,7 +648,7 @@ func TestRouteStageMalformedAnswers(t *testing.T) {
 					d, err := newRouter(t, cfg, cat, client).Route(context.Background(), Eligible(cat, req), req,
 						state.captured)
 					require.ErrorIs(t, err, ErrCannotDecide)
-					require.ErrorIs(t, err, jev.ErrMalformed)
+					require.ErrorIs(t, err, classifier.ErrMalformed)
 					assert.Contains(t, err.Error(), lv.name+" stage")
 					assert.Equal(t, decidedStages[:i], stageSummary(d.Stages))
 				})
@@ -736,9 +736,9 @@ func TestBudgetPolicyOverBudget(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, cat := requestFixture(t)
 			tc.mutate(&cfg.Agrouter)
-			_, err := New(cfg, cat, &mocks.JevClientMock{})
+			_, err := New(cfg, cat, &mocks.ClassifierMock{})
 			require.ErrorIs(t, err, prompt.ErrQuestionsOverBudget)
-			assert.Contains(t, err.Error(), "config: [agrouter]")
+			assert.Contains(t, err.Error(), "config: [classifier]")
 			for _, w := range tc.want {
 				assert.Contains(t, err.Error(), w)
 			}

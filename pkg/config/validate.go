@@ -28,6 +28,7 @@ var placeholderRe = regexp.MustCompile(`\{[A-Za-z_][A-Za-z0-9_]*\}`)
 // Validate checks the merged config and returns every violation, each naming its section and key.
 func (c *Config) Validate() error {
 	errs := c.Agrouter.validate()
+	errs = append(errs, c.Classifier.validate()...)
 	for _, cli := range c.CLIs {
 		errs = append(errs, cli.validate(c.Models)...)
 	}
@@ -48,14 +49,26 @@ func (a Agrouter) validate() []error {
 			errs = append(errs, fmt.Errorf("[agrouter] %s: must not be empty", q.key))
 		}
 	}
-	if a.RequestTokens <= 0 {
-		errs = append(errs, fmt.Errorf("[agrouter] request_tokens = %d: must be positive", a.RequestTokens))
-	}
-	if math.IsNaN(a.BytesPerToken) || math.IsInf(a.BytesPerToken, 0) || a.BytesPerToken <= 0 {
-		errs = append(errs, fmt.Errorf("[agrouter] bytes_per_token = %v: must be a finite number greater than zero", a.BytesPerToken))
-	}
 	if strings.TrimSpace(a.LogDir) == "" {
 		errs = append(errs, errors.New("[agrouter] log_dir: must not be empty"))
+	}
+	return errs
+}
+
+// validate checks the classifier's required keys and its sizing keys. The url value itself is the
+// user's: only an empty one is an error.
+func (c Classifier) validate() []error {
+	var errs []error
+	for _, k := range []struct{ key, value string }{{"url", c.URL}, {"model", c.Model}} {
+		if strings.TrimSpace(k.value) == "" {
+			errs = append(errs, fmt.Errorf("[classifier] %s: must not be empty", k.key))
+		}
+	}
+	if c.RequestTokens <= 0 {
+		errs = append(errs, fmt.Errorf("[classifier] request_tokens = %d: must be positive", c.RequestTokens))
+	}
+	if math.IsNaN(c.BytesPerToken) || math.IsInf(c.BytesPerToken, 0) || c.BytesPerToken <= 0 {
+		errs = append(errs, fmt.Errorf("[classifier] bytes_per_token = %v: must be a finite number greater than zero", c.BytesPerToken))
 	}
 	return errs
 }

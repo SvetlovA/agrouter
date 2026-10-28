@@ -27,9 +27,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/SvetlovA/agrouter/cmd/agrouter/mocks"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/config"
 	"github.com/SvetlovA/agrouter/pkg/config/defaults"
-	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/readiness"
 	"github.com/SvetlovA/agrouter/pkg/router"
 	"github.com/SvetlovA/agrouter/pkg/runner"
@@ -140,11 +140,11 @@ func (f *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 
 	answers := map[string]any{}
 	for id, q := range req.Questions {
-		if q.Type == jev.TypeNoul {
+		if q.Type == classifier.TypeNoul {
 			answers[id] = map[string]any{"type": q.Type, "noul": 0.5}
 			continue
 		}
-		if q.Type == jev.TypeScore {
+		if q.Type == classifier.TypeScore {
 			answer, err := fakeScoreAnswer(q.Criteria, level)
 			if err != nil {
 				f.t.Errorf("fake jev: %v", err)
@@ -260,7 +260,7 @@ func fakeScoreAnswer(criteria json.RawMessage, level string) (map[string]any, er
 			probs[key] = score - float64(low)
 		}
 	}
-	return map[string]any{"type": jev.TypeScore, "score": score, "legend": legend, "probabilities": probs, "confidence": 0.9}, nil
+	return map[string]any{"type": classifier.TypeScore, "score": score, "legend": legend, "probabilities": probs, "confidence": 0.9}, nil
 }
 
 func (f *fakeJev) requests() []string {
@@ -361,10 +361,8 @@ func (e *env) app(stdin io.Reader, stdout, stderr io.Writer, child CommandRunner
 		getenv:   os.Getenv,
 		workDir:  e.workDir,
 		embedded: defaults.Config,
-		newJev: func(key string, longContext bool) router.JevClient {
-			c := newJevClient(key, longContext)
-			c.URL = e.jev.srv.URL
-			return c
+		newClassifier: func(_, key string, longContext bool) router.Classifier {
+			return newClassifierClient(e.jev.srv.URL, key, longContext)
 		},
 		runner:  child,
 		checker: e.checker,
@@ -410,7 +408,7 @@ func fallbackLog(t *testing.T, stderr string) (string, map[string]any) {
 	t.Helper()
 	warning, rest, ok := strings.Cut(stderr, "\n")
 	require.True(t, ok, stderr)
-	require.True(t, strings.HasPrefix(warning, "agrouter: warning: Jev routing failed"), stderr)
+	require.True(t, strings.HasPrefix(warning, "agrouter: warning: Classifier routing failed"), stderr)
 	require.Equal(t, 1, strings.Count(rest, "\n"), stderr)
 	return warning, selectionLog(t, rest)
 }
@@ -543,7 +541,7 @@ func TestApp_Decision(t *testing.T) {
 
 	t.Run("cannot decide with the CLI known: null model and effort", func(t *testing.T) {
 		e := newEnv(t)
-		r := e.run([]string{"--verbose", "--cli=claude", "--jev-api-key=", "fix it"}, nil)
+		r := e.run([]string{"--verbose", "--cli=claude", "--api-key=", "fix it"}, nil)
 
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.Empty(t, r.stderr)
@@ -590,9 +588,10 @@ func TestApp_Decision(t *testing.T) {
 func TestNewApp_LongContextReachesClient(t *testing.T) {
 	a := newApp(nil, io.Discard, io.Discard)
 	for _, want := range []bool{false, true} {
-		c, ok := a.newJev("key", want).(*jev.Client)
+		c, ok := a.newClassifier("http://classifier.test", "key", want).(*classifier.Client)
 		require.True(t, ok)
 		assert.Equal(t, want, c.LongContext)
+		assert.Equal(t, "http://classifier.test", c.URL)
 	}
 }
 
@@ -603,8 +602,8 @@ func TestApp_LongContext(t *testing.T) {
 		header string
 	}{
 		{name: "off by default"},
-		{name: "off when set to false", config: "[agrouter]\nlong_context = false\n"},
-		{name: "on when set", config: "[agrouter]\nlong_context = true\n", header: "true"},
+		{name: "off when set to false", config: "[classifier]\nlong_context = false\n"},
+		{name: "on when set", config: "[classifier]\nlong_context = true\n", header: "true"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -618,6 +617,111 @@ func TestApp_LongContext(t *testing.T) {
 			require.Equal(t, 0, r.code, r.stderr)
 			headers := e.jev.longContextHeaders()
 			assert.Equal(t, repeated(tt.header, 3), headers, "every cli, model and effort request alike")
+		})
+	}
+}
+
+// the classifier key resolves flag > env > local > global > embedded, and the source is reported
+func TestApp_ClassifierAPIKeyPrecedence(t *testing.T) {
+	tests := []struct {
+		name     string
+		global   string
+		local    string
+		env      string
+		argv     []string
+		wantKey  string
+		wantExit int
+		wantLine string // the key line of the debug output
+	}{
+		{name: "global config", global: "global-key", env: "", wantKey: "global-key", wantLine: "api key: from global"},
+		{name: "local over global", global: "global-key", local: "local-key", env: "", wantKey: "local-key", wantLine: "api key: from local"},
+		{name: "env over config", global: "global-key", local: "local-key", env: "env-key", wantKey: "env-key", wantLine: "api key: from env"},
+		{name: "flag over env", local: "local-key", env: "env-key", argv: []string{"--api-key=flag-key"},
+			wantKey: "flag-key", wantLine: "api key: from flag"},
+		{name: "empty flag clears the key", local: "local-key", env: "env-key", argv: []string{"--api-key="},
+			wantKey: "", wantLine: "api key: none (flag)", wantExit: exitUsage},
+		{name: "embedded without a key", env: "", wantKey: "", wantLine: "api key: none (embedded)", wantExit: exitUsage},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.jev.pick = "claude-sonnet-5-5@low"
+			t.Setenv(config.EnvAPIKey, tc.env)
+			t.Setenv(envDebug, "1")
+			if tc.global != "" {
+				e.globalConfig("[classifier]\napi_key = " + tc.global + "\n")
+			}
+			if tc.local != "" {
+				require.NoError(t, os.MkdirAll(filepath.Join(e.workDir, ".agrouter"), 0o750))
+				require.NoError(t, os.WriteFile(filepath.Join(e.workDir, ".agrouter", "config"),
+					[]byte("[classifier]\napi_key = "+tc.local+"\n"), 0o600))
+			}
+			var stdout, stderr bytes.Buffer
+			a := e.app(nil, &stdout, &stderr, runner.Runner{})
+			var keys []string
+			factory := a.newClassifier
+			a.newClassifier = func(url, key string, longContext bool) router.Classifier {
+				keys = append(keys, key)
+				return factory(url, key, longContext)
+			}
+
+			code := a.run(append(slices.Clone(tc.argv), "fix the typo in README"))
+
+			require.Equal(t, tc.wantExit, code, stderr.String())
+			assert.Equal(t, []string{tc.wantKey}, keys)
+			assert.Contains(t, stderr.String(), "agrouter debug: "+tc.wantLine+"\n")
+		})
+	}
+}
+
+// TestApp_ClassifierURL pins that the configured url, not a built-in endpoint, reaches the client.
+func TestApp_ClassifierURL(t *testing.T) {
+	e := newEnv(t)
+	e.jev.pick = "claude-sonnet-5-5@low"
+	e.globalConfig("[classifier]\nurl = https://classifier.example.test/v1/route\n")
+	var stdout, stderr bytes.Buffer
+	a := e.app(nil, &stdout, &stderr, runner.Runner{})
+	var urls []string
+	factory := a.newClassifier
+	a.newClassifier = func(url, key string, longContext bool) router.Classifier {
+		urls = append(urls, url)
+		return factory(url, key, longContext)
+	}
+
+	a.run([]string{"fix the typo in README"})
+
+	assert.Equal(t, []string{"https://classifier.example.test/v1/route"}, urls)
+}
+
+// TestApp_ClassifierAPIKeyEnvName pins the env var name: the literal name is read, and the name used
+// by previous versions is not.
+func TestApp_ClassifierAPIKeyEnvName(t *testing.T) {
+	tests := []struct {
+		name    string
+		env     string
+		wantKey string
+	}{
+		{name: "classifier env var", env: "AGROUTER_CLASSIFIER_API_KEY", wantKey: "env-key"},
+		{name: "previous env var is not read", env: "TYPESAFE_API_KEY", wantKey: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.jev.pick = "claude-sonnet-5-5@low"
+			t.Setenv(config.EnvAPIKey, "")
+			t.Setenv(tc.env, "env-key")
+			var stdout, stderr bytes.Buffer
+			a := e.app(nil, &stdout, &stderr, runner.Runner{})
+			var keys []string
+			factory := a.newClassifier
+			a.newClassifier = func(url, key string, longContext bool) router.Classifier {
+				keys = append(keys, key)
+				return factory(url, key, longContext)
+			}
+
+			a.run([]string{"fix the typo in README"})
+
+			assert.Equal(t, []string{tc.wantKey}, keys)
 		})
 	}
 }
@@ -745,14 +849,14 @@ func TestApp_Errors(t *testing.T) {
 
 	t.Run("cannot decide with the CLI unknown", func(t *testing.T) {
 		e := newEnv(t)
-		r := e.run([]string{"--jev-api-key=", "fix it"}, nil)
+		r := e.run([]string{"--api-key=", "fix it"}, nil)
 		assert.Equal(t, 2, r.code)
 		assert.Equal(t, 1, strings.Count(r.stderr, "\n"), r.stderr)
-		assert.True(t, strings.HasPrefix(r.stderr, "agrouter: jev cannot decide between claude, codex"), r.stderr)
+		assert.True(t, strings.HasPrefix(r.stderr, "agrouter: classifier cannot decide between claude, codex"), r.stderr)
 		d := decision(t, r.stdout)
 		assert.Subset(t, d, map[string]any{"cli": nil, "model": nil, "effort": nil})
-		assert.Equal(t, map[string]any{"code": "jev_no_key", "stage": "cli",
-			"message": "Jev CLI selection failed: no Jev API key is set"}, d["reason"])
+		assert.Equal(t, map[string]any{"code": "classifier_no_key", "stage": "cli",
+			"message": "Classifier CLI selection failed: no classifier API key is set"}, d["reason"])
 	})
 
 	t.Run("unknown flag and second positional", func(t *testing.T) {
@@ -1066,8 +1170,8 @@ func TestApp_Docs(t *testing.T) {
 		assert.NotContains(t, r.stdout, "DOC TEXT")
 		d := decision(t, r.stdout)
 		assert.Nil(t, d["cli"])
-		assert.Equal(t, map[string]any{"code": "jev_api_error", "stage": "complexity",
-			"message": "Jev project complexity scoring failed: Jev returned an error status"}, d["reason"])
+		assert.Equal(t, map[string]any{"code": "classifier_api_error", "stage": "complexity",
+			"message": "Classifier project complexity scoring failed: the classifier returned an error status"}, d["reason"])
 	})
 
 	t.Run("exec: the deadline passing while reading a doc runs the known CLI with its defaults", func(t *testing.T) {
@@ -1175,7 +1279,7 @@ func TestApp_ExecSelectionBeforeChild(t *testing.T) {
 		return 7, nil
 	}}
 	r := e.runWithRunner([]string{"exec", "acme", "--model=preferred", "--effort=thorough",
-		"--jev-api-key=private-api-key", "private prompt", "--", "private raw token"}, nil, child)
+		"--api-key=private-api-key", "private prompt", "--", "private raw token"}, nil, child)
 	assert.Equal(t, 7, r.code)
 	assert.JSONEq(t, `{"child":"output"}`, r.stdout)
 	line, rest, ok := strings.Cut(r.stderr, "\n")
@@ -1394,7 +1498,7 @@ func TestApp_HelpHasKeyCautions(t *testing.T) {
 	r := e.run([]string{"--help"}, nil)
 
 	require.Equal(t, 0, r.code)
-	for _, want := range []string{"TYPESAFE_API_KEY", "process", "listings", ".agrouter/config"} {
+	for _, want := range []string{"AGROUTER_CLASSIFIER_API_KEY", "process", "listings", ".agrouter/config"} {
 		assert.Contains(t, r.stdout, want)
 	}
 }
@@ -1504,7 +1608,7 @@ func TestApp_MirrorLog(t *testing.T) {
 			return 3, nil
 		}}
 		r := e.runWithRunner([]string{"exec", "acme", "--model=preferred", "--effort=thorough",
-			"--jev-api-key=" + keyMarker, promptMarker, "--", argvMarker}, nil, child)
+			"--api-key=" + keyMarker, promptMarker, "--", argvMarker}, nil, child)
 		require.Equal(t, 3, r.code, r.stderr)
 		assert.Equal(t, "CHILD-STDOUT\n", r.stdout)
 
@@ -1603,8 +1707,8 @@ func TestApp_MirrorLog(t *testing.T) {
 			argv   []string
 		}{
 			{"usage error", "", []string{"--no-such-flag"}},
-			{"invalid config", "\n[agrouter]\nrequest_tokens = 0\n", []string{"fix it"}},
-			{"request_tokens over the provider limit", "\n[agrouter]\nrequest_tokens = 40000\n", []string{"fix it"}},
+			{"invalid config", "\n[classifier]\nrequest_tokens = 0\n", []string{"fix it"}},
+			{"request_tokens over the provider limit", "\n[classifier]\nrequest_tokens = 40000\n", []string{"fix it"}},
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {

@@ -24,7 +24,7 @@ const legacyCLIEnv = "AGROUTER_CLI"
 const slashEscape = "\x00"
 
 // helpText is the long description in --help, including the API key cautions.
-const helpText = `agrouter asks TypeSafe's Jev which (cli, model, effort) should run a prompt.
+const helpText = `agrouter asks a routing classifier which (cli, model, effort) should run a prompt.
 
   agrouter [OPTIONS] [PROMPT]
   agrouter exec CLI [OPTIONS] [PROMPT] [-- NATIVE ARGS...]
@@ -34,7 +34,7 @@ followed by the CLI to run, it routes within that CLI and runs it; the CLI's own
 options go after "--". Agrouter replaces native --model/-m and --effort selections;
 other options are passed through in order, followed by the chosen model and effort.
 "--" is only accepted with exec.
-The default decision includes the selection, project complexity and Jev's
+The default decision includes the selection, project complexity and the classifier's
 confidence at each routing stage (cli, model, effort). --verbose prints indented
 JSON with every routing stage, chunk, candidate probability, complexity score,
 argv and a copyable command. --verbose before "--" controls agrouter's output
@@ -46,10 +46,10 @@ The prompt is -p TEXT (also --prompt or --print), the positional argument, the
 must be non-empty. Nothing after "--" is read as a prompt. The chosen CLI gets
 the first three as its prompt argument and stdin replayed.
 --doc files (the project's agent instructions and docs) describe the project to
-Jev; they are read on every call but never passed to the chosen CLI.
+the classifier; they are read on every call but never passed to the chosen CLI.
 
-The Jev API key comes from --jev-api-key, then TYPESAFE_API_KEY, then api_key
-in the config. A key on the command line is visible to other local users in
+The classifier API key comes from --api-key, then AGROUTER_CLASSIFIER_API_KEY, then
+api_key in the [classifier] config section. With exec, a child's own --api-key goes after "--". A key on the command line is visible to other local users in
 process listings; prefer the environment variable or the global config with
 user-only permissions, and never put it in a local .agrouter/config that may
 be committed.`
@@ -114,17 +114,17 @@ func parseArgs(argv []string) (command, error) {
 
 // flagSet is agrouter's options. The func fields set the request as go-flags parses them.
 type flagSet struct {
-	CLI       func(string) `long:"cli" value-name:"NAME" unquote:"false" description:"restrict routing to one CLI; with exec, only the CLI after exec"`
-	JevAPIKey func(string) `long:"jev-api-key" value-name:"KEY" unquote:"false" description:"TypeSafe API key for Jev; empty clears it (env TYPESAFE_API_KEY)"`
-	Version   bool         `long:"version" description:"print agrouter's version and exit"`
+	CLI     func(string) `long:"cli" value-name:"NAME" unquote:"false" description:"restrict routing to one CLI; with exec, only the CLI after exec"`
+	APIKey  func(string) `long:"api-key" value-name:"KEY" unquote:"false" description:"the routing classifier's API key; empty clears it (env AGROUTER_CLASSIFIER_API_KEY)"`
+	Version bool         `long:"version" description:"print agrouter's version and exit"`
 
 	Prompt     func(string) `short:"p" long:"prompt" value-name:"TEXT" unquote:"false" description:"the prompt, before the positional prompt, --prompt-file and stdin"`
 	Print      func(string) `long:"print" value-name:"TEXT" unquote:"false" description:"the same as -p TEXT"`
 	PromptFile func(string) `long:"prompt-file" value-name:"PATH" unquote:"false" description:"read prompt text from a file, after -p and the positional prompt"`
 	Doc        func(string) `long:"doc" value-name:"PATH" unquote:"false" description:"project doc for routing only, repeatable; never passed to the chosen CLI"`
 
-	Model  func(string) `short:"m" long:"model" value-name:"MODEL" unquote:"false" description:"use this model; Jev chooses only its effort"`
-	Effort func(string) `long:"effort" value-name:"EFFORT" unquote:"false" description:"use this effort; Jev chooses among options with it"`
+	Model  func(string) `short:"m" long:"model" value-name:"MODEL" unquote:"false" description:"use this model; the classifier chooses only its effort"`
+	Effort func(string) `long:"effort" value-name:"EFFORT" unquote:"false" description:"use this effort; the classifier chooses among options with it"`
 
 	Verbose bool `long:"verbose" description:"include full decision details (agrouter only; after -- it goes to the chosen CLI)"`
 }
@@ -152,7 +152,7 @@ func newFlagSet(req *args.Request, seen *flagCounts) *flagSet {
 			seen.promptFile++
 		},
 		Doc: func(v string) { req.Docs = append(req.Docs, unescape(v)) },
-		JevAPIKey: func(v string) {
+		APIKey: func(v string) {
 			req.APIKey = args.Optional{Value: unescape(v), Set: true}
 		},
 		Model:  func(v string) { req.Model = unescape(v) },

@@ -16,8 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/SvetlovA/agrouter/pkg/catalog"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/config"
-	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/readiness"
 	"github.com/SvetlovA/agrouter/pkg/router"
 )
@@ -93,13 +93,13 @@ func TestDebug_JevFailureEchoingKey(t *testing.T) {
 	t.Cleanup(srv.Close)
 	e.jev.srv = srv
 
-	r := e.run([]string{"--cli=codex", "--jev-api-key=flag-secret-key", "fix it"}, nil)
+	r := e.run([]string{"--cli=codex", "--api-key=flag-secret-key", "fix it"}, nil)
 	require.Equal(t, 0, r.code, r.stderr)
 	lines := debugLines(r.stderr)
 	require.Len(t, lines, 6, r.stderr)
 	assert.Equal(t, "api key: from flag", lines[0])
 	assert.Equal(t, "stage cli: skipped (codex)", lines[3], "the stage completed before the failure")
-	assert.True(t, strings.HasPrefix(lines[4], "jev failed: model stage: route request: "), lines[4])
+	assert.True(t, strings.HasPrefix(lines[4], "classifier failed: model stage: route request: "), lines[4])
 	assert.Contains(t, lines[4], "running codex with the caller's fixed values")
 	assert.Equal(t, "command: codex exec -- <prompt>", lines[5])
 	assert.NotContains(t, r.stderr, "flag-secret-key")
@@ -109,13 +109,13 @@ func TestDebug_JevFailureEchoingKey(t *testing.T) {
 func TestDebug_NoKeyAndNoDecision(t *testing.T) {
 	e := newEnv(t)
 	t.Setenv(envDebug, "1")
-	r := e.run([]string{"--jev-api-key=", "fix it"}, nil)
+	r := e.run([]string{"--api-key=", "fix it"}, nil)
 	require.Equal(t, exitUsage, r.code)
 	lines := debugLines(r.stderr)
 	require.NotEmpty(t, lines)
 	assert.Equal(t, "api key: none (flag)", lines[0])
 	assert.True(t, strings.HasPrefix(lines[len(lines)-1], "no decision: "), r.stderr)
-	assert.Contains(t, r.stderr, "agrouter: jev cannot decide")
+	assert.Contains(t, r.stderr, "agrouter: classifier cannot decide")
 }
 
 func TestDebug_SingleOption(t *testing.T) {
@@ -123,7 +123,7 @@ func TestDebug_SingleOption(t *testing.T) {
 	t.Setenv(envDebug, "1")
 	r := e.run([]string{"--model", "claude-opus-5-5", "--effort", "high", "fix it"}, nil)
 	require.Equal(t, 0, r.code, r.stderr)
-	assert.Contains(t, debugLines(r.stderr), "one option, jev not asked: claude-opus-5-5@high")
+	assert.Contains(t, debugLines(r.stderr), "one option, classifier not asked: claude-opus-5-5@high")
 	assert.Empty(t, e.jev.requests())
 }
 
@@ -159,7 +159,7 @@ func TestDebug_ReportedTokens(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(e.workDir, "project.md"), []byte(secretDoc+"\n"), 0o600))
 		e.jev.pick = "fast@low"
 		e.jev.usage = usage
-		r := e.run([]string{"--cli=alpha", "--doc", "project.md", "--jev-api-key=" + testKey, secretPrompt}, nil)
+		r := e.run([]string{"--cli=alpha", "--doc", "project.md", "--api-key=" + testKey, secretPrompt}, nil)
 		require.Equal(t, 0, r.code, r.stderr)
 		assert.NotContains(t, r.stderr, secretPrompt)
 		assert.NotContains(t, r.stderr, secretDoc)
@@ -197,15 +197,15 @@ func TestDebug_StagesBeforeAFailureWithTwoCLIs(t *testing.T) {
 	r := e.run([]string{"--verbose", "fix it"}, nil)
 
 	assert.Equal(t, exitUsage, r.code)
-	assert.Equal(t, map[string]any{"code": "jev_api_error", "stage": "model",
-		"message": "Jev model selection failed: Jev returned an error status"}, decision(t, r.stdout)["reason"])
+	assert.Equal(t, map[string]any{"code": "classifier_api_error", "stage": "model",
+		"message": "Classifier model selection failed: the classifier returned an error status"}, decision(t, r.stdout)["reason"])
 	assert.Equal(t, []string{"cli"}, e.jev.asked(), "the cli stage was answered")
 	lines := debugLines(r.stderr)
 	require.Len(t, lines, 4, r.stderr)
 	assert.Equal(t, "eligible: 6 option(s) on alpha, beta", lines[1])
 	assert.Regexp(t, `^stage cli: choice alpha, confidence 0\.900, top \[alpha 1\.000, beta 0\.000\], tokens: estimated \d+, provider reported unknown$`,
 		lines[2])
-	assert.True(t, strings.HasPrefix(lines[3], "no decision: jev cannot decide between alpha, beta: model stage: "), lines[3])
+	assert.True(t, strings.HasPrefix(lines[3], "no decision: classifier cannot decide between alpha, beta: model stage: "), lines[3])
 	assert.Contains(t, lines[3], "model stage rejected")
 	assert.True(t, strings.HasSuffix(r.stderr, "\nagrouter: "+strings.TrimPrefix(lines[3], "no decision: ")+"\n"),
 		"the one error line follows the debug lines: %s", r.stderr)
@@ -280,7 +280,7 @@ agrouter debug: stage model: pooled choice b, confidence 0.550, top [b 0.550]
 		assert.Equal(t, `agrouter debug: doc 1/2: score 8.250, evidence 0.900, confidence 0.800, tokens: estimated 4000, provider reported 4100
 agrouter debug: doc 2/2: score 1.000, evidence 0.100, confidence 0.200, tokens: estimated 50, provider reported unknown
 agrouter debug: project complexity: 6.9
-agrouter debug: jev failed: boom; running made-up with the caller's fixed values
+agrouter debug: classifier failed: boom; running made-up with the caller's fixed values
 `, buf.String())
 	})
 
@@ -304,7 +304,7 @@ agrouter debug: stage model: pooled choice b, confidence none, top []
 	t.Run("answer", func(t *testing.T) {
 		var buf bytes.Buffer
 		newDebugLog("1", &buf).decision(router.Decision{OptionID: "a", Stages: []router.Stage{{Level: "cli",
-			Choice: "a", Answer: &jev.Answer{Choice: "a", Confidence: 0.5, Probabilities: map[string]float64{"a": 0.5, "b": 0.5}},
+			Choice: "a", Answer: &classifier.Answer{Choice: "a", Confidence: 0.5, Probabilities: map[string]float64{"a": 0.5, "b": 0.5}},
 			Estimated: 12, Reported: new(0)}}})
 		assert.Equal(t, "agrouter debug: stage cli: choice a, confidence 0.500, top [a 0.500, b 0.500], tokens: estimated 12, provider reported 0\n",
 			buf.String(), "a reported zero is a count, not unknown")
@@ -322,7 +322,7 @@ func TestDebug_Readiness(t *testing.T) {
 		r.Defaults.Model = &model
 		return r
 	})
-	r := e.run([]string{"exec", "alpha", "--model=fast-1", "--effort=low", "--jev-api-key=" + testKey, "fix it"}, nil)
+	r := e.run([]string{"exec", "alpha", "--model=fast-1", "--effort=low", "--api-key=" + testKey, "fix it"}, nil)
 	require.Equal(t, 0, r.code, r.stderr)
 
 	var lines []string

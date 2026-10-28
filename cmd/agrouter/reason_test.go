@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/SvetlovA/agrouter/pkg/jev"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/router"
 )
 
@@ -28,59 +28,59 @@ func TestFailureReason(t *testing.T) {
 		want *reasonJSON
 	}{
 		{name: "success", err: nil, want: nil},
-		{name: "no key", err: stage(router.LevelCLI, jev.ErrNoKey),
-			want: &reasonJSON{reasonNoKey, "cli", "Jev CLI selection failed: no Jev API key is set"}},
-		{name: "unauthorized", err: stage(router.LevelModel, &jev.StatusError{Status: http.StatusUnauthorized, Body: "SECRET"}),
-			want: &reasonJSON{reasonUnauthorized, "model", "Jev model selection failed: the Jev API key was rejected"}},
+		{name: "no key", err: stage(router.LevelCLI, classifier.ErrNoKey),
+			want: &reasonJSON{reasonNoKey, "cli", "Classifier CLI selection failed: no classifier API key is set"}},
+		{name: "unauthorized", err: stage(router.LevelModel, &classifier.StatusError{Status: http.StatusUnauthorized, Body: "SECRET"}),
+			want: &reasonJSON{reasonUnauthorized, "model", "Classifier model selection failed: the classifier API key was rejected"}},
 		{name: "timeout", err: stage(router.LevelModel, fmt.Errorf("route request: %w", context.DeadlineExceeded)),
-			want: &reasonJSON{reasonTimeout, "model", "Jev model selection timed out"}},
+			want: &reasonJSON{reasonTimeout, "model", "Classifier model selection timed out"}},
 		{name: "timeout in the transport", err: stage(router.LevelEffort,
-			fmt.Errorf("%w: %w", jev.ErrTransport, context.DeadlineExceeded)),
-			want: &reasonJSON{reasonTimeout, "effort", "Jev effort selection timed out"}},
+			fmt.Errorf("%w: %w", classifier.ErrTransport, context.DeadlineExceeded)),
+			want: &reasonJSON{reasonTimeout, "effort", "Classifier effort selection timed out"}},
 		{name: "canceled", err: stage(router.LevelEffort, context.Canceled),
-			want: &reasonJSON{reasonCanceled, "effort", "Jev effort selection was canceled"}},
-		{name: "overloaded", err: stage(router.LevelCLI, &jev.StatusError{Status: 529}),
-			want: &reasonJSON{reasonAPIError, "cli", "Jev CLI selection failed: Jev returned an error status"}},
-		{name: "server error", err: stage(router.LevelComplexity, &jev.StatusError{Status: 500, Body: "SECRET"}),
-			want: &reasonJSON{reasonAPIError, "complexity", "Jev project complexity scoring failed: Jev returned an error status"}},
+			want: &reasonJSON{reasonCanceled, "effort", "Classifier effort selection was canceled"}},
+		{name: "overloaded", err: stage(router.LevelCLI, &classifier.StatusError{Status: 529}),
+			want: &reasonJSON{reasonAPIError, "cli", "Classifier CLI selection failed: the classifier returned an error status"}},
+		{name: "server error", err: stage(router.LevelComplexity, &classifier.StatusError{Status: 500, Body: "SECRET"}),
+			want: &reasonJSON{reasonAPIError, "complexity", "Classifier project complexity scoring failed: the classifier returned an error status"}},
 		{name: "request over the context length", err: stage(router.LevelModel,
-			&jev.StatusError{Status: http.StatusBadRequest, ErrorType: "max_tokens_exceeded", Body: "SECRET"}),
-			want: &reasonJSON{reasonTooLong, "model", "Jev model selection failed: " + tooLongDetail}},
+			&classifier.StatusError{Status: http.StatusBadRequest, ErrorType: "max_tokens_exceeded", Body: "SECRET"}),
+			want: &reasonJSON{reasonTooLong, "model", "Classifier model selection failed: " + tooLongDetail}},
 		{name: "chunk over the context length", err: stage(router.LevelEffort,
 			fmt.Errorf("route 2 of 3: estimated 31000 tokens, request_tokens is 30000: %w",
-				&jev.StatusError{Status: http.StatusBadRequest, ErrorType: "max_tokens_exceeded"})),
-			want: &reasonJSON{reasonTooLong, "effort", "Jev effort selection failed: " + tooLongDetail}},
+				&classifier.StatusError{Status: http.StatusBadRequest, ErrorType: "max_tokens_exceeded"})),
+			want: &reasonJSON{reasonTooLong, "effort", "Classifier effort selection failed: " + tooLongDetail}},
 		{name: "docs over the context length", err: stage(router.LevelComplexity,
-			&jev.StatusError{Status: http.StatusBadRequest, ErrorType: "max_tokens_exceeded"}),
-			want: &reasonJSON{reasonTooLong, "complexity", "Jev project complexity scoring failed: " + tooLongDetail}},
+			&classifier.StatusError{Status: http.StatusBadRequest, ErrorType: "max_tokens_exceeded"}),
+			want: &reasonJSON{reasonTooLong, "complexity", "Classifier project complexity scoring failed: " + tooLongDetail}},
 		{name: "overflow through the cannot-decide error", err: fmt.Errorf("%w between a, b: %w", router.ErrCannotDecide,
-			stage(router.LevelCLI, &jev.StatusError{Status: http.StatusBadRequest, ErrorType: "max_tokens_exceeded"})),
-			want: &reasonJSON{reasonTooLong, "cli", "Jev CLI selection failed: " + tooLongDetail}},
+			stage(router.LevelCLI, &classifier.StatusError{Status: http.StatusBadRequest, ErrorType: "max_tokens_exceeded"})),
+			want: &reasonJSON{reasonTooLong, "cli", "Classifier CLI selection failed: " + tooLongDetail}},
 		{name: "400 of another type", err: stage(router.LevelModel,
-			&jev.StatusError{Status: http.StatusBadRequest, ErrorType: "invalid_request", Body: "SECRET"}),
-			want: &reasonJSON{reasonAPIError, "model", "Jev model selection failed: Jev returned an error status"}},
-		{name: "400 without a type", err: stage(router.LevelModel, &jev.StatusError{Status: http.StatusBadRequest, Body: "SECRET"}),
-			want: &reasonJSON{reasonAPIError, "model", "Jev model selection failed: Jev returned an error status"}},
+			&classifier.StatusError{Status: http.StatusBadRequest, ErrorType: "invalid_request", Body: "SECRET"}),
+			want: &reasonJSON{reasonAPIError, "model", "Classifier model selection failed: the classifier returned an error status"}},
+		{name: "400 without a type", err: stage(router.LevelModel, &classifier.StatusError{Status: http.StatusBadRequest, Body: "SECRET"}),
+			want: &reasonJSON{reasonAPIError, "model", "Classifier model selection failed: the classifier returned an error status"}},
 		{name: "422 with the overflow type", err: stage(router.LevelModel,
-			&jev.StatusError{Status: http.StatusUnprocessableEntity, ErrorType: "max_tokens_exceeded", Body: "SECRET"}),
-			want: &reasonJSON{reasonAPIError, "model", "Jev model selection failed: Jev returned an error status"}},
-		{name: "transport", err: stage(router.LevelModel, fmt.Errorf("%w: %w", jev.ErrTransport, secret)),
-			want: &reasonJSON{reasonTransportError, "model", "Jev model selection failed: Jev could not be reached"}},
-		{name: "invalid answer", err: stage(router.LevelModel, fmt.Errorf("%w: %w", jev.ErrInvalidAnswer, secret)),
-			want: &reasonJSON{reasonInvalidAnswer, "model", "Jev model selection failed: Jev returned an invalid answer"}},
-		{name: "malformed answer", err: stage(router.LevelModel, jev.ErrMalformed),
-			want: &reasonJSON{reasonInvalidAnswer, "model", "Jev model selection failed: Jev returned an invalid answer"}},
-		{name: "empty answer", err: stage(router.LevelCLI, jev.ErrEmptyAnswer),
-			want: &reasonJSON{reasonEmptyAnswer, "cli", "Jev CLI selection failed: Jev returned no answer"}},
-		{name: "chunked routing", err: stage(router.LevelModel, fmt.Errorf("route 2 of 3: %w", jev.ErrEmptyAnswer)),
-			want: &reasonJSON{reasonEmptyAnswer, "model", "Jev model selection failed: Jev returned no answer"}},
+			&classifier.StatusError{Status: http.StatusUnprocessableEntity, ErrorType: "max_tokens_exceeded", Body: "SECRET"}),
+			want: &reasonJSON{reasonAPIError, "model", "Classifier model selection failed: the classifier returned an error status"}},
+		{name: "transport", err: stage(router.LevelModel, fmt.Errorf("%w: %w", classifier.ErrTransport, secret)),
+			want: &reasonJSON{reasonTransportError, "model", "Classifier model selection failed: the classifier could not be reached"}},
+		{name: "invalid answer", err: stage(router.LevelModel, fmt.Errorf("%w: %w", classifier.ErrInvalidAnswer, secret)),
+			want: &reasonJSON{reasonInvalidAnswer, "model", "Classifier model selection failed: the classifier returned an invalid answer"}},
+		{name: "malformed answer", err: stage(router.LevelModel, classifier.ErrMalformed),
+			want: &reasonJSON{reasonInvalidAnswer, "model", "Classifier model selection failed: the classifier returned an invalid answer"}},
+		{name: "empty answer", err: stage(router.LevelCLI, classifier.ErrEmptyAnswer),
+			want: &reasonJSON{reasonEmptyAnswer, "cli", "Classifier CLI selection failed: the classifier returned no answer"}},
+		{name: "chunked routing", err: stage(router.LevelModel, fmt.Errorf("route 2 of 3: %w", classifier.ErrEmptyAnswer)),
+			want: &reasonJSON{reasonEmptyAnswer, "model", "Classifier model selection failed: the classifier returned no answer"}},
 		{name: "through the cannot-decide error", err: fmt.Errorf("%w between a, b: %w", router.ErrCannotDecide,
-			stage(router.LevelCLI, &jev.StatusError{Status: 401})),
-			want: &reasonJSON{reasonUnauthorized, "cli", "Jev CLI selection failed: the Jev API key was rejected"}},
+			stage(router.LevelCLI, &classifier.StatusError{Status: 401})),
+			want: &reasonJSON{reasonUnauthorized, "cli", "Classifier CLI selection failed: the classifier API key was rejected"}},
 		{name: "deadline before any stage", err: fmt.Errorf("--doc: %w", context.DeadlineExceeded),
-			want: &reasonJSON{reasonTimeout, "", "Jev routing timed out"}},
+			want: &reasonJSON{reasonTimeout, "", "Classifier routing timed out"}},
 		{name: "anything else", err: secret,
-			want: &reasonJSON{reasonNoDecision, "", "Jev routing failed: Jev could not decide"}},
+			want: &reasonJSON{reasonNoDecision, "", "Classifier routing failed: the classifier could not decide"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -149,7 +149,7 @@ const (
 )
 
 func TestApp_RequestTooLong(t *testing.T) {
-	const wantMessage = "Jev model selection failed: " + tooLongDetail
+	const wantMessage = "Classifier model selection failed: " + tooLongDetail
 	wantReason := map[string]any{"code": reasonTooLong, "stage": "model", "message": wantMessage}
 
 	t.Run("decision", func(t *testing.T) {
@@ -175,7 +175,7 @@ func TestApp_RequestTooLong(t *testing.T) {
 		assert.Equal(t, exitUsage, r.code)
 		d := decision(t, r.stdout)
 		assert.Equal(t, map[string]any{"code": reasonTooLong, "stage": "cli",
-			"message": "Jev CLI selection failed: " + tooLongDetail}, d["reason"])
+			"message": "Classifier CLI selection failed: " + tooLongDetail}, d["reason"])
 		assert.Len(t, e.jev.requests(), 1, "the overflow is never resent")
 	})
 
@@ -185,7 +185,7 @@ func TestApp_RequestTooLong(t *testing.T) {
 
 		require.Equal(t, exitOK, r.code, r.stderr)
 		warning, s := fallbackLog(t, r.stderr)
-		assert.Contains(t, warning, "Jev routing failed at the model stage (request_too_long)")
+		assert.Contains(t, warning, "Classifier routing failed at the model stage (request_too_long)")
 		assert.Equal(t, wantReason, s["reason"])
 		assert.Len(t, e.jev.requests(), 1, "the overflow is never resent")
 		assert.NotContains(t, r.stderr, "SECRET stage rejected")
@@ -219,7 +219,7 @@ func TestApp_FailureReasons(t *testing.T) {
 		argv []string
 		code string
 	}{
-		{name: "missing key", fail: func(*fakeJev) {}, argv: []string{"--jev-api-key="}, code: reasonNoKey},
+		{name: "missing key", fail: func(*fakeJev) {}, argv: []string{"--api-key="}, code: reasonNoKey},
 		{name: "unauthorized", fail: func(f *fakeJev) { f.failStatus = http.StatusUnauthorized }, code: reasonUnauthorized},
 		{name: "API error", fail: func(f *fakeJev) { f.failStatus = http.StatusInternalServerError }, code: reasonAPIError},
 		{name: "request too long", fail: func(f *fakeJev) { f.failBody = tooLongBody }, code: reasonTooLong},
@@ -260,7 +260,7 @@ func TestApp_FailureReasons(t *testing.T) {
 
 				assert.Equal(t, exitUsage, r.code)
 				assert.Equal(t, 1, strings.Count(r.stderr, "\n"), r.stderr)
-				assert.True(t, strings.HasPrefix(r.stderr, "agrouter: jev cannot decide between alpha, beta"), r.stderr)
+				assert.True(t, strings.HasPrefix(r.stderr, "agrouter: classifier cannot decide between alpha, beta"), r.stderr)
 				d := decision(t, r.stdout)
 				assert.Subset(t, d, map[string]any{"cli": nil, "model": nil, "effort": nil})
 				reason, _ := d["reason"].(map[string]any)

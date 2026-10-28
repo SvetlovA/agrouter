@@ -35,9 +35,9 @@ fmt:
 generate:
 	go generate ./...
 
-# routes testdata/routing against the real Jev API with both encodings (needs TYPESAFE_API_KEY), never in CI
+# routes testdata/routing against the real classifier API with both encodings (needs AGROUTER_CLASSIFIER_API_KEY), never in CI
 eval-routing:
-	@if ([string]::IsNullOrEmpty($$env:TYPESAFE_API_KEY)) { [Console]::Error.WriteLine('eval-routing: TYPESAFE_API_KEY is not set'); exit 1 }
+	@if ([string]::IsNullOrEmpty($$env:AGROUTER_CLASSIFIER_API_KEY)) { [Console]::Error.WriteLine('eval-routing: AGROUTER_CLASSIFIER_API_KEY is not set'); exit 1 }
 	go test -tags=eval -count=1 -v -run TestEvalRouting -timeout 60m ./pkg/router/...
 
 .PHONY: all build test lint fmt generate eval-routing

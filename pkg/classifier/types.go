@@ -1,6 +1,6 @@
-// Package jev is a client for TypeSafe's Jev "System One" API: one endpoint that answers typed
-// questions about a state.
-package jev
+// Package classifier is a client for a routing classifier: one endpoint that answers typed
+// questions about a state. The wire format is TypeSafe's "System One" API.
+package classifier
 
 import (
 	"bytes"

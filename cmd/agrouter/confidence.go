@@ -2,7 +2,7 @@ package main
 
 import "github.com/SvetlovA/agrouter/pkg/router"
 
-// confidenceJSON records Jev's confidence and arithmetic means for reporting only. Each routing
+// confidenceJSON records the classifier's confidence and arithmetic means for reporting only. Each routing
 // stage's confidence is conditional on the stages before it, not the confidence of the whole choice.
 type confidenceJSON struct {
 	CLI               *float64 `json:"cli,omitempty"`
@@ -19,7 +19,7 @@ type confidenceDetailsJSON struct {
 }
 
 // stageJSON is one routing stage in order: skipped ones carry only the value their options share,
-// asked ones Jev's whole-state answer or the per-chunk answers and pooled scores.
+// asked ones the classifier's whole-state answer or the per-chunk answers and pooled scores.
 type stageJSON struct {
 	Level         string                  `json:"level"`
 	Choice        string                  `json:"choice"`
@@ -101,7 +101,7 @@ func recordedConfidence(d router.Decision, verbose bool) *confidenceJSON {
 	return out
 }
 
-// stageConfidence is Jev's confidence in an asked stage: the whole-state answer's, or the mean of the
+// stageConfidence is the classifier's confidence in an asked stage: the whole-state answer's, or the mean of the
 // chunk answers' for a pooled stage. It is nil for a skipped stage or a pool without chunks.
 func stageConfidence(st router.Stage) *float64 {
 	switch {

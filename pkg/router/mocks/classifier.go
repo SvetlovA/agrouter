@@ -5,28 +5,28 @@ package mocks
 
 import (
 	"context"
-	"github.com/SvetlovA/agrouter/pkg/jev"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"sync"
 )
 
-// JevClientMock is a mock implementation of router.JevClient.
+// ClassifierMock is a mock implementation of router.Classifier.
 //
-//	func TestSomethingThatUsesJevClient(t *testing.T) {
+//	func TestSomethingThatUsesClassifier(t *testing.T) {
 //
-//		// make and configure a mocked router.JevClient
-//		mockedJevClient := &JevClientMock{
-//			AskFunc: func(ctx context.Context, req jev.Request) (jev.Response, error) {
+//		// make and configure a mocked router.Classifier
+//		mockedClassifier := &ClassifierMock{
+//			AskFunc: func(ctx context.Context, req classifier.Request) (classifier.Response, error) {
 //				panic("mock out the Ask method")
 //			},
 //		}
 //
-//		// use mockedJevClient in code that requires router.JevClient
+//		// use mockedClassifier in code that requires router.Classifier
 //		// and then make assertions.
 //
 //	}
-type JevClientMock struct {
+type ClassifierMock struct {
 	// AskFunc mocks the Ask method.
-	AskFunc func(ctx context.Context, req jev.Request) (jev.Response, error)
+	AskFunc func(ctx context.Context, req classifier.Request) (classifier.Response, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -35,20 +35,20 @@ type JevClientMock struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// Req is the req argument value.
-			Req jev.Request
+			Req classifier.Request
 		}
 	}
 	lockAsk sync.RWMutex
 }
 
 // Ask calls AskFunc.
-func (mock *JevClientMock) Ask(ctx context.Context, req jev.Request) (jev.Response, error) {
+func (mock *ClassifierMock) Ask(ctx context.Context, req classifier.Request) (classifier.Response, error) {
 	if mock.AskFunc == nil {
-		panic("JevClientMock.AskFunc: method is nil but JevClient.Ask was just called")
+		panic("ClassifierMock.AskFunc: method is nil but Classifier.Ask was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		Req jev.Request
+		Req classifier.Request
 	}{
 		Ctx: ctx,
 		Req: req,
@@ -62,14 +62,14 @@ func (mock *JevClientMock) Ask(ctx context.Context, req jev.Request) (jev.Respon
 // AskCalls gets all the calls that were made to Ask.
 // Check the length with:
 //
-//	len(mockedJevClient.AskCalls())
-func (mock *JevClientMock) AskCalls() []struct {
+//	len(mockedClassifier.AskCalls())
+func (mock *ClassifierMock) AskCalls() []struct {
 	Ctx context.Context
-	Req jev.Request
+	Req classifier.Request
 } {
 	var calls []struct {
 		Ctx context.Context
-		Req jev.Request
+		Req classifier.Request
 	}
 	mock.lockAsk.RLock()
 	calls = mock.calls.Ask

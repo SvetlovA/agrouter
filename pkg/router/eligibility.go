@@ -1,5 +1,5 @@
 // Package router decides which catalog option runs a prompt: eligibility from the caller's
-// arguments, then Jev.
+// arguments, then the classifier.
 package router
 
 import (
@@ -16,7 +16,7 @@ type Drop struct {
 	Reason string
 }
 
-// Eligibility is what the filters leave for Jev to choose from.
+// Eligibility is what the filters leave for the classifier to choose from.
 type Eligibility struct {
 	// Options are in catalog order. Eligible never empties them; Exclude can.
 	Options []catalog.Option

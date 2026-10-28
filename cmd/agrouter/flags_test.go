@@ -142,16 +142,16 @@ func TestParseArgs_OwnFlags(t *testing.T) {
 		assert.False(t, cmd.verbose)
 		assert.Equal(t, []string{"--verbose"}, cmd.req.Raw)
 	})
-	t.Run("--jev-api-key absent", func(t *testing.T) {
+	t.Run("--api-key absent", func(t *testing.T) {
 		req := parseOK(t, []string{"x"})
 		assert.Equal(t, args.Optional{}, req.APIKey)
 	})
-	t.Run("--jev-api-key= clears", func(t *testing.T) {
-		req := parseOK(t, []string{"--jev-api-key=", "x"})
+	t.Run("--api-key= clears", func(t *testing.T) {
+		req := parseOK(t, []string{"--api-key=", "x"})
 		assert.Equal(t, args.Optional{Set: true}, req.APIKey)
 	})
-	t.Run("--jev-api-key split form", func(t *testing.T) {
-		req := parseOK(t, []string{"--jev-api-key", "k-1", "x"})
+	t.Run("--api-key split form", func(t *testing.T) {
+		req := parseOK(t, []string{"--api-key", "k-1", "x"})
 		assert.Equal(t, args.Optional{Value: "k-1", Set: true}, req.APIKey)
 	})
 	t.Run("--model and --effort are constraints", func(t *testing.T) {
@@ -163,7 +163,9 @@ func TestParseArgs_OwnFlags(t *testing.T) {
 		cmd, err := parseArgs([]string{"--verbose", "--help"})
 		require.NoError(t, err)
 		assert.Nil(t, cmd.req)
-		assert.Contains(t, cmd.help, "TYPESAFE_API_KEY")
+		assert.Contains(t, cmd.help, "AGROUTER_CLASSIFIER_API_KEY")
+		assert.Contains(t, cmd.help, "--api-key=KEY")
+		assert.NotContains(t, strings.ToLower(cmd.help), "jev")
 		assert.Contains(t, cmd.help, "process")
 		assert.Contains(t, cmd.help, "--cli=NAME")
 		assert.Contains(t, cmd.help, "exec CLI")
@@ -314,6 +316,7 @@ func TestParseArgs_Errors(t *testing.T) {
 		{"removed --sandbox", []string{"--sandbox", "read-only", "x"}, "sandbox"},
 		{"removed -c", []string{"exec", "tool-a", "-c", "k=v", "x"}, "unknown flag"},
 		{"removed --config", []string{"--config=k=v", "x"}, "config"},
+		{"removed --jev-api-key", []string{"--jev-api-key=k", "x"}, "jev-api-key"},
 		{"second --prompt-file", []string{"--prompt-file", "a", "--prompt-file=b"}, "--prompt-file given more than once"},
 		{"-p value looks like a flag", []string{"-p", "--model", "x"}, "expected argument"},
 		{"-p without value", []string{"x", "-p"}, "prompt"},

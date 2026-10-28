@@ -1,4 +1,4 @@
-package jev
+package classifier
 
 import (
 	"bytes"
@@ -16,11 +16,9 @@ import (
 	"unicode/utf8"
 )
 
-// DefaultURL is the Jev endpoint.
-const DefaultURL = "https://api.typesafe.ai/v1/systemone"
-
-// The provider's input limits in tokens, per question and per request, and the header that switches
-// them to the long-context mode.
+// TypeSafe's input limits in tokens, per question and per request, and the header that switches
+// them to the long-context mode. They are TypeSafe's: the startup check of the configured request
+// size uses them for every endpoint, and other providers ignore the header.
 const (
 	questionLimit     = 32_000
 	requestLimit      = 64_000
@@ -32,8 +30,9 @@ const (
 	maxErrorType = 64
 )
 
-// Limits returns the most tokens the provider takes in one question and in one whole request.
+// Limits returns the most tokens TypeSafe takes in one question and in one whole request.
 // longContext selects its long-context mode, which Client.LongContext turns on in the request.
+// The router checks the configured request size against these limits whatever the endpoint is.
 func Limits(longContext bool) (perQuestion, perRequest int) {
 	if longContext {
 		return longContextLimit, longContextLimit
@@ -55,7 +54,7 @@ const (
 
 var (
 	// ErrNoKey means no API key is set, so no request is made.
-	ErrNoKey = errors.New("no Jev API key")
+	ErrNoKey = errors.New("no classifier API key")
 	// ErrUnauthorized is a 401: the key was rejected.
 	ErrUnauthorized = errors.New("unauthorized")
 	// ErrTooLong is a 400 whose error type says the request is longer than the context length.
@@ -98,7 +97,7 @@ type StatusError struct {
 }
 
 func (e *StatusError) Error() string {
-	msg := "jev: HTTP " + strconv.Itoa(e.Status)
+	msg := "classifier: HTTP " + strconv.Itoa(e.Status)
 	if e.Body != "" {
 		msg += ": " + e.Body
 	}
@@ -123,23 +122,24 @@ func (e *StatusError) Is(target error) bool {
 // statusOverloaded is TypeSafe's (and Anthropic-style) "overloaded" status.
 const statusOverloaded = 529
 
-// Client calls Jev. The zero value is not usable; use New.
+// Client calls the classifier endpoint. The zero value is not usable; use New.
 type Client struct {
 	URL        string
 	HTTPClient *http.Client
 	// MinBackoff and MaxBackoff bound the wait between retries of a 429 or 529.
 	MinBackoff time.Duration
 	MaxBackoff time.Duration
-	// LongContext asks for the provider's long-context mode, which raises its input limits (Limits).
+	// LongContext sends TypeSafe's long-context header, which raises its input limits (Limits); other
+	// providers ignore it.
 	LongContext bool
 
 	key string
 }
 
-// New returns a client for key against DefaultURL.
-func New(key string) *Client {
+// New returns a client for the endpoint at url, authorized with key.
+func New(url, key string) *Client {
 	return &Client{
-		URL:        DefaultURL,
+		URL:        url,
 		HTTPClient: &http.Client{},
 		MinBackoff: 200 * time.Millisecond,
 		MaxBackoff: 2 * time.Second,
@@ -157,7 +157,7 @@ func (c *Client) Ask(ctx context.Context, req Request) (Response, error) {
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
-		return Response{}, fmt.Errorf("jev: encode request: %w", err)
+		return Response{}, fmt.Errorf("classifier: encode request: %w", err)
 	}
 	var last *StatusError
 	for attempt := 0; ; attempt++ {
@@ -167,7 +167,7 @@ func (c *Client) Ask(ctx context.Context, req Request) (Response, error) {
 			if last != nil && ctx.Err() != nil {
 				return Response{}, last
 			}
-			return Response{}, c.redact(&transportError{fmt.Errorf("jev: %w", postErr)})
+			return Response{}, c.redact(&transportError{fmt.Errorf("classifier: %w", postErr)})
 		}
 		if status == http.StatusOK {
 			resp, decodeErr := decode(data, req.Questions)
@@ -435,17 +435,17 @@ func (e *redactedError) Unwrap() error { return e.err }
 func decode(data []byte, questions map[string]Question) (Response, error) {
 	var resp response
 	if err := json.Unmarshal(data, &resp); err != nil {
-		return Response{}, fmt.Errorf("jev: %w: %w", ErrInvalidAnswer, err)
+		return Response{}, fmt.Errorf("classifier: %w: %w", ErrInvalidAnswer, err)
 	}
 	answers := make(map[string]Answer, len(questions))
 	for id, q := range questions {
 		w, ok := resp.Answers[id]
 		if !ok || w == nil || empty(q, *w) && (w.Type == "" || w.Type == q.Type) {
-			return Response{}, fmt.Errorf("jev: %w: %q", ErrEmptyAnswer, id)
+			return Response{}, fmt.Errorf("classifier: %w: %q", ErrEmptyAnswer, id)
 		}
 		a, err := validate(q, *w)
 		if err != nil {
-			return Response{}, fmt.Errorf("jev: %w: %q: %w", ErrInvalidAnswer, id, err)
+			return Response{}, fmt.Errorf("classifier: %w: %q: %w", ErrInvalidAnswer, id, err)
 		}
 		answers[id] = a
 	}

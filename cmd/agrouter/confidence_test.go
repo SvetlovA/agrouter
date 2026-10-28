@@ -8,13 +8,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/SvetlovA/agrouter/pkg/jev"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/router"
 )
 
 func TestRecordedConfidence(t *testing.T) {
-	answer := func(choice string, confidence float64) *jev.Answer {
-		return &jev.Answer{Choice: choice, Confidence: confidence, Probabilities: map[string]float64{choice: 1}}
+	answer := func(choice string, confidence float64) *classifier.Answer {
+		return &classifier.Answer{Choice: choice, Confidence: confidence, Probabilities: map[string]float64{choice: 1}}
 	}
 	const none = `{"cli":"alpha","model":null,"effort":null}`
 	tests := []struct {
@@ -51,7 +51,7 @@ func TestRecordedConfidence(t *testing.T) {
 			{"level":"model","choice":"m","skipped":true},
 			{"level":"effort","choice":"low","skipped":true}]}}`, wantSummary: none},
 		{name: "zero is a recorded value", decision: router.Decision{OptionID: "x", Stages: []router.Stage{
-			{Level: "effort", Choice: "low", Answer: &jev.Answer{Choice: "low", Confidence: 0}},
+			{Level: "effort", Choice: "low", Answer: &classifier.Answer{Choice: "low", Confidence: 0}},
 		}}, want: `{"cli":"alpha","model":null,"effort":null,"confidence":{"effort":0,"stages":[{"level":"effort","choice":"low","skipped":false,"confidence":0}]}}`,
 			wantSummary: `{"cli":"alpha","model":null,"effort":null,"confidence":{"effort":0}}`},
 		{name: "a pooled stage reports the mean of its chunks; documents preserve each confidence", decision: router.Decision{

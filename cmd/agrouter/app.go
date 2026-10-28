@@ -14,9 +14,9 @@ import (
 
 	"github.com/SvetlovA/agrouter/pkg/args"
 	"github.com/SvetlovA/agrouter/pkg/catalog"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/config"
 	"github.com/SvetlovA/agrouter/pkg/config/defaults"
-	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 	"github.com/SvetlovA/agrouter/pkg/readiness"
 	"github.com/SvetlovA/agrouter/pkg/router"
@@ -29,21 +29,21 @@ const (
 	exitUsage = 2 // arguments, prompt, config, or no decision with the CLI unknown
 )
 
-// app is one agrouter invocation with its dependencies, so tests can replace the Jev client and runner.
+// app is one agrouter invocation with its dependencies, so tests can replace the classifier client and runner.
 type app struct {
 	stdin          io.Reader // nil: no stdin
 	stdout, stderr io.Writer
 	// childStderr is the child's stderr: the console as given, never the mirror log's copy. run sets
 	// it, and swaps stderr for the copy, for its duration.
-	childStderr io.Writer
-	getenv      func(string) string
-	workDir     string
-	embedded    []byte
-	newJev      func(key string, longContext bool) router.JevClient
-	runner      CommandRunner
-	checker     ReadinessChecker // exec only
-	now         func() time.Time // nil means time.Now
-	debug       *debugLog        // nil unless AGROUTER_DEBUG=1
+	childStderr   io.Writer
+	getenv        func(string) string
+	workDir       string
+	embedded      []byte
+	newClassifier func(url, key string, longContext bool) router.Classifier
+	runner        CommandRunner
+	checker       ReadinessChecker // exec only
+	now           func() time.Time // nil means time.Now
+	debug         *debugLog        // nil unless AGROUTER_DEBUG=1
 }
 
 // newApp returns an app wired to the real process environment.
@@ -56,15 +56,18 @@ func newApp(stdin io.Reader, stdout, stderr io.Writer) *app {
 		getenv:   os.Getenv,
 		workDir:  wd,
 		embedded: defaults.Config,
-		newJev:   func(key string, longContext bool) router.JevClient { return newJevClient(key, longContext) },
-		runner:   runner.Runner{},
-		checker:  readiness.Checker{Dir: wd},
+		newClassifier: func(url, key string, longContext bool) router.Classifier {
+			return newClassifierClient(url, key, longContext)
+		},
+		runner:  runner.Runner{},
+		checker: readiness.Checker{Dir: wd},
 	}
 }
 
-// newJevClient is the Jev client for key, sending the long-context header when longContext is set.
-func newJevClient(key string, longContext bool) *jev.Client {
-	c := jev.New(key)
+// newClassifierClient is the classifier client for the endpoint at url and key, sending the
+// long-context header when longContext is set.
+func newClassifierClient(url, key string, longContext bool) *classifier.Client {
+	c := classifier.New(url, key)
 	c.LongContext = longContext
 	return c
 }
@@ -85,7 +88,7 @@ func stdinReader(r io.Reader) io.Reader {
 }
 
 // selectionJSON records the selection, why routing failed or a value is null, project complexity
-// and available Jev confidence.
+// and available classifier confidence.
 type selectionJSON struct {
 	CLI               *string          `json:"cli"`
 	Model             *string          `json:"model"`
@@ -162,7 +165,7 @@ func (a *app) run(argv []string) int {
 
 	d, err := a.route(cfg, cat, rt, req)
 	if err != nil {
-		// the stages completed before Jev failed, if any
+		// the stages completed before the classifier failed, if any
 		a.debug.decision(d.Decision)
 		a.debug.failed(err)
 		if blocked, ok := errors.AsType[*preflightError](err); ok {
@@ -242,7 +245,7 @@ func (a *app) startLog(mirror *consoleLog, logDir string) {
 }
 
 // setup loads and validates the config, derives the catalog and builds the router with the resolved
-// Jev key. Every error is a config error.
+// classifier key. Every error is a config error.
 func (a *app) setup(req *args.Request) (*config.Config, *catalog.Catalog, *router.Router, error) {
 	global, local, err := config.DefaultPaths(a.workDir)
 	if err != nil {
@@ -259,9 +262,9 @@ func (a *app) setup(req *args.Request) (*config.Config, *catalog.Catalog, *route
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	key, source := config.ResolveAPIKey(req.APIKey.Value, req.APIKey.Set, a.getenv(config.EnvAPIKey), cfg.Agrouter)
+	key, source := config.ResolveAPIKey(req.APIKey.Value, req.APIKey.Set, a.getenv(config.EnvAPIKey), cfg.Classifier)
 	a.debug.apiKey(key, source)
-	rt, err := router.New(cfg, cat, a.newJev(key, cfg.Agrouter.LongContext))
+	rt, err := router.New(cfg, cat, a.newClassifier(cfg.Classifier.URL, key, cfg.Classifier.LongContext))
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -281,8 +284,8 @@ type routed struct {
 
 // route reads --prompt-file and every --doc, captures the prompt and decides, all within the routing
 // deadline. Exec checks its CLI's readiness meanwhile and routes only over what it can run now; when
-// nothing is left it returns a *preflightError without asking Jev. Eligibility warnings go to stderr
-// once the prompt is known to be there. When Jev cannot decide, the error comes with the partial
+// nothing is left it returns a *preflightError without asking the classifier. Eligibility warnings go to stderr
+// once the prompt is known to be there. When the classifier cannot decide, the error comes with the partial
 // decision: the stages and complexity completed.
 func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router, req *args.Request) (routed, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Agrouter.Timeout)
@@ -309,7 +312,7 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 		defer func() { cancel(); pf.wait() }()
 	}
 	// docs are read even when one option will be left, so a bad --doc fails every call alike; the
-	// deadline passing mid-read is not a bad doc, so Jev cannot decide
+	// deadline passing mid-read is not a bad doc, so the classifier cannot decide
 	var (
 		docs        []string
 		undecidable error
@@ -345,7 +348,7 @@ func (a *app) route(cfg *config.Config, cat *catalog.Catalog, rt *router.Router,
 		fmt.Fprintln(a.stderr, w)
 	}
 	a.debug.eligibility(el)
-	// one option runs without Jev, so the files the prompt mentions are not read for it
+	// one option runs without the classifier, so the files the prompt mentions are not read for it
 	if len(el.Options) > 1 {
 		if err = captured.ReadMentions(ctx, a.workDir); err != nil {
 			return routed{}, fmt.Errorf("read mentioned files: %w", err)

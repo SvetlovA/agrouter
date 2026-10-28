@@ -5,47 +5,59 @@
 # every key is written out here. each section kind starts with a key reference: "default" is what
 # agrouter uses when no layer sets the key; "required" keys have no default and must be set.
 # environment variables are set in the process environment, not as keys in this file:
-# TYPESAFE_API_KEY: overrides [agrouter] api_key; --jev-api-key takes precedence,
-# including an explicitly empty --jev-api-key, which clears the key.
+# AGROUTER_CLASSIFIER_API_KEY: overrides [classifier] api_key; --api-key takes precedence,
+# including an explicitly empty --api-key, which clears the key.
 # AGROUTER_CONFIG_DIR: directory containing the global config file, replacing
 # ~/.config/agrouter; .agrouter/config in the working directory still overrides it.
 # AGROUTER_DEBUG=1: enables redacted diagnostics on stderr; it is separate from
 # --verbose, which controls decision details. other values leave debug disabled.
 # these are the only supported environment variables; model, effort, --doc,
-# --verbose, timeout and jev_model have no environment-variable overrides.
+# --verbose, timeout and the classifier model have no environment-variable overrides.
 
-# [agrouter]: how agrouter talks to Jev.
-#   api_key            TypeSafe API key for Jev. default: empty (no key)
-#   jev_model          the Jev model answering the routing questions. required (no fallback)
+# [agrouter]: how agrouter routes.
 #   timeout            total routing budget, a Go duration. required, must be positive
 #   routing_policy     cost/quality preference for choosing the CLI, model and effort. required
 #   complexity_policy  how the --doc stage judges the project. required
-#   long_context       use the routing provider's long-input mode, which raises the provider's own limits. default: false
-#   request_tokens     token allowance of one routing request: its state plus all its questions. default: 30000
-#   bytes_per_token    estimated bytes per token, used to size routing requests. default: 3
 #   log_dir            directory of the console log, relative to the working directory. default: .agrouter/logs
 [agrouter]
-# TypeSafe API key for Jev. Empty = no key. Prefer the env var or the global config;
-# never put it in a local .agrouter/config that may be committed.
-# before using Jev routing, uncomment [agrouter] and api_key in the generated global
-# config and enter your TypeSafe API key, or set TYPESAFE_API_KEY in the environment.
-# precedence: --jev-api-key > non-empty TYPESAFE_API_KEY > local > global > embedded.
-api_key   =
-# pin a versioned id (e.g. jev-1.13.0) to keep routing stable across Jev releases
-jev_model = jev-latest
 # total routing budget: reading stdin and files, the --doc complexity stage and up to three sequential
 # routing stages (cli, model, effort), each sending its chunks at once, with retries.
 # cooperative: reading and network stop at it, splitting and encoding do not. raise it for very long inputs
 timeout   = 30s
 
-# the questions sent to Jev, and what each state field holds, are built into agrouter; these two
-# keys hold only the preference they follow. both must be non-empty. jev_model above is the model
-# answering the questions, not one of the catalog models being chosen.
+# the questions sent to the classifier, and what each state field holds, are built into agrouter; these
+# two keys hold only the preference they follow. both must be non-empty. the [classifier] model is the
+# model answering the questions, not one of the catalog models being chosen.
 # routing_policy: the cost/quality preference for choosing the CLI, model and effort, sent with
 # every routing question, for a prompt sent whole and for each chunk of a split one.
 routing_policy = Choose the option with the lowest cost that can reliably satisfy this task's requirements. Compare the supplied model prices and the effort descriptions, including their effect on token usage. Prefer cheaper options when their capabilities are sufficient. Choose a more expensive model or higher effort when it materially improves the likelihood of completing this specific task correctly. Prefer less time when cost and capability are comparable. The project complexity, when present, rates the codebase the task runs in: use it as context for how hard this specific task is there, not as a substitute for judging the task (a typo fix stays trivial in any codebase).
 # complexity_policy: how the --doc stage judges the project the docs describe before routing.
 complexity_policy = Judge the codebase as a whole: its size, architecture, dependencies and constraints, not any single task in it.
+
+# agrouter copies every line it writes to the console (selection, warnings, errors, AGROUTER_DEBUG
+# output) to agrouter.log in this directory, append-only and never trimmed. the child's own output is
+# never copied. a relative path is resolved against the working directory. the default directory is
+# kept out of git by .agrouter/.gitignore; any other directory is yours to manage.
+log_dir         = .agrouter/logs
+
+# [classifier]: the routing classifier agrouter asks which (cli, model, effort) runs a prompt, and
+# how big one routing request may be. any source accepting the same request body works.
+#   url              endpoint the routing requests are POSTed to. required
+#   api_key          bearer key for the endpoint. default: empty (no key)
+#   model            the classifier model answering the routing questions. required (no fallback)
+#   long_context     use the provider's long-input mode. default: false
+#   request_tokens   token allowance of one routing request: its state plus all its questions. default: 30000
+#   bytes_per_token  estimated bytes per token, used to size routing requests. default: 3
+[classifier]
+url     = https://api.typesafe.ai/v1/systemone
+# bearer key for the endpoint. Empty = no key. Prefer the env var or the global config;
+# never put it in a local .agrouter/config that may be committed.
+# before using the classifier, uncomment [classifier] and api_key in the generated global
+# config and enter your API key, or set AGROUTER_CLASSIFIER_API_KEY in the environment.
+# precedence: --api-key > non-empty AGROUTER_CLASSIFIER_API_KEY > local > global > embedded.
+api_key =
+# pin a versioned id (e.g. jev-1.13.0) to keep routing stable across releases
+model   = jev-latest
 
 # routing request size. agrouter cannot count tokens, so it estimates them from bytes.
 # request_tokens is the allowance of one routing request: the state plus all its questions. input that
@@ -55,24 +67,32 @@ complexity_policy = Judge the codebase as a whole: its size, architecture, depen
 # the provider's own limits are checked at startup: request_tokens must stay below them.
 request_tokens  = 30000
 bytes_per_token = 3
-# the routing provider's long-input mode raises the provider's limits. it does not raise request_tokens:
-# raise that yourself, as in the example below.
+# long_context works only with Jev (TypeSafe): it sends TypeSafe's long-context header; other
+# providers ignore it. the startup check of request_tokens uses Jev's limits for every url:
+# at most 30000 with long_context = false, 260000 with long_context = true.
+# it does not raise request_tokens: raise that yourself, as in the examples below.
 long_context    = false
-# long context: the routing provider's experimental long-input mode (for TypeSafe Jev, the
-# "danger zone" header TypeSafe-Danger-Zone-Long-Context: true). Jev's limits rise from 32k per
-# question / 64k per request to 262k each, at the same price, but slower and less accurate.
-# turning it on changes only the provider's limits: raise request_tokens yourself.
-# recommended starting values, uncalibrated; compare AGROUTER_DEBUG=1 "tokens:" lines and tune:
+# long context: Jev's experimental long-input mode (the "danger zone" header
+# TypeSafe-Danger-Zone-Long-Context: true). Jev's limits rise from 32k per question / 64k per
+# request to 262k each, at the same price, but slower and less accurate.
+# recommended starting values, uncalibrated; compare AGROUTER_DEBUG=1 "tokens:" lines and tune
+# (timeout is the [agrouter] key):
 # long_context    = true
 # request_tokens  = 128000
 # bytes_per_token = 2.5
 # timeout         = 120s
 
-# agrouter copies every line it writes to the console (selection, warnings, errors, AGROUTER_DEBUG
-# output) to agrouter.log in this directory, append-only and never trimmed. the child's own output is
-# never copied. a relative path is resolved against the working directory. the default directory is
-# kept out of git by .agrouter/.gitignore; any other directory is yours to manage.
-log_dir         = .agrouter/logs
+# example: OpenAI Luna (Decisions API), unverified: it works only if the endpoint accepts this
+# request body. put it in the global config, not a committed local one. Luna takes up to 922K
+# input tokens and bills inputs over 272K at 2x, so 250000 stays under that step with margin;
+# long_context = true only lifts agrouter's startup check. larger requests take longer: raise
+# [agrouter] timeout too (e.g. 120s).
+# [classifier]
+# url            = https://api.openai.com/v1/decisions
+# api_key        = sk-...
+# model          = gpt-6-luna
+# long_context   = true
+# request_tokens = 250000
 
 # how agrouter invokes each CLI. argv = command + exec_args + native options + model_args
 # + effort_args + any native "--" and its remaining tokens + prompt_args. Only {model}, {effort}

@@ -16,14 +16,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/SvetlovA/agrouter/pkg/jev"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 	"github.com/SvetlovA/agrouter/pkg/router/mocks"
 )
 
 // levels is a complexity answer with the given probabilities and 0 on every other level.
-func levels(probs map[int]float64) jev.Answer {
-	a := jev.Answer{Type: jev.TypeScore, Confidence: 0.8, Probabilities: map[string]float64{}}
+func levels(probs map[int]float64) classifier.Answer {
+	a := classifier.Answer{Type: classifier.TypeScore, Confidence: 0.8, Probabilities: map[string]float64{}}
 	var total float64
 	for i := range complexityLevels {
 		a.Probabilities[strconv.Itoa(i)] = probs[i]
@@ -36,15 +36,15 @@ func levels(probs map[int]float64) jev.Answer {
 	return a
 }
 
-func docAnswers(level int, evidence float64) map[string]jev.Answer {
-	return map[string]jev.Answer{
+func docAnswers(level int, evidence float64) map[string]classifier.Answer {
+	return map[string]classifier.Answer{
 		questionComplexity: complexityAnswer(float64(level)),
-		questionEvidence:   {Type: jev.TypeNoul, Noul: evidence},
+		questionEvidence:   {Type: classifier.TypeNoul, Noul: evidence},
 	}
 }
 
 // complexityAnswer expresses a 0-to-10 test rating on the Score question's 0-to-9 scale.
-func complexityAnswer(rating float64) jev.Answer {
+func complexityAnswer(rating float64) classifier.Answer {
 	raw := rating * float64(len(complexityLevels)-1) / 10
 	low := int(math.Floor(raw))
 	fraction := raw - float64(low)
@@ -52,8 +52,8 @@ func complexityAnswer(rating float64) jev.Answer {
 }
 
 // docMock answers every doc request with fn, given the doc chunk (zero for the whole-docs state).
-func docMock(fn func(c prompt.DocChunk, whole bool) (map[string]jev.Answer, error)) *mocks.JevClientMock {
-	return &mocks.JevClientMock{AskFunc: answersOnly(func(_ context.Context, req jev.Request) (map[string]jev.Answer, error) {
+func docMock(fn func(c prompt.DocChunk, whole bool) (map[string]classifier.Answer, error)) *mocks.ClassifierMock {
+	return &mocks.ClassifierMock{AskFunc: answersOnly(func(_ context.Context, req classifier.Request) (map[string]classifier.Answer, error) {
 		switch st := req.State.(type) {
 		case prompt.DocsState:
 			return fn(prompt.DocChunk{}, true)
@@ -87,9 +87,9 @@ func TestAskDocsExpectedValue(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			client := docMock(func(prompt.DocChunk, bool) (map[string]jev.Answer, error) {
-				return map[string]jev.Answer{questionComplexity: levels(tc.probs),
-					questionEvidence: {Type: jev.TypeNoul, Noul: 0.8}}, nil
+			client := docMock(func(prompt.DocChunk, bool) (map[string]classifier.Answer, error) {
+				return map[string]classifier.Answer{questionComplexity: levels(tc.probs),
+					questionEvidence: {Type: classifier.TypeNoul, Noul: 0.8}}, nil
 			})
 			got, err := newRouter(t, cfg, cat, client).complexity(context.Background(),
 				&prompt.Result{Docs: []string{"a small Go CLI"}})
@@ -143,7 +143,7 @@ func TestReduceConfidenceRecordedOnly(t *testing.T) {
 
 func TestComplexitySingleRequest(t *testing.T) {
 	cfg, cat := embedded(t)
-	client := docMock(func(_ prompt.DocChunk, whole bool) (map[string]jev.Answer, error) {
+	client := docMock(func(_ prompt.DocChunk, whole bool) (map[string]classifier.Answer, error) {
 		if !whole {
 			return nil, errors.New("docs that fit sent in chunks")
 		}
@@ -165,12 +165,12 @@ func TestComplexitySingleRequest(t *testing.T) {
 	require.Len(t, calls, 1)
 	assert.Equal(t, prompt.DocsState{Docs: []string{"# Shop\n\nThree services.\n", "Use gofmt.\n"}}, calls[0].Req.State)
 	assert.Equal(t, complexityQuestions(cfg.Agrouter), calls[0].Req.Questions)
-	assert.Equal(t, cfg.Agrouter.JevModel, calls[0].Req.Model)
+	assert.Equal(t, cfg.Classifier.Model, calls[0].Req.Model)
 }
 
 func TestComplexityChunked(t *testing.T) {
 	cfg, cat := embedded(t)
-	r := newRouter(t, cfg, cat, &mocks.JevClientMock{})
+	r := newRouter(t, cfg, cat, &mocks.ClassifierMock{})
 	b := r.budget
 	docs := &prompt.Result{Docs: []string{docsOf("ENTERPRISE", 2*b.Doc), docsOf("STYLE", 3*b.Doc)}}
 	chunks := docs.SplitDocs(b)
@@ -179,7 +179,7 @@ func TestComplexityChunked(t *testing.T) {
 	var mu sync.Mutex
 	inFlight, peak := 0, 0
 	all := make(chan struct{})
-	client := docMock(func(c prompt.DocChunk, whole bool) (map[string]jev.Answer, error) {
+	client := docMock(func(c prompt.DocChunk, whole bool) (map[string]classifier.Answer, error) {
 		if whole {
 			return nil, errors.New("docs over budget sent whole")
 		}
@@ -222,54 +222,54 @@ func TestComplexityChunked(t *testing.T) {
 
 func TestComplexityFailures(t *testing.T) {
 	cfg, cat := embedded(t)
-	b := newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget
+	b := newRouter(t, cfg, cat, &mocks.ClassifierMock{}).budget
 	small := &prompt.Result{Docs: []string{"a small CLI"}}
 	big := &prompt.Result{Docs: []string{docsOf("START", 3*b.Doc)}}
 
 	tests := []struct {
 		name     string
 		captured *prompt.Result
-		ask      func(c prompt.DocChunk, whole bool) (map[string]jev.Answer, error)
+		ask      func(c prompt.DocChunk, whole bool) (map[string]classifier.Answer, error)
 		want     error
 	}{
-		{name: "missing complexity answer", captured: small, want: jev.ErrEmptyAnswer,
-			ask: func(prompt.DocChunk, bool) (map[string]jev.Answer, error) {
+		{name: "missing complexity answer", captured: small, want: classifier.ErrEmptyAnswer,
+			ask: func(prompt.DocChunk, bool) (map[string]classifier.Answer, error) {
 				a := docAnswers(3, 1)
 				delete(a, questionComplexity)
 				return a, nil
 			}},
-		{name: "missing evidence answer", captured: big, want: jev.ErrEmptyAnswer,
-			ask: func(prompt.DocChunk, bool) (map[string]jev.Answer, error) {
+		{name: "missing evidence answer", captured: big, want: classifier.ErrEmptyAnswer,
+			ask: func(prompt.DocChunk, bool) (map[string]classifier.Answer, error) {
 				a := docAnswers(3, 1)
 				delete(a, questionEvidence)
 				return a, nil
 			}},
-		{name: "probability missing for a level", captured: small, want: jev.ErrInvalidAnswer,
-			ask: func(prompt.DocChunk, bool) (map[string]jev.Answer, error) {
+		{name: "probability missing for a level", captured: small, want: classifier.ErrInvalidAnswer,
+			ask: func(prompt.DocChunk, bool) (map[string]classifier.Answer, error) {
 				a := docAnswers(3, 1)
 				delete(a[questionComplexity].Probabilities, "9")
 				return a, nil
 			}},
-		{name: "probabilities all zero", captured: small, want: jev.ErrInvalidAnswer,
-			ask: func(prompt.DocChunk, bool) (map[string]jev.Answer, error) {
-				return map[string]jev.Answer{questionComplexity: levels(nil),
-					questionEvidence: {Type: jev.TypeNoul, Noul: 1}}, nil
+		{name: "probabilities all zero", captured: small, want: classifier.ErrInvalidAnswer,
+			ask: func(prompt.DocChunk, bool) (map[string]classifier.Answer, error) {
+				return map[string]classifier.Answer{questionComplexity: levels(nil),
+					questionEvidence: {Type: classifier.TypeNoul, Noul: 1}}, nil
 			}},
-		{name: "whole-docs request failing", captured: small, want: jev.ErrOverloaded,
-			ask: func(prompt.DocChunk, bool) (map[string]jev.Answer, error) {
-				return nil, &jev.StatusError{Status: 529}
+		{name: "whole-docs request failing", captured: small, want: classifier.ErrOverloaded,
+			ask: func(prompt.DocChunk, bool) (map[string]classifier.Answer, error) {
+				return nil, &classifier.StatusError{Status: 529}
 			}},
-		{name: "one doc chunk failing", captured: big, want: jev.ErrOverloaded,
-			ask: func(c prompt.DocChunk, _ bool) (map[string]jev.Answer, error) {
+		{name: "one doc chunk failing", captured: big, want: classifier.ErrOverloaded,
+			ask: func(c prompt.DocChunk, _ bool) (map[string]classifier.Answer, error) {
 				if c.Index == 2 {
-					return nil, &jev.StatusError{Status: 529}
+					return nil, &classifier.StatusError{Status: 529}
 				}
 				return docAnswers(3, 1), nil
 			}},
-		{name: "whole-docs overflow", captured: small, want: jev.ErrTooLong,
-			ask: func(prompt.DocChunk, bool) (map[string]jev.Answer, error) { return nil, tooLong() }},
-		{name: "overflow on a doc chunk", captured: big, want: jev.ErrTooLong,
-			ask: func(c prompt.DocChunk, _ bool) (map[string]jev.Answer, error) {
+		{name: "whole-docs overflow", captured: small, want: classifier.ErrTooLong,
+			ask: func(prompt.DocChunk, bool) (map[string]classifier.Answer, error) { return nil, tooLong() }},
+		{name: "overflow on a doc chunk", captured: big, want: classifier.ErrTooLong,
+			ask: func(c prompt.DocChunk, _ bool) (map[string]classifier.Answer, error) {
 				if strings.HasPrefix(c.Text, "START") {
 					return nil, tooLong()
 				}
@@ -287,7 +287,7 @@ func TestComplexityFailures(t *testing.T) {
 
 func TestComplexityRejectedRequestsAreNotResent(t *testing.T) {
 	cfg, cat := embedded(t)
-	b := newRouter(t, cfg, cat, &mocks.JevClientMock{}).budget
+	b := newRouter(t, cfg, cat, &mocks.ClassifierMock{}).budget
 	small := &prompt.Result{Docs: []string{"a small CLI"}}
 	big := &prompt.Result{Docs: []string{docsOf("START", 3*b.Doc)}}
 	n := len(big.SplitDocs(b))
@@ -295,7 +295,7 @@ func TestComplexityRejectedRequestsAreNotResent(t *testing.T) {
 
 	for _, rj := range rejections {
 		t.Run(rj.name+"/whole docs", func(t *testing.T) {
-			client := docMock(func(prompt.DocChunk, bool) (map[string]jev.Answer, error) { return nil, rj.err })
+			client := docMock(func(prompt.DocChunk, bool) (map[string]classifier.Answer, error) { return nil, rj.err })
 			got, err := newRouter(t, cfg, cat, client).complexity(context.Background(), small)
 			assert.Nil(t, got)
 			requireRejected(t, err, rj)
@@ -303,7 +303,7 @@ func TestComplexityRejectedRequestsAreNotResent(t *testing.T) {
 		})
 		t.Run(rj.name+"/doc chunk", func(t *testing.T) {
 			g := newGate(n)
-			client := docMock(func(c prompt.DocChunk, whole bool) (map[string]jev.Answer, error) {
+			client := docMock(func(c prompt.DocChunk, whole bool) (map[string]classifier.Answer, error) {
 				if whole {
 					return nil, errors.New("docs over budget sent whole")
 				}
@@ -337,13 +337,13 @@ func TestComplexityRejectedRequestsAreNotResent(t *testing.T) {
 }
 
 // requireRejected asserts err is the rejection rj: a StatusError with its status, matching
-// jev.ErrTooLong only for the overflow.
+// classifier.ErrTooLong only for the overflow.
 func requireRejected(t *testing.T, err error, rj rejection) {
 	t.Helper()
-	var serr *jev.StatusError
+	var serr *classifier.StatusError
 	require.ErrorAs(t, err, &serr)
 	assert.Equal(t, rj.status, serr.Status)
-	assert.Equal(t, rj.tooLong, errors.Is(err, jev.ErrTooLong))
+	assert.Equal(t, rj.tooLong, errors.Is(err, classifier.ErrTooLong))
 }
 
 func TestComplexityStopsOnDeadline(t *testing.T) {
@@ -354,7 +354,7 @@ func testComplexityStopsOnDeadline(t *testing.T) {
 	cfg, cat := embedded(t)
 	var mu sync.Mutex
 	started := 0
-	client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, _ jev.Request) (map[string]jev.Answer, error) {
+	client := &mocks.ClassifierMock{AskFunc: answersOnly(func(ctx context.Context, _ classifier.Request) (map[string]classifier.Answer, error) {
 		mu.Lock()
 		started++
 		mu.Unlock()
@@ -378,7 +378,7 @@ func testComplexityStopsOnDeadline(t *testing.T) {
 func TestComplexitySingleRequestDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cfg, cat := embedded(t)
-		client := &mocks.JevClientMock{AskFunc: answersOnly(func(ctx context.Context, _ jev.Request) (map[string]jev.Answer, error) {
+		client := &mocks.ClassifierMock{AskFunc: answersOnly(func(ctx context.Context, _ classifier.Request) (map[string]classifier.Answer, error) {
 			<-ctx.Done()
 			return nil, ctx.Err()
 		})}

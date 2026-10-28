@@ -115,7 +115,7 @@ func stdinRelay(cmd *exec.Cmd, stdin io.Reader) (func(), error) {
 	}, nil
 }
 
-// childEnv returns env without the Jev API key (names are case-insensitive on Windows).
+// childEnv returns env without the classifier API key (names are case-insensitive on Windows).
 func childEnv(env []string) []string {
 	out := make([]string, 0, len(env))
 	for _, kv := range env {

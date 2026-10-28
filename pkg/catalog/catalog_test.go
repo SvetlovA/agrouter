@@ -18,9 +18,13 @@ const catalogConfig = `
 timeout = 10s
 routing_policy = Prefer cheap.
 complexity_policy = Judge the codebase.
+log_dir = logs
+
+[classifier]
+url = https://classifier.example.test/v1
+model = test-classifier
 request_tokens = 20000
 bytes_per_token = 3
-log_dir = logs
 
 [cli.alpha]
 command     = alpha
@@ -141,7 +145,7 @@ func TestOptionLimit(t *testing.T) {
 
 	_, err = build(catalog.MaxOptions + 1)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "256 options, more than Jev's limit of 255")
+	assert.Contains(t, err.Error(), "256 options, more than the classifier's limit of 255")
 
 	// the limit counts options, not models: 52 models × 5 efforts = 260
 	cfg := &config.Config{}

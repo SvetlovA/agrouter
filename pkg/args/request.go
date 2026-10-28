@@ -23,7 +23,7 @@ type Optional struct {
 type Request struct {
 	Mode       Mode
 	CLI        string   // the exec CLI, or --cli in decision mode; empty routes across every CLI
-	APIKey     Optional // --jev-api-key; Set with an empty Value clears any other key
+	APIKey     Optional // --api-key; Set with an empty Value clears any other key
 	Model      string   // --model constraint, as given (resolved against the catalog later)
 	Effort     string   // --effort constraint, as given
 	PromptFlag Optional // -p, --prompt, --print
@@ -35,7 +35,7 @@ type Request struct {
 }
 
 // ArgvPrompt is the {prompt} text: the prompt texts given on the command line joined in prompt
-// order (-p, the positional prompt, then the --prompt-file contents), like the prompt Jev sees but
+// order (-p, the positional prompt, then the --prompt-file contents), like the prompt the classifier sees but
 // without stdin, which the child gets replayed instead.
 func (r *Request) ArgvPrompt() string {
 	return prompt.Join(r.PromptFlag.Value, r.Prompt.Value, r.FileText)

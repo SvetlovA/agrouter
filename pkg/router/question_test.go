@@ -10,14 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/SvetlovA/agrouter/pkg/catalog"
+	"github.com/SvetlovA/agrouter/pkg/classifier"
 	"github.com/SvetlovA/agrouter/pkg/config"
-	"github.com/SvetlovA/agrouter/pkg/jev"
 	"github.com/SvetlovA/agrouter/pkg/prompt"
 )
 
 func TestComplexityQuestion(t *testing.T) {
 	q := complexityQuestion("Judge the whole codebase.")
-	assert.Equal(t, jev.TypeScore, q.Type)
+	assert.Equal(t, classifier.TypeScore, q.Type)
 	assert.Equal(t, instructions{Question: complexityText, State: docGuide, Policy: "Judge the whole codebase."}, q.Instructions)
 	require.Len(t, q.Levels, 10)
 	for i, description := range q.Levels {
@@ -28,7 +28,7 @@ func TestComplexityQuestion(t *testing.T) {
 
 func TestEvidenceQuestion(t *testing.T) {
 	q := evidenceQuestion()
-	assert.Equal(t, jev.TypeNoul, q.Type)
+	assert.Equal(t, classifier.TypeNoul, q.Type)
 	assert.Equal(t, evidenceText, q.Instructions)
 	assert.Equal(t, []string{"true", "false"}, q.Criteria.Names())
 }
@@ -62,7 +62,7 @@ func TestComplexityGoldenRequest(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := jev.Request{Model: cfg.Agrouter.JevModel, State: tc.state, Questions: complexityQuestions(cfg.Agrouter)}
+			req := classifier.Request{Model: cfg.Classifier.Model, State: tc.state, Questions: complexityQuestions(cfg.Agrouter)}
 			got, err := json.MarshalIndent(req, "", "  ")
 			require.NoError(t, err)
 			assert.NotContains(t, string(got), "rename the flag", "the prompt never reaches a doc request")
@@ -91,8 +91,8 @@ func TestNewTreeKeepsSeparatorNamesApart(t *testing.T) {
 	require.NoError(t, err)
 
 	tr := newTree(cfg, cat.Options, "")
-	assert.Equal(t, jev.Criteria{{Name: "b/c", Value: modelEntry{Description: "First.", Efforts: []string{"low"}}}},
+	assert.Equal(t, classifier.Criteria{{Name: "b/c", Value: modelEntry{Description: "First.", Efforts: []string{"low"}}}},
 		tr.modelCriteria("a"))
-	assert.Equal(t, jev.Criteria{{Name: "c", Value: modelEntry{Description: "Second.", Efforts: []string{"high"}}}},
+	assert.Equal(t, classifier.Criteria{{Name: "c", Value: modelEntry{Description: "Second.", Efforts: []string{"high"}}}},
 		tr.modelCriteria("a/b"))
 }
